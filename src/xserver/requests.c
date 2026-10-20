@@ -18,11 +18,6 @@ static struct xs_window *get_window(struct xs_client *client, const struct xin *
 	return window;
 }
 
-// ids a client makes up have to come from the range it was handed
-static bool own_id(struct xs_client *client, uint32_t id) {
-	return (id & ~0x1fffffu) == client->id_base;
-}
-
 static void reply_empty(struct xs_client *client, uint8_t data) {
 	struct xout out;
 	xs_reply_begin(client, &out, data);
@@ -75,7 +70,7 @@ static void create_window(struct xs_client *client, const struct xin *in) {
 	if (!parent) {
 		return;
 	}
-	if (!own_id(client, id) || xserver_window(xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, 1, 0);
 		return;
 	}
@@ -636,6 +631,7 @@ static const struct extension {
 	{"RANDR", XS_RANDR_OPCODE, XS_RANDR_FIRST_EVENT, XS_RANDR_FIRST_ERROR},
 	{"XInputExtension", XS_XI_OPCODE, XS_XI_FIRST_EVENT, XS_XI_FIRST_ERROR},
 	{"XKEYBOARD", XS_XKB_OPCODE, XS_XKB_FIRST_EVENT, XS_XKB_FIRST_ERROR},
+	{"XC-MISC", XS_XCMISC_OPCODE, 0, 0},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -988,6 +984,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_XKB_OPCODE:
 		xs_xkb_request(client, in);
+		break;
+	case XS_XCMISC_OPCODE:
+		xs_xcmisc_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs

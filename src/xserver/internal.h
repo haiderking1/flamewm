@@ -83,6 +83,8 @@ enum {
 #define XS_XKB_OPCODE 140
 #define XS_XKB_FIRST_EVENT 90
 #define XS_XKB_FIRST_ERROR 160
+// more ids when a client ran out, see ids.c
+#define XS_XCMISC_OPCODE 141
 
 // ---- talking back (xserver.c) ----
 
@@ -311,6 +313,17 @@ void xs_selection_finish(struct flame_xserver *xserver);
 // answer, or a ClientMessage flame hears through its hook
 void xs_flame_window_event(struct flame_xserver *xserver, struct xs_window *window,
 	const struct xs_event *event);
+
+// ---- resource ids (ids.c) ----
+
+// a resource of any kind, any client, has it
+bool xs_id_in_use(struct flame_xserver *xserver, uint32_t id);
+// from the client's range and free: what a create needs
+bool xs_id_available(struct xs_client *client, uint32_t id);
+void xs_xcmisc_request(struct xs_client *client, const struct xin *request);
+// RENDER's pictures and glyph sets
+bool xs_render_id_in_use(struct flame_xserver *xserver, uint32_t id);
+size_t xs_render_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
 
 // ---- MIT-SHM (shm.c) ----
 

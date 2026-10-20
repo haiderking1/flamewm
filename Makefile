@@ -72,7 +72,7 @@ $(BUILD)/tests/hiccup_test: tests/hiccup_test.c src/render/hiccup.c
 XSERVER_SRCS := $(wildcard src/xserver/*.c) src/util/strbuf.c
 XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xcb-xfixes xkbcommon-x11 xkbcommon
 XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test \
-	$(BUILD)/tests/fuzz_test
+	$(BUILD)/tests/ids_test $(BUILD)/tests/fuzz_test
 
 $(BUILD)/tests/harness: tests/xserver/harness.c $(XSERVER_SRCS)
 	@mkdir -p $(dir $@)

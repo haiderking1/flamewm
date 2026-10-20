@@ -87,7 +87,9 @@ void xs_sync_request(struct xs_client *client, const struct xin *in) {
 		xs_reply_send(client, &out);
 		break;
 	case 14: // CreateFence
-		if (!xs_fence_create(client, xin32(in, 8), NULL, xin8(in, 12))) {
+		if (!xs_id_available(client, xin32(in, 8))) {
+			xs_error(client, XS_ERROR_ID_CHOICE, xin32(in, 8), XS_SYNC_OPCODE, minor);
+		} else if (!xs_fence_create(client, xin32(in, 8), NULL, xin8(in, 12))) {
 			xs_error(client, XS_ERROR_ALLOC, 0, XS_SYNC_OPCODE, minor);
 		}
 		break;

@@ -18,10 +18,6 @@
 
 #define SHM_MINOR 2
 
-static bool own_id(struct xs_client *client, uint32_t id) {
-	return (id & ~0x1fffffu) == client->id_base;
-}
-
 static struct xs_shm_segment *find(struct flame_xserver *xserver, uint32_t id) {
 	struct xs_shm_segment *segment;
 	wl_list_for_each(segment, &xserver->shm_segments, link) {
@@ -69,7 +65,7 @@ void xs_shm_detach_all(struct flame_xserver *xserver, struct xs_client *client) 
 }
 
 static bool new_id(struct xs_client *client, uint32_t id, uint16_t minor) {
-	if (!own_id(client, id) || find(client->xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_SHM_OPCODE, minor);
 		return false;
 	}
