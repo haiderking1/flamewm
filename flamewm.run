@@ -1,0 +1,7 @@
+#!/bin/sh
+# rebuild if anything changed, then run with debug logs in /tmp/flamewm.log
+# extra args go straight to flamewm, e.g. ./flamewm.run -s foot
+
+cd "$(dirname "$0")" || exit 1
+make -s || exit 1
+exec ./build/flamewm -d "$@" 2> /tmp/flamewm.log

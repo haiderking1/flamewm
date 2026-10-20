@@ -1,0 +1,6 @@
+build/
+build-asan/
+build-release/
+compile_commands.json
+compile_flags.txt
+.cache/
