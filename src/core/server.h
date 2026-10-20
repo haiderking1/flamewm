@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <wayland-server-core.h>
 
+#include "anim/anim.h"
 #include "backend/backend.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
@@ -31,6 +32,7 @@ struct flame_server {
 	struct wl_event_source *reload_idle;
 
 	struct flame_signals signals;
+	struct flame_anims anims;
 	struct flame_backend backend;
 	struct flame_outputs outputs;
 	struct flame_render render;

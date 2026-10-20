@@ -5,6 +5,7 @@
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
 
+#include "anim/window.h"
 #include "config/config.h"
 #include "core/server.h"
 #include "layout/tree.h"
@@ -287,6 +288,8 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	drag->start_y = cursor->y;
 	drag->float_start = view->float_box;
 
+	// whatever it's playing is done: the mouse has it
+	window_anim_stop(view);
 	bool started = drag->mode == FLAME_DRAG_MOVE
 		? begin_move(drag, view) : begin_resize(drag, view);
 	if (!started) {

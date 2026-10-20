@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
+#include "anim/layer.h"
 #include "core/server.h"
 #include "shell/popup.h"
 #include "util/listener.h"
@@ -56,10 +57,12 @@ static void handle_map(struct wl_listener *listener, void *data) {
 	// exclusive zones only count once mapped
 	rearrange(surface);
 	layers_update_focus(surface->layers);
+	layer_anim_mapped(surface);
 }
 
 static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct flame_layer_surface *surface = wl_container_of(listener, surface, unmap);
+	layer_anim_unmapped(surface);
 	rearrange(surface);
 	layers_update_focus(surface->layers);
 }
@@ -89,6 +92,16 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	}
 }
 
+// about to unmap by taking its buffer away: its last picture goes first
+static void handle_client_commit(struct wl_listener *listener, void *data) {
+	struct flame_layer_surface *surface = wl_container_of(listener, surface, client_commit);
+	struct wlr_surface *wlr = surface->wlr->surface;
+	if (wlr->mapped && (wlr->pending.committed & WLR_SURFACE_STATE_BUFFER)
+			&& !wlr->pending.buffer) {
+		layer_anim_snapshot(surface);
+	}
+}
+
 static void handle_new_popup(struct wl_listener *listener, void *data) {
 	struct flame_layer_surface *surface = wl_container_of(listener, surface, new_popup);
 	popup_create(surface->layers->server, data, surface->popups);
@@ -101,10 +114,12 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&surface->map);
 	listener_disconnect(&surface->unmap);
 	listener_disconnect(&surface->commit);
+	listener_disconnect(&surface->client_commit);
 	listener_disconnect(&surface->new_popup);
 	listener_disconnect(&surface->destroy);
 
 	wl_list_remove(&surface->link);
+	layer_anim_free(surface);
 	scene_node_destroy(&surface->tree->node);
 	scene_node_destroy(&surface->popups->node);
 	surface->wlr->data = NULL;
@@ -172,6 +187,8 @@ static void handle_new_surface(struct wl_listener *listener, void *data) {
 	listener_connect(&surface->map, &wlr->surface->events.map, handle_map);
 	listener_connect(&surface->unmap, &wlr->surface->events.unmap, handle_unmap);
 	listener_connect(&surface->commit, &wlr->surface->events.commit, handle_commit);
+	listener_connect(&surface->client_commit, &wlr->surface->events.client_commit,
+		handle_client_commit);
 	listener_connect(&surface->new_popup, &wlr->events.new_popup, handle_new_popup);
 	listener_connect(&surface->destroy, &wlr->events.destroy, handle_destroy);
 	wl_list_insert(layers->surfaces.prev, &surface->link);

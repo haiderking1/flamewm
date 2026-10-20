@@ -23,10 +23,12 @@ struct flame_layer_surface {
 	// its popups, kept above the tiles even when the surface sits below them
 	struct flame_tree *popups;
 	enum zwlr_layer_shell_v1_layer layer; // scene tree it's in right now
+	struct flame_layer_anim *anim; // opening and closing, see anim/layer.c
 
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener commit;
+	struct wl_listener client_commit; // before a commit applies: a null buffer coming
 	struct wl_listener new_popup;
 	struct wl_listener destroy;
 };

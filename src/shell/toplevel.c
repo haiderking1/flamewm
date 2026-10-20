@@ -6,6 +6,7 @@
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
+#include "anim/window.h"
 #include "core/server.h"
 #include "shell/xdg_tree.h"
 #include "util/listener.h"
@@ -478,6 +479,17 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	reconcile_size(toplevel);
 }
 
+// the client is about to unmap by taking its buffer away: its last picture,
+// for the close animation, has to be taken while it's still there
+static void handle_client_commit(struct wl_listener *listener, void *data) {
+	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, client_commit);
+	struct wlr_surface *surface = toplevel->xdg->base->surface;
+	if (surface->mapped && (surface->pending.committed & WLR_SURFACE_STATE_BUFFER)
+			&& !surface->pending.buffer) {
+		window_anim_snapshot(&toplevel->view);
+	}
+}
+
 static void handle_request_maximize(struct wl_listener *listener, void *data) {
 	// protocol says we must answer with a configure even if we say no
 	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, request_maximize);
@@ -523,6 +535,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&toplevel->map);
 	listener_disconnect(&toplevel->unmap);
 	listener_disconnect(&toplevel->commit);
+	listener_disconnect(&toplevel->client_commit);
 	listener_disconnect(&toplevel->destroy);
 	listener_disconnect(&toplevel->request_maximize);
 	listener_disconnect(&toplevel->request_fullscreen);
@@ -563,6 +576,8 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 	listener_connect(&toplevel->map, &surface->events.map, handle_map);
 	listener_connect(&toplevel->unmap, &surface->events.unmap, handle_unmap);
 	listener_connect(&toplevel->commit, &surface->events.commit, handle_commit);
+	listener_connect(&toplevel->client_commit, &surface->events.client_commit,
+		handle_client_commit);
 	listener_connect(&toplevel->destroy, &xdg_toplevel->events.destroy, handle_destroy);
 	listener_connect(&toplevel->request_maximize, &xdg_toplevel->events.request_maximize,
 		handle_request_maximize);
