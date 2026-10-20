@@ -551,6 +551,16 @@ static void hook_damage(void *data, struct xs_window *top, const pixman_region32
 }
 
 
+static void hook_selection_owner(void *data, uint32_t selection, bool x_owned) {
+	struct flame_xbridge *xbridge = data;
+	xselection_owner_changed(&xbridge->server->xselection, selection, x_owned);
+}
+
+static void hook_selection_request(void *data, struct xs_selection_request *request) {
+	struct flame_xbridge *xbridge = data;
+	xselection_request(&xbridge->server->xselection, request);
+}
+
 static void hook_focus_changed(void *data, uint32_t focus) {
 	focus_moved(data, focus);
 }
@@ -618,6 +628,8 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.window_destroyed = hook_window_destroyed,
 		.windows_changed = hook_windows_changed,
 		.focus_changed = hook_focus_changed,
+		.selection_owner = hook_selection_owner,
+		.selection_request = hook_selection_request,
 		.pointer = hook_pointer,
 		.open_device = hook_open_device,
 		.modifiers = hook_modifiers,

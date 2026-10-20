@@ -15,6 +15,7 @@
 #include "render/render.h"
 #include "shell/xdg.h"
 #include "xbridge/xbridge.h"
+#include "xselection/xselection.h"
 #include "xshell/xshell.h"
 
 struct flame_config;
@@ -38,6 +39,7 @@ struct flame_server {
 	struct flame_ipc ipc;
 	struct flame_xbridge xbridge;
 	struct flame_xshell xshell;
+	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;
 };
 

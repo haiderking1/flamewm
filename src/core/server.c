@@ -28,6 +28,7 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& ipc_init(&server->ipc, server)
 		&& xbridge_init(&server->xbridge, server)
 		&& xshell_init(&server->xshell, server, &server->xbridge.xserver)
+		&& xselection_init(&server->xselection, server, &server->xbridge.xserver)
 		&& ext_workspaces_init(&server->ext_workspaces, server);
 }
 
@@ -72,6 +73,7 @@ void server_finish(struct flame_server *server) {
 	wl_display_destroy_clients(server->display);
 	// stop listening to the desktop before it goes
 	ipc_finish(&server->ipc);
+	xselection_finish(&server->xselection);
 	xbridge_finish(&server->xbridge);
 	xshell_finish(&server->xshell);
 	ext_workspaces_finish(&server->ext_workspaces);
