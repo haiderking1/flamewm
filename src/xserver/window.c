@@ -421,7 +421,7 @@ static void focus_event(struct flame_xserver *xserver, uint8_t type, uint32_t id
 	xs_event_put32(&event, 4, window->id);
 	xs_event_put8(&event, 8, 0); // NotifyNormal
 	int evtype = type == XS_EVENT_FOCUS_IN ? XS_XI_FOCUS_IN : XS_XI_FOCUS_OUT;
-	xs_event_deliver_input(xserver, window, XS_MASK_FOCUS, evtype, &event);
+	xs_event_deliver_input(xserver, window, XS_MASK_FOCUS, evtype, &event, false);
 	xs_xi_focus(xserver, evtype, window);
 }
 

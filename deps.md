@@ -41,7 +41,8 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
 | dep | pkg-config | why |
 | --- | --- | --- |
-| libxcb + xcb-xinput, xcb-randr (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c` |
+| libxcb + xcb-xinput, xcb-randr, xcb-xkb (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` `xcb-xkb` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c` |
+| libxkbcommon-x11 (comes with `libxkbcommon`) | `xkbcommon-x11` | the XKB test reads the keymap back the way kitty and alacritty do |
 
 ## runtime
 

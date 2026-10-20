@@ -13,6 +13,7 @@ struct flame_buffer_node;
 struct flame_frame;
 struct flame_server;
 struct flame_xserver;
+struct wlr_keyboard;
 struct flame_tree;
 struct xs_window;
 
@@ -100,7 +101,8 @@ void xshell_syncobj_destroyed(struct flame_xshell *xshell, struct xs_syncobj *sy
 int xshell_open_device(struct flame_xshell *xshell);
 size_t xshell_modifiers(struct flame_xshell *xshell, uint32_t format, uint64_t *out,
 	size_t max);
-int xshell_keysyms(struct flame_xshell *xshell, uint8_t keycode, uint32_t *out, int max);
+// the keyboard that typed: its keymap, repeat and modifiers are X's
+void xshell_keyboard(struct flame_xshell *xshell, struct wlr_keyboard *keyboard);
 
 // input. true when it went to an X window: the wayland seat stays out of it.
 // view is the X window's flame view (for focus) or NULL for a floating one
@@ -120,6 +122,7 @@ void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 	const pixman_region32_t *region);
 
 // to the focused X window when flame's focus is on one
-bool xshell_key(struct flame_xshell *xshell, uint32_t keycode, bool pressed, uint32_t time);
+bool xshell_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard, uint32_t keycode,
+	bool pressed, uint32_t time);
 
 #endif
