@@ -118,7 +118,11 @@ void xs_client_send(struct xs_client *client, const void *data, size_t len) {
 		client->dead = true; client->why = "output overflow";
 		return;
 	}
-	// replies go out when the batch of requests is done, see handle_client
+	// replies go out when the batch of requests is done (see handle_client).
+	// events flame sends on its own (input, Present completes, focus) come
+	// outside any batch: the socket being writable wakes handle_client to
+	// send them right away, or they'd wait for the app's next request
+	wl_event_source_fd_update(client->source, WL_EVENT_READABLE | WL_EVENT_WRITABLE);
 }
 
 void xs_error(struct xs_client *client, uint8_t code, uint32_t value, uint8_t major,
