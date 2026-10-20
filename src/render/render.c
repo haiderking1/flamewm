@@ -39,6 +39,7 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 	// every surface gets tracked from birth, so even ones we haven't drawn
 	// yet wake the outputs when they show up
 	scene_surfaces_init(&render->surfaces, &render->scene, render->compositor);
+	acquire_init(&render->acquire, server->loop, render->compositor);
 
 	// clients get the formats our renderer can import, default feedback only.
 	// scanout hints come back with direct scanout
@@ -87,6 +88,7 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 
 void render_unhook(struct flame_render *render) {
 	scene_surfaces_finish(&render->surfaces);
+	acquire_finish(&render->acquire);
 }
 
 void render_finish(struct flame_render *render) {

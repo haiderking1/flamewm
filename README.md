@@ -28,7 +28,9 @@ fullscreen window whose buffer KMS can take goes straight to the display
 
 windows covered by something opaque still get frame callbacks, four times a
 second while they ask, so they don't freeze without burning the gpu, and
-their redraws don't repaint the screen.
+their redraws don't repaint the screen. a client buffer the gpu is still
+writing waits before it's used (explicit sync clients say so themselves),
+the window keeps its last frame instead of one slow app delaying the screen.
 
 `FLAME_FRAME_PIPELINE` picks the policy:
 
