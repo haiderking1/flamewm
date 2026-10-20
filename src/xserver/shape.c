@@ -170,6 +170,10 @@ static void mask(struct xs_client *client, const struct xin *in) {
 	if (!window || !kind_ok(client, kind, 2)) {
 		return;
 	}
+	if (op > OP_INVERT) {
+		xs_error(client, XS_ERROR_VALUE, op, XS_SHAPE_OPCODE, 2);
+		return;
+	}
 	uint32_t source = xin32(in, 16);
 	if (!source) {
 		apply(client->xserver, window, kind, op, NULL);
@@ -192,6 +196,10 @@ static void combine(struct xs_client *client, const struct xin *in) {
 	struct xs_window *window = window_arg(client, in, 8, 3);
 	struct xs_window *source = window ? window_arg(client, in, 16, 3) : NULL;
 	if (!source || !kind_ok(client, kind, 3) || !kind_ok(client, source_kind, 3)) {
+		return;
+	}
+	if (op > OP_INVERT) {
+		xs_error(client, XS_ERROR_VALUE, op, XS_SHAPE_OPCODE, 3);
 		return;
 	}
 	pixman_region32_t region;

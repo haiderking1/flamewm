@@ -19,6 +19,15 @@ static void fake_input(struct xs_client *client, const struct xin *in) {
 			return;
 		}
 		xserver_key(xserver, detail, type == 2, state, time);
+		// a modifier key counts from the next event on, like a real one:
+		// xdotool's ctrl+c is a press of Control_L, then c
+		uint8_t mods = xs_xkb_modmap(xserver, detail);
+		if (mods) {
+			const struct xs_kbd_state *kbd = &xserver->kbd;
+			uint8_t base = type == 2 ? kbd->base | mods : kbd->base & (uint8_t)~mods;
+			xserver->state = type == 2 ? state | mods : state & (uint16_t)~mods;
+			xserver_keyboard_state(xserver, base, kbd->latched, kbd->locked, kbd->group);
+		}
 		break;
 	case 4: // ButtonPress
 	case 5: { // ButtonRelease

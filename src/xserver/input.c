@@ -251,15 +251,16 @@ void xserver_pointer_leave(struct flame_xserver *xserver, uint32_t time) {
 
 static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
 		uint32_t time, uint32_t flags, bool core_only) {
-	struct xs_window *focus = alive(xserver, xserver->focus)
-		? xserver_window(xserver, xserver->focus) : NULL;
+	struct xs_window *under = alive(xserver, xserver->pointer_window)
+		? xserver_window(xserver, xserver->pointer_window) : NULL;
+	// PointerRoot: keys follow the pointer, whatever window it's over
+	struct xs_window *focus = xserver->focus == XS_FOCUS_POINTER_ROOT ? xserver->root
+		: alive(xserver, xserver->focus) ? xserver_window(xserver, xserver->focus) : NULL;
 	if (!focus) {
 		return;
 	}
 	// to the window under the pointer when it's inside the focus window
 	struct xs_window *source = focus;
-	struct xs_window *under = alive(xserver, xserver->pointer_window)
-		? xserver_window(xserver, xserver->pointer_window) : NULL;
 	for (struct xs_window *w = under; w; w = w->parent) {
 		if (w == focus) {
 			source = under;

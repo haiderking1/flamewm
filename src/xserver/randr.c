@@ -229,8 +229,9 @@ static void get_screen_resources(struct xs_client *client, const struct xin *in,
 	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	char names[1024];
 	size_t names_len = 0;
-	for (size_t i = 0; i < len; i++) {
-		names_len += mode_name(&all[i], names + names_len, sizeof(names) - names_len);
+	for (size_t i = 0; i < len && names_len < sizeof(names) - 16; i++) {
+		size_t n = mode_name(&all[i], names + names_len, sizeof(names) - names_len);
+		names_len += n < sizeof(names) - names_len ? n : 0;
 	}
 	struct xout out;
 	xs_reply_begin(client, &out, 0);

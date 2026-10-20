@@ -10,6 +10,7 @@
 #include <xcb/screensaver.h>
 #include <xcb/shape.h>
 #include <xcb/xcb.h>
+#include <xcb/xinput.h>
 #include <xcb/xinerama.h>
 #include <xcb/xtest.h>
 
@@ -95,6 +96,63 @@ static void test_xtest(xcb_connection_t *c, xcb_screen_t *s) {
 	}
 	CHECK(keys == 1);
 	CHECK(buttons == 1);
+	// xdotool's ctrl+c: Control_L down makes the c a ctrl+c
+	xcb_test_fake_input(c, XCB_KEY_PRESS, 37, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	xcb_test_fake_input(c, XCB_KEY_PRESS, 54, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	xcb_test_fake_input(c, XCB_KEY_RELEASE, 54, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	xcb_test_fake_input(c, XCB_KEY_RELEASE, 37, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	xcb_test_fake_input(c, XCB_KEY_PRESS, 54, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	xcb_test_fake_input(c, XCB_KEY_RELEASE, 54, XCB_CURRENT_TIME, s->root, 0, 0, 0);
+	free(xcb_get_input_focus_reply(c, xcb_get_input_focus(c), NULL));
+	int ctrl_c = 0, plain_c = 0;
+	while ((e = xcb_poll_for_event(c))) {
+		xcb_key_press_event_t *k = (xcb_key_press_event_t *)e;
+		if ((e->response_type & 0x7f) == XCB_KEY_PRESS && k->detail == 54) {
+			ctrl_c += (k->state & XCB_MOD_MASK_CONTROL) != 0;
+			plain_c += !(k->state & XCB_MOD_MASK_CONTROL);
+		}
+		free(e);
+	}
+	CHECK(ctrl_c == 1);
+	CHECK(plain_c == 1);
+}
+
+// XI1 clients (old games, wine) open the slave devices
+static void test_xi1(xcb_connection_t *c) {
+	xcb_input_open_device_reply_t *r = xcb_input_open_device_reply(c,
+		xcb_input_open_device(c, 4), NULL);
+	CHECK(r && r->num_classes == 3);
+	if (r) {
+		xcb_input_input_class_info_t *info = xcb_input_open_device_class_info(r);
+		CHECK(info[0].class_id == XCB_INPUT_INPUT_CLASS_BUTTON);
+	}
+	free(r);
+	xcb_generic_error_t *error = NULL;
+	r = xcb_input_open_device_reply(c, xcb_input_open_device(c, 2), &error);
+	CHECK(!r && error); // a master: XI2's business
+	free(r);
+	free(error);
+	CHECK(!xcb_request_check(c, xcb_input_close_device_checked(c, 4)));
+}
+
+// a client can't take flame's own windows away: the selection window survives
+// everything under the root going, and stays put
+static void test_flame_windows(xcb_connection_t *c, xcb_screen_t *s) {
+	xcb_window_t w = xcb_generate_id(c);
+	xcb_create_window(c, 24, w, s->root, 0, 0, 10, 10, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+		s->root_visual, 0, NULL);
+	xcb_generic_error_t *error = xcb_request_check(c,
+		xcb_reparent_window_checked(c, 0x102, w, 0, 0));
+	CHECK(error && error->error_code == XCB_ACCESS);
+	free(error);
+	xcb_destroy_subwindows(c, s->root);
+	xcb_get_window_attributes_reply_t *a = xcb_get_window_attributes_reply(c,
+		xcb_get_window_attributes(c, 0x102), NULL);
+	CHECK(a != NULL);
+	free(a);
+	a = xcb_get_window_attributes_reply(c, xcb_get_window_attributes(c, w), NULL);
+	CHECK(a == NULL);
+	free(a);
 }
 
 // half a window takes input: the pointer over the other half finds what's
@@ -160,6 +218,8 @@ int main(void) {
 	test_idle(c, s);
 	test_xtest(c, s);
 	test_shape(c, s);
+	test_xi1(c);
+	test_flame_windows(c, s); // last: every window goes
 	xcb_disconnect(c);
 	if (failures) {
 		fprintf(stderr, "misc_test: %d failed\n", failures);

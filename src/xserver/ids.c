@@ -118,10 +118,15 @@ static uint32_t *used_ids(struct xs_client *client, size_t *len) {
 	wl_list_for_each(select, &xserver->present_selects, link) {
 		add(&ids, len, &cap, base, select->id);
 	}
-	uint32_t render[4096];
-	size_t n = xs_render_ids(xserver, base, render, 4096);
-	for (size_t i = 0; i < n; i++) {
-		add(&ids, len, &cap, base, render[i]);
+	// render's own lists, as many as there are
+	size_t n = xs_render_ids(xserver, base, NULL, 0);
+	uint32_t *render = n ? malloc(n * sizeof(*render)) : NULL;
+	if (render) {
+		n = xs_render_ids(xserver, base, render, n);
+		for (size_t i = 0; i < n; i++) {
+			add(&ids, len, &cap, base, render[i]);
+		}
+		free(render);
 	}
 	if (ids) {
 		qsort(ids, *len, sizeof(*ids), compare);
