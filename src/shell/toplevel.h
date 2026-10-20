@@ -18,6 +18,7 @@ struct flame_toplevel {
 
 	// what we last asked for
 	int configured_width, configured_height;
+	bool configured_fullscreen;
 	uint32_t configure_serial;
 	// already re-sent once for this size because the client ignored it
 	bool corrected;

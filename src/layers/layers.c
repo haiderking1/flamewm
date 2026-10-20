@@ -12,15 +12,17 @@
 #include "util/listener.h"
 #include "util/macros.h"
 
+// a top surface that grabs the keyboard is a launcher: it has to show over a
+// fullscreen window, a bar doesn't (raven's rule, no per-app lists)
 static struct wlr_scene_tree *scene_layer(struct flame_server *server,
-		enum zwlr_layer_shell_v1_layer layer) {
+		enum zwlr_layer_shell_v1_layer layer, bool grabs_keyboard) {
 	switch (layer) {
 	case ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND:
 		return server->render.layers[FLAME_LAYER_BACKGROUND];
 	case ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM:
 		return server->render.layers[FLAME_LAYER_BOTTOM];
 	case ZWLR_LAYER_SHELL_V1_LAYER_TOP:
-		return server->render.layers[FLAME_LAYER_TOP];
+		return server->render.layers[grabs_keyboard ? FLAME_LAYER_GRAB : FLAME_LAYER_TOP];
 	case ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY:
 		break;
 	}
@@ -29,8 +31,12 @@ static struct wlr_scene_tree *scene_layer(struct flame_server *server,
 
 // a bottom layer's menus would end up under the tiles otherwise
 static struct wlr_scene_tree *popup_layer(struct flame_server *server,
-		enum zwlr_layer_shell_v1_layer layer) {
-	return scene_layer(server, MAX(layer, ZWLR_LAYER_SHELL_V1_LAYER_TOP));
+		enum zwlr_layer_shell_v1_layer layer, bool grabs_keyboard) {
+	return scene_layer(server, MAX(layer, ZWLR_LAYER_SHELL_V1_LAYER_TOP), grabs_keyboard);
+}
+
+static bool grabs_keyboard(const struct wlr_layer_surface_v1_state *state) {
+	return state->keyboard_interactive == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
 }
 
 struct flame_layer_surface *layer_surface_from_wlr(struct wlr_surface *surface) {
@@ -67,11 +73,14 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	if (!surface->output) {
 		return;
 	}
-	if (wlr->current.layer != surface->layer) {
-		surface->layer = wlr->current.layer;
-		wlr_scene_node_reparent(&surface->scene->tree->node,
-			scene_layer(server, surface->layer));
-		wlr_scene_node_reparent(&surface->popups->node, popup_layer(server, surface->layer));
+	// layer or keyboard interactivity can change on any commit
+	surface->layer = wlr->current.layer;
+	bool grabs = grabs_keyboard(&wlr->current);
+	struct wlr_scene_tree *tree = scene_layer(server, surface->layer, grabs);
+	if (surface->scene->tree->node.parent != tree) {
+		wlr_scene_node_reparent(&surface->scene->tree->node, tree);
+		wlr_scene_node_reparent(&surface->popups->node,
+			popup_layer(server, surface->layer, grabs));
 	}
 	// first commit needs its configure, later ones only when state changed,
 	// not every frame
@@ -143,8 +152,10 @@ static void handle_new_surface(struct wl_listener *listener, void *data) {
 	surface->wlr = wlr;
 	surface->output = wlr->output->data;
 	surface->layer = wlr->pending.layer;
-	surface->scene = wlr_scene_layer_surface_v1_create(scene_layer(server, surface->layer), wlr);
-	surface->popups = wlr_scene_tree_create(popup_layer(server, surface->layer));
+	bool grabs = grabs_keyboard(&wlr->pending);
+	surface->scene = wlr_scene_layer_surface_v1_create(
+		scene_layer(server, surface->layer, grabs), wlr);
+	surface->popups = wlr_scene_tree_create(popup_layer(server, surface->layer, grabs));
 	if (!surface->scene || !surface->popups) {
 		wlr_log(WLR_ERROR, "failed to create layer surface scene");
 		if (surface->popups) {

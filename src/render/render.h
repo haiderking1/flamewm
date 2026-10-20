@@ -12,6 +12,9 @@ enum flame_layer {
 	FLAME_LAYER_TILED,
 	FLAME_LAYER_FLOATING,
 	FLAME_LAYER_TOP,
+	FLAME_LAYER_FULLSCREEN,
+	// layer surfaces holding the keyboard (launchers), above fullscreen
+	FLAME_LAYER_GRAB,
 	FLAME_LAYER_OVERLAY,
 	FLAME_LAYER_COUNT,
 };

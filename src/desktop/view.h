@@ -16,13 +16,16 @@ struct wlr_scene_node;
 
 // what a shell (xdg now, xwayland later) has to provide for its windows
 struct flame_view_impl {
-	// ask for a new content size. returns the serial to wait on, or 0 when
-	// there's nothing to wait for (same size, or not configurable yet)
-	uint32_t (*configure)(struct flame_view *view, int width, int height);
+	// ask for a new content size and fullscreen state. returns the serial to
+	// wait on, or 0 when there's nothing to wait for (nothing changed, or not
+	// configurable yet)
+	uint32_t (*configure)(struct flame_view *view, int width, int height, bool fullscreen);
 	// called from client_commit: does the commit being made ack serial
 	bool (*acked)(struct flame_view *view, uint32_t serial);
 	// we now show the window at this content size (clipping and such)
 	void (*set_display_size)(struct flame_view *view, int width, int height);
+	// size of what the client actually drew, its window geometry
+	void (*content_size)(struct flame_view *view, int *width, int *height);
 	void (*set_activated)(struct flame_view *view, bool activated);
 	void (*close)(struct flame_view *view);
 	struct wlr_surface *(*surface)(struct flame_view *view);
@@ -54,6 +57,11 @@ struct flame_view {
 	// held by a mouse drag, the drag owns where its tree sits
 	bool grabbed;
 
+	// the client or the user wants it fullscreen
+	bool fullscreen_wanted;
+	// on screen as fullscreen right now, flips only when a transaction lands
+	bool fullscreen_shown;
+
 	struct flame_view_txn txn;
 };
 
@@ -61,12 +69,17 @@ void view_init(struct flame_view *view, const struct flame_view_impl *impl,
 	struct flame_desktop *desktop);
 void view_finish(struct flame_view *view);
 
-// content size for a box that includes the border
-void view_content_size(struct flame_view *view, struct wlr_box box, int *width, int *height);
-uint32_t view_configure(struct flame_view *view, struct wlr_box box);
+// content size for a box. tiles lose their border, fullscreen gets it all
+void view_content_size(struct flame_view *view, struct wlr_box box, bool fullscreen,
+	int *width, int *height);
+uint32_t view_configure(struct flame_view *view, struct wlr_box box, bool fullscreen);
 // put it on screen in this box, only the transaction calls this
-void view_place(struct flame_view *view, struct wlr_box box);
+void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen);
 void view_hide(struct flame_view *view);
+// into the tree it belongs in: its workspace's tiles or fullscreen tree
+void view_reparent(struct flame_view *view);
+// the client drew a new size, recenter it if it's smaller than fullscreen
+void view_content_changed(struct flame_view *view);
 
 void view_set_focused(struct flame_view *view, bool focused);
 void view_close(struct flame_view *view);

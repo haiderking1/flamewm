@@ -1,5 +1,6 @@
 #include "desktop/focus.h"
 
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_scene.h>
 
 #include "core/server.h"
@@ -8,6 +9,7 @@ void focus_restore_keyboard(struct flame_desktop *desktop) {
 	struct flame_server *server = desktop->server;
 	// an open launcher keeps typing, a clicked bar gives it back
 	if (layers_keyboard_locked(&server->layers)) {
+		input_keyboard_enter(&server->input, server->layers.focused->wlr->surface);
 		return;
 	}
 	layers_drop_keyboard(&server->layers);
@@ -35,6 +37,10 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 }
 
 void focus_cycle(struct flame_desktop *desktop, int direction) {
+	// everything else is behind it, cycling there would type into the void
+	if (desktop->active->fullscreen) {
+		return;
+	}
 	struct flame_view *current = desktop->focused;
 	if (!current) {
 		focus_view(desktop, focus_fallback(desktop->active));

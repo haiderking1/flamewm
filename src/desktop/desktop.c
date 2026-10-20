@@ -9,6 +9,7 @@
 
 bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	struct wlr_scene_tree *tiled = server->render.layers[FLAME_LAYER_TILED];
+	struct wlr_scene_tree *fullscreen = server->render.layers[FLAME_LAYER_FULLSCREEN];
 
 	desktop->server = server;
 	desktop->staging = wlr_scene_tree_create(tiled);
@@ -19,7 +20,7 @@ bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	wlr_scene_node_set_enabled(&desktop->staging->node, false);
 
 	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
-		workspace_init(&desktop->workspaces[i], i, tiled);
+		workspace_init(&desktop->workspaces[i], i, tiled, fullscreen);
 	}
 	desktop->active = &desktop->workspaces[0];
 	workspace_set_visible(desktop->active, true);
@@ -49,11 +50,20 @@ void desktop_arrange(struct flame_desktop *desktop) {
 	struct flame_workspace *workspace = desktop->active;
 	tree_layout(workspace->layout, output->usable, server->config->gap);
 
+	// the owner takes the whole output, everyone else keeps tiling behind it
+	struct flame_view *owner = workspace->fullscreen;
 	struct flame_view *view;
 	wl_list_for_each(view, &workspace->views, link) {
-		transaction_add(txn, view, view->node->box);
+		bool fullscreen = view == owner && view->fullscreen_wanted;
+		transaction_add(txn, view, fullscreen ? output->box : view->node->box, fullscreen);
 	}
 	transaction_commit(txn);
+}
+
+void desktop_layout_applied(struct flame_desktop *desktop) {
+	fullscreen_refresh_backdrops(desktop);
+	// things moved under the pointer
+	cursor_refresh(&desktop->server->input.cursor);
 }
 
 bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box *box) {
@@ -69,10 +79,15 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 }
 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
-	if (!workspace_add_view(desktop->active, view)) {
+	struct flame_workspace *workspace = desktop->active;
+	if (!workspace_add_view(workspace, view)) {
 		return;
 	}
-	focus_view(desktop, view);
+	fullscreen_claim_if_wanted(desktop, view);
+	// a window opening behind someone's fullscreen doesn't steal the seat
+	if (!workspace->fullscreen || workspace->fullscreen == view) {
+		focus_view(desktop, view);
+	}
 	// stays hidden until the transaction places it next to its resized siblings
 	desktop_arrange(desktop);
 }
@@ -84,10 +99,13 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	}
 
 	drag_forget(&desktop->server->input.drag, view);
+	// a remap starts from whatever the client asks for next, not a stale claim
+	view->fullscreen_wanted = false;
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);
 	wlr_scene_node_reparent(&view->tree->node, desktop->staging);
+	fullscreen_refresh_backdrops(desktop);
 
 	if (desktop->focused == view) {
 		// drop it without deactivating, the surface may be on its way out
@@ -154,6 +172,9 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	} else {
 		target->last_focused = view;
 	}
+	// a fullscreen window stays fullscreen over there, displacing that owner
+	fullscreen_claim_if_wanted(desktop, view);
+	fullscreen_refresh_backdrops(desktop);
 
 	if (was_focused) {
 		focus_view(desktop, focus_fallback(desktop->active));

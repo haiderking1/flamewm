@@ -9,7 +9,7 @@ TARGET  := $(BUILD)/flamewm
 CC := clang
 
 # every lib here has to be in deps.md too
-PKGS := wlroots-0.20 wayland-server xkbcommon
+PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1
 
 # clean shouldn't need any deps installed
 ifeq ($(filter clean,$(MAKECMDGOALS)),)

@@ -7,17 +7,24 @@
 #include "layout/tree.h"
 
 void workspace_init(struct flame_workspace *workspace, int index,
-		struct wlr_scene_tree *parent) {
+		struct wlr_scene_tree *tiled, struct wlr_scene_tree *fullscreen) {
+	static const float black[4] = {0, 0, 0, 1};
+
 	workspace->index = index;
-	workspace->tree = wlr_scene_tree_create(parent);
-	wlr_scene_node_set_enabled(&workspace->tree->node, false);
+	workspace->tree = wlr_scene_tree_create(tiled);
+	workspace->fullscreen_tree = wlr_scene_tree_create(fullscreen);
+	workspace->backdrop = wlr_scene_rect_create(workspace->fullscreen_tree, 0, 0, black);
+	wlr_scene_node_set_enabled(&workspace->backdrop->node, false);
 	workspace->layout = NULL;
 	wl_list_init(&workspace->views);
 	workspace->last_focused = NULL;
+	workspace->fullscreen = NULL;
+	workspace_set_visible(workspace, false);
 }
 
 void workspace_set_visible(struct flame_workspace *workspace, bool visible) {
 	wlr_scene_node_set_enabled(&workspace->tree->node, visible);
+	wlr_scene_node_set_enabled(&workspace->fullscreen_tree->node, visible);
 }
 
 struct tree_node *workspace_insert_target(struct flame_workspace *workspace) {
@@ -43,7 +50,7 @@ bool workspace_add_view(struct flame_workspace *workspace, struct flame_view *vi
 	}
 	view->node = leaf;
 	view->workspace = workspace;
-	wlr_scene_node_reparent(&view->tree->node, workspace->tree);
+	view_reparent(view);
 	return true;
 }
 
@@ -55,6 +62,9 @@ void workspace_remove_view(struct flame_workspace *workspace, struct flame_view 
 	view->workspace = NULL;
 	if (workspace->last_focused == view) {
 		workspace->last_focused = NULL;
+	}
+	if (workspace->fullscreen == view) {
+		workspace->fullscreen = NULL;
 	}
 }
 

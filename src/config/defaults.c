@@ -27,6 +27,7 @@ static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_c, action_close, { 0 } },
 	{ MOD, XKB_KEY_j, action_focus, { .i = +1 } },
 	{ MOD, XKB_KEY_k, action_focus, { .i = -1 } },
+	{ MOD, XKB_KEY_f, action_fullscreen, { 0 } },
 	{ MOD | SHIFT, XKB_KEY_q, action_quit, { 0 } },
 	WORKSPACE(XKB_KEY_1, 0),
 	WORKSPACE(XKB_KEY_2, 1),
