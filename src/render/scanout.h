@@ -22,6 +22,9 @@ struct flame_scanout {
 	struct flame_render *render;
 	struct wlr_output *output;
 	bool active; // the last frame went out this way
+	// KMS refused a scanout commit that passed its test: compose until the
+	// next vt switch instead of trying it every frame
+	bool suspended;
 
 	// clients only allocate buffers KMS can take when told to. the hint
 	// follows the candidate after it held for a while, so a window that's

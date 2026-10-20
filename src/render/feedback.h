@@ -1,6 +1,7 @@
 #ifndef FLAME_RENDER_FEEDBACK_H
 #define FLAME_RENDER_FEEDBACK_H
 
+#include <stdint.h>
 #include <time.h>
 
 struct flame_element_list;
@@ -16,7 +17,14 @@ struct wlr_output;
 void feedback_drawn(struct flame_scene_surfaces *surfaces, struct wlr_output *output,
 	const struct flame_element_list *list);
 
-// frame callbacks for everything that actually shows, covered ones wait
-void feedback_frame_done(const struct flame_element_list *list, const struct timespec *now);
+// frame callbacks for everything that actually shows, one turn per surface
+// per cycle (frame.c bumps cycle for a new one). covered surfaces wait
+void feedback_frame_done(const struct flame_element_list *list, uint64_t cycle, int64_t now);
+
+// covered windows asking for callbacks get one every 250ms, so they don't
+// freeze without running at the refresh rate behind something opaque.
+// never asks for a repaint. returns when the next one is due, 0 for none.
+// hidden workspaces aren't in the list and get nothing
+int64_t feedback_background(const struct flame_element_list *list, uint64_t cycle, int64_t now);
 
 #endif

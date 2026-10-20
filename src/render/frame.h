@@ -25,8 +25,11 @@ struct flame_frame_hooks {
 	void *data;
 	// right before a frame gets built from the scene (a mouse resize lands here)
 	void (*before_render)(void *data);
-	// frame callbacks just went out (transactions keep hidden windows drawing)
-	void (*callbacks_sent)(void *data, const struct timespec *now);
+	// frame callbacks just went out (transactions keep hidden windows drawing).
+	// new_cycle: a submission or the refresh grid moving on, at most once a
+	// refresh. anything re-requesting frames from here has to wait for one, a
+	// revisit comes right after every empty pass and would loop
+	void (*callbacks_sent)(void *data, const struct timespec *now, bool new_cycle);
 };
 
 // one output's frames: when to draw (schedule.h decides), what it showed last
@@ -42,9 +45,14 @@ struct flame_frame {
 	struct schedule schedule;
 	struct flame_timer wake; // render window, callback wake, watchdog
 	struct wl_event_source *idle; // requests are handled once per dispatch
+	// inside process(): requests made from in there wait for its timer, so
+	// nothing it triggers can bounce straight back into it and spin the loop
+	bool processing;
 	bool stall_reported;
 	// the latest present's kernel timestamp, for the flip that follows it
 	int64_t present_ns;
+	// frame callback cycles, see schedule_cycle
+	uint64_t callback_cycle;
 
 	// tickets for the schedule, only their addresses matter
 	int submitted_ticket, queued_ticket;

@@ -21,6 +21,7 @@
 #include "util/listener.h"
 
 static void process(struct flame_frame *frame);
+static void process_once(struct flame_frame *frame);
 
 static int64_t timespec_ns(const struct timespec *ts) {
 	return (int64_t)ts->tv_sec * 1000000000 + ts->tv_nsec;
@@ -49,6 +50,9 @@ static void handle_idle(void *data) {
 // everything asking in one dispatch becomes one look at the schedule, at
 // the end of it, after input and clients had their say
 static void queue_process(struct flame_frame *frame) {
+	if (frame->processing) {
+		return; // its timer covers it, see process()
+	}
 	if (!frame->idle) {
 		frame->idle = wl_event_loop_add_idle(frame->output->event_loop, handle_idle, frame);
 	}
@@ -134,6 +138,15 @@ static bool commit(struct flame_frame *frame, struct wlr_output_state *state, bo
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
 	}
+	if (!ok && scanout && !frame->scanout.suspended) {
+		// it passed the test and still got refused: one full composition now,
+		// and no scanout attempts until the next vt switch
+		wlr_log(WLR_INFO, "%s: KMS refused a scanout frame, composing until the next vt switch",
+			frame->output->name);
+		frame->scanout.suspended = true;
+		frame->whole = true;
+		schedule_request_redraw(&frame->schedule);
+	}
 	timing_committed(&frame->timing, ok, scanout);
 	return ok;
 }
@@ -185,6 +198,7 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	schedule_resume(&frame->schedule);
 	frame->whole = true;
 	frame->stall_reported = false;
+	frame->scanout.suspended = false;
 	queue_process(frame);
 }
 
@@ -198,6 +212,7 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	frame->area = area;
 	frame->hooks = hooks;
 	frame->whole = true;
+	frame->callback_cycle = 1;
 	wlr_damage_ring_init(&frame->ring);
 	pixman_region32_init(&frame->pending);
 	pixman_region32_init(&frame->pending_buffer);
@@ -570,15 +585,25 @@ static void render(struct flame_frame *frame, int64_t now) {
 
 static void send_callbacks(struct flame_frame *frame, int64_t now) {
 	struct timespec when = ns_timespec(now);
+	bool new_cycle = schedule_callbacks_new_cycle(&frame->schedule, now);
+	if (new_cycle) {
+		frame->callback_cycle++;
+	}
 	// prev is the last frame built, the one that just went out
-	feedback_frame_done(&frame->prev, &when);
+	feedback_frame_done(&frame->prev, frame->callback_cycle, now);
 	schedule_callbacks_sent(&frame->schedule, now);
 	if (frame->hooks.callbacks_sent) {
-		frame->hooks.callbacks_sent(frame->hooks.data, &when);
+		frame->hooks.callbacks_sent(frame->hooks.data, &when, new_cycle);
 	}
 }
 
 static void process(struct flame_frame *frame) {
+	frame->processing = true;
+	process_once(frame);
+	frame->processing = false;
+}
+
+static void process_once(struct flame_frame *frame) {
 	struct schedule *schedule = &frame->schedule;
 	struct wlr_output *output = frame->output;
 	int64_t now = now_ns();
@@ -607,10 +632,16 @@ static void process(struct flame_frame *frame) {
 		send_callbacks(frame, now);
 	}
 
+	// covered windows still asking for callbacks, a few times a second
+	int64_t background = feedback_background(&frame->prev, frame->callback_cycle, now);
+
 	// sleep until the next thing is due, never spin on something due already
 	int64_t deadline = schedule_deadline(schedule, now);
 	if (deadline > 0 && deadline <= now) {
 		deadline = now + schedule->period;
+	}
+	if (background && (!deadline || background < deadline)) {
+		deadline = background;
 	}
 	timer_arm(&frame->wake, deadline);
 }

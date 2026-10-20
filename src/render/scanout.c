@@ -29,6 +29,7 @@ void scanout_init(struct flame_scanout *scanout, struct flame_render *render,
 	scanout->render = render;
 	scanout->output = output;
 	scanout->active = false;
+	scanout->suspended = false;
 	scanout->debounce = 0;
 	scanout->hinted = NULL;
 	wl_list_init(&scanout->hinted_destroy.link);
@@ -122,7 +123,7 @@ bool scanout_try(struct flame_scanout *scanout, const struct flame_element *cand
 	struct wlr_buffer *buffer = candidate->buffer;
 	// the software cursor (or anything locking rendering) needs composition,
 	// and a rotated buffer would need us to turn it
-	if (!buffer || !wlr_output_is_direct_scanout_allowed(output)
+	if (!buffer || scanout->suspended || !wlr_output_is_direct_scanout_allowed(output)
 			|| candidate->transform != output->transform) {
 		return false;
 	}
