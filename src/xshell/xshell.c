@@ -1109,6 +1109,63 @@ static bool wanted(struct flame_xshell *xshell, struct xs_window *x) {
 		&& !xbridge_hides(&xshell->server->xbridge, x->owner->pid);
 }
 
+// ---- floating windows belong to their app's window ----
+
+// the tiled window a floating one (a menu, a tooltip) belongs to: the window
+// WM_TRANSIENT_FOR names (gtk sets it on its menus, a menu of a menu leads up
+// the chain), else the same app's newest tiled window. NULL: none, it floats
+// on its own
+static struct flame_view *float_owner(struct flame_xshell *xshell,
+		struct flame_xwindow *window) {
+	struct flame_xserver *xserver = xshell->xserver;
+	struct xs_window *x = xserver_window(xserver, window->id);
+	struct xs_window *self = x;
+	for (int depth = 0; x && depth < 8; depth++) {
+		struct xs_property *p = xserver_property(xserver, x, "WM_TRANSIENT_FOR");
+		uint32_t parent_id = 0;
+		if (p && p->format == 32 && p->units >= 1) {
+			memcpy(&parent_id, p->data, 4);
+		}
+		struct flame_xwindow *parent = parent_id ? window_of(xshell, parent_id) : NULL;
+		if (!parent || parent == window) {
+			break;
+		}
+		if (!parent->floating) {
+			return &parent->view;
+		}
+		x = xserver_window(xserver, parent->id);
+	}
+	struct flame_view *found = NULL;
+	struct flame_xwindow *other;
+	wl_list_for_each(other, &xshell->windows, link) {
+		struct xs_window *ox = other->floating ? NULL : xserver_window(xserver, other->id);
+		if (ox && self && ox->owner && self->owner && ox->owner->pid == self->owner->pid) {
+			found = &other->view;
+		}
+	}
+	return found;
+}
+
+// a floating window shows while its owner's workspace does: a menu left open
+// doesn't hang over the workspace switched to
+static void floats_update(struct flame_xshell *xshell) {
+	struct flame_workspace *active = xshell->server->desktop.active;
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		if (!window->floating) {
+			continue;
+		}
+		struct flame_view *owner = float_owner(xshell, window);
+		bool show = !owner || !owner->workspace || owner->workspace == active;
+		scene_node_set_enabled(&window->float_tree->node, show);
+	}
+}
+
+static void handle_desktop_changed(struct wl_listener *listener, void *data) {
+	struct flame_xshell *xshell = wl_container_of(listener, xshell, desktop_changed);
+	floats_update(xshell);
+}
+
 void xshell_windows_changed(struct flame_xshell *xshell) {
 	struct xs_window *root = xshell->xserver->root;
 	struct xs_window *x;
@@ -1124,6 +1181,7 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 			window_destroy(window);
 		}
 	}
+	floats_update(xshell);
 	desktop_notify(&xshell->server->desktop); // titles
 }
 
@@ -1296,6 +1354,8 @@ bool xshell_init(struct flame_xshell *xshell, struct flame_server *server,
 	}
 	listener_connect(&xshell->new_output, &server->outputs.events.new_frame,
 		handle_new_frame);
+	listener_connect(&xshell->desktop_changed, &server->desktop.events.changed,
+		handle_desktop_changed);
 	return true;
 }
 
@@ -1318,4 +1378,5 @@ void xshell_finish(struct flame_xshell *xshell) {
 	}
 	timer_finish(&xshell->msc_timer);
 	listener_disconnect(&xshell->new_output);
+	listener_disconnect(&xshell->desktop_changed);
 }
