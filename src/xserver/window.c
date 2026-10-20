@@ -502,6 +502,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 		}
 	}
 	xs_shm_detach_all(xserver, client);
+	xs_render_client_gone(xserver, client);
 	struct xs_fence *fence, *ftmp;
 	wl_list_for_each_safe(fence, ftmp, &xserver->fences, link) {
 		if (fence->owner == client) {
