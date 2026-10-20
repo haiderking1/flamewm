@@ -1,6 +1,7 @@
 // X drag and drop test client (XDND 5)
 //   xdnd source TEXT [secs]   a window; press in it and drag TEXT (UTF8_STRING, text/plain)
 //   xdnd target [secs]        a window; takes text drops, prints "dropped: TEXT", exits
+//   xdnd popup [secs]         an override-redirect window, like a menu
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -74,8 +75,12 @@ int main(int argc, char **argv) {
 	uint32_t values[] = {!strcmp(mode, "source") ? 0x2060c0u : 0x20a040u,
 		XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION
 		| XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_PROPERTY_CHANGE};
-	xcb_create_window(c, 24, w, s->root, 0, 0, 400, 300, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-		s->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, values);
+	bool popup = !strcmp(mode, "popup");
+	uint32_t popup_values[] = {values[0], 1, values[1]};
+	xcb_create_window(c, 24, w, s->root, popup ? 100 : 0, popup ? 100 : 0, 400, 300, 0,
+		XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual, popup
+		? XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK
+		: XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, popup ? popup_values : values);
 	xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, strlen(mode), mode);
 	if (!strcmp(mode, "target")) {
 		uint32_t version = 5;

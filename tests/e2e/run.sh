@@ -119,5 +119,19 @@ $CTL workspace 1 > /dev/null
 sleep 0.3
 echo back: \$($BIN/xwins | grep target)" "hidden: target -32000,-32000" "back: target 8,8"
 
+case_run "focus and workspaces with X menus open: flame keeps up, menus stay on top" "
+$BIN/xdnd target 12 > /dev/null 2>&1 &
+sleep 0.5
+$BIN/xdnd target 12 > /dev/null 2>&1 &
+sleep 0.5
+$BIN/xdnd popup 12 > /dev/null 2>&1 &
+$BIN/xdnd popup 12 > /dev/null 2>&1 &
+sleep 0.8
+for i in 1 2 3 4 5; do
+	$CTL focus next > /dev/null; $CTL workspace 2 > /dev/null; $CTL workspace 1 > /dev/null
+done
+timeout 2 $CTL state > /dev/null && echo responsive
+$BIN/xwins | tail -2 | grep -c popup | sed 's/^/popups on top: /'" "responsive" "popups on top: 2"
+
 rm -rf "$WORK"
 exit $failed
