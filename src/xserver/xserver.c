@@ -671,6 +671,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 		return false;
 	}
 	wl_list_init(&xserver->xi_selects);
+	wl_list_init(&xserver->shape_selects);
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
 	xserver->last_input = xserver->monitors_time;
@@ -832,6 +833,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	xs_render_finish(xserver);
 	xs_randr_client_gone(xserver, NULL);
 	xs_xi_client_gone(xserver, NULL);
+	xs_shape_client_gone(xserver, NULL);
 	xs_xkb_finish(xserver);
 	xs_selection_finish(xserver);
 	free(xserver->monitors);

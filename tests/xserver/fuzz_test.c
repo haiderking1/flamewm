@@ -303,7 +303,7 @@ int main(void) {
 			connections);
 		return 0;
 	}
-	// the extension opcodes flame has: 128 to 140
+	// the extension opcodes flame has: 128 to 146
 	while (sent < rounds) {
 		int fd = connect_x(display);
 		if (fd < 0 || !setup(fd)) {
@@ -315,7 +315,7 @@ int main(void) {
 		int per = 200 + (int)(rnd() % 2000);
 		for (int i = 0; i < per && sent < rounds; i++, sent++) {
 			uint8_t req[1024] = {0};
-			uint8_t opcode = rnd() % 3 ? (uint8_t)(1 + rnd() % 127) : (uint8_t)(128 + rnd() % 13);
+			uint8_t opcode = rnd() % 3 ? (uint8_t)(1 + rnd() % 127) : (uint8_t)(128 + rnd() % 19);
 			uint16_t units = (uint16_t)(1 + rnd() % 32);
 			if (rnd() % 50 == 0) {
 				units = (uint16_t)(rnd() % 256); // a length that lies

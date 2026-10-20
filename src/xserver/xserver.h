@@ -79,6 +79,8 @@ struct xs_window {
 	bool damaged;
 	// something real was drawn since it mapped: flame shows it from then on
 	bool painted;
+	// SHAPE: bounding, clip, input. NULL for its plain rectangle
+	pixman_region32_t *shapes[3];
 };
 
 enum {
@@ -344,6 +346,7 @@ struct flame_xserver {
 	// wayland's axis units), wheel notches building up, and whether XI2
 	// clients have seen the valuators since the pointer came in
 	struct wl_list xi_selects;
+	struct wl_list shape_selects; // shape.c's
 	double scroll[2], scroll_notches[2];
 	bool scroll_primed;
 	// XKB, see xkb.c: flame's keymap worked out for X, the keyboard's state,

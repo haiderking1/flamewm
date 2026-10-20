@@ -114,6 +114,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 	xs_present_window_gone(xserver, window->id);
 	xs_randr_window_gone(xserver, window->id);
 	xs_xi_window_gone(xserver, window->id);
+	xs_shape_window_gone(xserver, window);
 	xs_draw_window_freed(window);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
@@ -267,7 +268,7 @@ struct xs_window *xs_window_child_at(struct xs_window *window, int x, int y) {
 		xs_window_origin(child, &cx, &cy);
 		int b = child->border;
 		if (x >= cx - b && y >= cy - b && x < cx + child->width + b
-				&& y < cy + child->height + b) {
+				&& y < cy + child->height + b && xs_shape_contains(child, x - cx, y - cy)) {
 			return child;
 		}
 	}
@@ -509,6 +510,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	xs_render_client_gone(xserver, client);
 	xs_randr_client_gone(xserver, client);
 	xs_xi_client_gone(xserver, client);
+	xs_shape_client_gone(xserver, client);
 	struct xs_fence *fence, *ftmp;
 	wl_list_for_each_safe(fence, ftmp, &xserver->fences, link) {
 		if (fence->owner == client) {

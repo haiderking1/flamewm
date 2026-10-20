@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <xcb/dpms.h>
 #include <xcb/screensaver.h>
+#include <xcb/shape.h>
 #include <xcb/xcb.h>
 #include <xcb/xinerama.h>
 #include <xcb/xtest.h>
@@ -96,6 +97,54 @@ static void test_xtest(xcb_connection_t *c, xcb_screen_t *s) {
 	CHECK(buttons == 1);
 }
 
+// half a window takes input: the pointer over the other half finds what's
+// below it
+static void test_shape(xcb_connection_t *c, xcb_screen_t *s) {
+	const xcb_query_extension_reply_t *ext = xcb_get_extension_data(c, &xcb_shape_id);
+	CHECK(ext && ext->present);
+	xcb_window_t w = xcb_generate_id(c);
+	xcb_create_window(c, 24, w, s->root, 300, 300, 200, 100, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+		s->root_visual, 0, NULL);
+	xcb_map_window(c, w);
+	xcb_shape_select_input(c, w, 1);
+	xcb_rectangle_t left = {0, 0, 100, 100};
+	xcb_shape_rectangles(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT, 0, w, 0, 0, 1, &left);
+	free(xcb_get_input_focus_reply(c, xcb_get_input_focus(c), NULL));
+	int notifies = 0;
+	xcb_generic_event_t *e;
+	while ((e = xcb_poll_for_event(c))) {
+		notifies += ext && (e->response_type & 0x7f) == ext->first_event;
+		free(e);
+	}
+	CHECK(notifies == 1);
+	harness("motion 350 350");
+	xcb_query_pointer_reply_t *p = xcb_query_pointer_reply(c, xcb_query_pointer(c, s->root),
+		NULL);
+	CHECK(p && p->child == w);
+	free(p);
+	harness("motion 450 350");
+	p = xcb_query_pointer_reply(c, xcb_query_pointer(c, s->root), NULL);
+	CHECK(p && p->child != w);
+	free(p);
+	xcb_shape_get_rectangles_reply_t *r = xcb_shape_get_rectangles_reply(c,
+		xcb_shape_get_rectangles(c, w, XCB_SHAPE_SK_INPUT), NULL);
+	CHECK(r && r->rectangles_len == 1);
+	if (r) {
+		xcb_rectangle_t *rect = xcb_shape_get_rectangles_rectangles(r);
+		CHECK(rect->width == 100 && rect->height == 100);
+	}
+	free(r);
+	xcb_shape_query_extents_reply_t *q = xcb_shape_query_extents_reply(c,
+		xcb_shape_query_extents(c, w), NULL);
+	CHECK(q && !q->bounding_shaped && q->bounding_shape_extents_width == 200);
+	free(q);
+	// back to a rectangle
+	xcb_shape_mask(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT, w, 0, 0, XCB_NONE);
+	p = xcb_query_pointer_reply(c, xcb_query_pointer(c, s->root), NULL);
+	CHECK(p && p->child == w);
+	free(p);
+}
+
 int main(void) {
 	const char *fds = getenv("HARNESS_FDS");
 	if (!fds || sscanf(fds, "%d %d", &to_harness, &from_harness) != 2) {
@@ -110,6 +159,7 @@ int main(void) {
 	test_xinerama(c);
 	test_idle(c, s);
 	test_xtest(c, s);
+	test_shape(c, s);
 	xcb_disconnect(c);
 	if (failures) {
 		fprintf(stderr, "misc_test: %d failed\n", failures);
