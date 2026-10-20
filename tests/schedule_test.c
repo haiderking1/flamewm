@@ -49,7 +49,7 @@ static void test_deadline_window(void) {
 	schedule_submitted(&s, &a, -MS);
 	CHECK(schedule_presented(&s, 0, 0) == &a);
 	schedule_submitted(&s, &b, 1 * MS);
-	schedule_callbacks_sent(&s); // a submission's callbacks are due at once
+	schedule_callbacks_sent(&s, 1 * MS); // a submission's callbacks are due at once
 	schedule_request_redraw(&s);
 	int64_t lead = schedule_lead(&s); // 1 + 1 + 0.5ms to start
 	CHECK(lead == 2500000LL);
@@ -102,53 +102,79 @@ static void test_idle_has_no_timer(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
 	schedule_submitted(&s, &a, 0);
+	schedule_callbacks_sent(&s, 0);
 	schedule_presented(&s, PERIOD, PERIOD);
-	schedule_callbacks_sent(&s);
+	schedule_callbacks_sent(&s, PERIOD); // the flip revisited the cycle
 	// nothing pending, nothing asked for: nothing to wake up for
 	CHECK(schedule_deadline(&s, PERIOD) == 0);
 	// a pending flip without a request: only its watchdog
 	schedule_request_redraw(&s);
 	schedule_submitted(&s, &b, 2 * PERIOD);
-	schedule_callbacks_sent(&s);
+	schedule_callbacks_sent(&s, 2 * PERIOD);
 	CHECK(schedule_deadline(&s, 2 * PERIOD) == 2 * PERIOD + SCHEDULE_WATCHDOG_NS);
 }
 
 static void test_callbacks(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_IMMEDIATE, PERIOD);
-	// a submission starts a cycle at once
+	// a submission starts a new cycle at once
 	schedule_submitted(&s, &a, 0);
-	CHECK(schedule_callbacks_due(&s, 0));
-	schedule_callbacks_sent(&s);
+	CHECK(schedule_callbacks_due(&s, 0) && schedule_callbacks_new_cycle(&s, 0));
+	schedule_callbacks_sent(&s, 0);
 	CHECK(!schedule_callbacks_due(&s, 0));
+	// a plain flip revisits it: only latecomers get a turn
 	schedule_presented(&s, PERIOD, PERIOD);
-	// nothing changed: one wake on the grid, not now, not a pageflip
+	CHECK(schedule_callbacks_due(&s, PERIOD) && !schedule_callbacks_new_cycle(&s, PERIOD));
+	schedule_callbacks_sent(&s, PERIOD);
+	// nothing changed: one wake on the grid, not a pageflip
 	schedule_request_redraw(&s);
 	schedule_empty(&s, PERIOD + MS);
-	CHECK(!schedule_callbacks_due(&s, PERIOD + MS));
 	CHECK(s.callbacks_wake == 2 * PERIOD);
+	CHECK(!schedule_callbacks_new_cycle(&s, PERIOD + MS)); // revisit now
+	schedule_callbacks_sent(&s, PERIOD + MS);
 	CHECK(schedule_deadline(&s, PERIOD + MS) == 2 * PERIOD);
-	// another empty pass doesn't move it
+	// another empty pass in the same refresh keeps the same wake
 	schedule_empty(&s, PERIOD + 2 * MS);
 	CHECK(s.callbacks_wake == 2 * PERIOD);
-	// late wakes still deliver, then it's gone
+	schedule_callbacks_sent(&s, PERIOD + 2 * MS);
+	// the grid moved on: that's a new cycle, even delivered late
 	CHECK(schedule_callbacks_due(&s, 2 * PERIOD + 3 * MS));
-	schedule_callbacks_sent(&s);
+	CHECK(schedule_callbacks_new_cycle(&s, 2 * PERIOD + 3 * MS));
+	schedule_callbacks_sent(&s, 2 * PERIOD + 3 * MS);
 	CHECK(schedule_deadline(&s, 3 * PERIOD) == 0);
+	// an empty pass landing after the wake expired starts the new cycle too
+	schedule_empty(&s, 3 * PERIOD + MS);
+	schedule_callbacks_sent(&s, 3 * PERIOD + MS);
+	CHECK(s.callbacks_wake == 4 * PERIOD);
+	schedule_empty(&s, 4 * PERIOD + MS);
+	CHECK(schedule_callbacks_new_cycle(&s, 4 * PERIOD + MS));
 
 	// a successor's preparation doesn't wake clients, its promotion does
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
 	schedule_submitted(&s, &a, 0);
-	schedule_callbacks_sent(&s);
+	schedule_callbacks_sent(&s, 0);
 	schedule_queued(&s, &b);
 	CHECK(!schedule_callbacks_due(&s, MS));
 	schedule_presented(&s, PERIOD, PERIOD);
-	CHECK(!schedule_callbacks_due(&s, PERIOD));
+	CHECK(!schedule_callbacks_due(&s, PERIOD)); // promotion is coming, not a revisit
 	schedule_promoted(&s, PERIOD);
-	CHECK(schedule_callbacks_due(&s, PERIOD));
-	// an empty pass never downgrades a cycle that's already due
+	CHECK(schedule_callbacks_new_cycle(&s, PERIOD));
+	// an empty pass never downgrades a cycle that's already new
 	schedule_empty(&s, PERIOD);
-	CHECK(schedule_callbacks_due(&s, PERIOD) && s.callbacks_wake == 0);
+	CHECK(schedule_callbacks_new_cycle(&s, PERIOD));
+}
+
+static void test_clock_only_moves_forward(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
+	schedule_submitted(&s, &a, 0);
+	schedule_presented(&s, 10 * PERIOD, 10 * PERIOD);
+	CHECK(s.vblank == 10 * PERIOD);
+	schedule_submitted(&s, &b, 10 * PERIOD + MS);
+	// a stale timestamp from an older flip doesn't drag the grid back
+	schedule_presented(&s, 5 * PERIOD, 11 * PERIOD);
+	CHECK(s.vblank == 10 * PERIOD);
+	CHECK(schedule_next_vblank(&s, 11 * PERIOD + MS) == 12 * PERIOD);
 }
 
 static void test_estimates(void) {
@@ -231,6 +257,7 @@ int main(void) {
 	test_unexpected_flip();
 	test_idle_has_no_timer();
 	test_callbacks();
+	test_clock_only_moves_forward();
 	test_estimates();
 	test_adaptive_hysteresis();
 	test_watchdog();

@@ -16,6 +16,15 @@
 //   successor near the predicted pageflip, below 1/2 it goes back
 // - deadline: always that overlap window, for comparing
 
+// frame callbacks come in cycles. a new one (a submission, or the refresh
+// grid moving on) gives every visible surface one turn, the current one only
+// catches surfaces that haven't had theirs yet, so nobody wakes twice a refresh
+enum schedule_cycle {
+	SCHEDULE_CYCLE_NONE,
+	SCHEDULE_CYCLE_CURRENT,
+	SCHEDULE_CYCLE_NEW,
+};
+
 enum schedule_policy {
 	SCHEDULE_ADAPTIVE,
 	SCHEDULE_IMMEDIATE,
@@ -48,8 +57,8 @@ struct schedule {
 	// render lead estimates, see schedule_observe_*
 	int64_t cpu, gpu;
 
-	// frame callbacks: due right now, or a wake on the refresh grid
-	bool callbacks_due;
+	// frame callbacks: a cycle due right now, and a wake on the refresh grid
+	enum schedule_cycle cycle;
 	int64_t callbacks_wake;
 };
 
@@ -81,9 +90,10 @@ void schedule_queued(struct schedule *schedule, void *ticket);
 void schedule_empty(struct schedule *schedule, int64_t now);
 
 // the pending frame flipped. kernel is its timestamp (0 when unknown, now is
-// used without claiming hardware accuracy). returns the finished ticket, NULL
-// for a flip nobody was waiting for. a queued successor stays queued: submit
-// it, then schedule_promoted with the actual submit time
+// used without claiming hardware accuracy), the grid only ever moves forward.
+// returns the finished ticket, NULL for a flip nobody was waiting for. a
+// queued successor stays queued: submit it, then schedule_promoted with the
+// actual submit time. without one the current callback cycle comes due again
 void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now);
 void schedule_promoted(struct schedule *schedule, int64_t submit);
 // the successor's submission failed right away: it's returned, a fresh
@@ -95,7 +105,9 @@ void schedule_observe_cpu(struct schedule *schedule, int64_t ns);
 void schedule_observe_gpu(struct schedule *schedule, int64_t ns);
 
 bool schedule_callbacks_due(const struct schedule *schedule, int64_t now);
-void schedule_callbacks_sent(struct schedule *schedule);
+// the due callbacks start a new cycle (true) or revisit the current one
+bool schedule_callbacks_new_cycle(const struct schedule *schedule, int64_t now);
+void schedule_callbacks_sent(struct schedule *schedule, int64_t now);
 
 // the earliest moment something is due: the render window, a callback wake
 // or the watchdog. 0 for nothing at all

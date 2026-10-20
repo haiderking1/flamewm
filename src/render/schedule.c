@@ -92,13 +92,29 @@ bool schedule_render_due(const struct schedule *schedule, int64_t now) {
 	return schedule_overlapping(schedule) && now >= render_window(schedule);
 }
 
+static bool wake_expired(const struct schedule *schedule, int64_t now) {
+	return schedule->callbacks_wake && now >= schedule->callbacks_wake;
+}
+
+// a real handoff to KMS: everyone gets a new turn
+static void new_cycle(struct schedule *schedule) {
+	schedule->cycle = SCHEDULE_CYCLE_NEW;
+	schedule->callbacks_wake = 0;
+}
+
+// a flip or an empty pass: catch whoever hasn't had a turn. never downgrades
+// a new cycle that's already due
+static void current_cycle(struct schedule *schedule) {
+	if (schedule->cycle == SCHEDULE_CYCLE_NONE) {
+		schedule->cycle = SCHEDULE_CYCLE_CURRENT;
+	}
+}
+
 void schedule_submitted(struct schedule *schedule, void *ticket, int64_t now) {
 	schedule->pending = ticket;
 	schedule->pending_submit = now;
 	schedule->redraw = false;
-	// an accepted submission starts a new callback cycle right away
-	schedule->callbacks_due = true;
-	schedule->callbacks_wake = 0;
+	new_cycle(schedule);
 }
 
 void schedule_queued(struct schedule *schedule, void *ticket) {
@@ -109,21 +125,31 @@ void schedule_queued(struct schedule *schedule, void *ticket) {
 
 void schedule_empty(struct schedule *schedule, int64_t now) {
 	schedule->redraw = false;
-	// one wake on the refresh grid. a cycle that's already due or armed
-	// stays as it is, a late wake doesn't move the grid
-	if (!schedule->callbacks_due && !schedule->callbacks_wake) {
-		schedule->callbacks_wake = schedule_next_vblank(schedule, now);
+	// the grid moved on since the last wake: that's a new cycle (rendering and
+	// an expired wake can land in the same dispatch)
+	if (wake_expired(schedule, now)) {
+		schedule->cycle = SCHEDULE_CYCLE_NEW;
 	}
+	// the next wake on the grid, nothing gets flipped for it
+	schedule->callbacks_wake = schedule_next_vblank(schedule, now);
+	current_cycle(schedule);
 }
 
 void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now) {
 	if (!schedule->pending) {
 		return NULL; // nobody waited for this one, the clock stays
 	}
-	schedule->vblank = kernel > 0 ? kernel : now;
-	schedule->have_vblank = true;
+	int64_t anchor = kernel > 0 ? kernel : now;
+	// a late or out of order timestamp never drags the grid backwards
+	if (!schedule->have_vblank || anchor > schedule->vblank) {
+		schedule->vblank = anchor;
+		schedule->have_vblank = true;
+	}
 	void *ticket = schedule->pending;
 	schedule->pending = NULL;
+	if (!schedule->queued) {
+		current_cycle(schedule);
+	}
 	return ticket;
 }
 
@@ -132,8 +158,8 @@ void schedule_promoted(struct schedule *schedule, int64_t submit) {
 	schedule->queued = NULL;
 	// its own watchdog, starting from the real handoff
 	schedule->pending_submit = submit;
-	schedule->callbacks_due = true;
-	schedule->callbacks_wake = 0;
+	// preparing it didn't wake anyone, reaching KMS does
+	new_cycle(schedule);
 }
 
 void *schedule_discard_queued(struct schedule *schedule) {
@@ -183,13 +209,19 @@ void schedule_observe_gpu(struct schedule *schedule, int64_t ns) {
 }
 
 bool schedule_callbacks_due(const struct schedule *schedule, int64_t now) {
-	return schedule->active && (schedule->callbacks_due
-		|| (schedule->callbacks_wake && now >= schedule->callbacks_wake));
+	return schedule->active
+		&& (schedule->cycle != SCHEDULE_CYCLE_NONE || wake_expired(schedule, now));
 }
 
-void schedule_callbacks_sent(struct schedule *schedule) {
-	schedule->callbacks_due = false;
-	schedule->callbacks_wake = 0;
+bool schedule_callbacks_new_cycle(const struct schedule *schedule, int64_t now) {
+	return schedule->cycle == SCHEDULE_CYCLE_NEW || wake_expired(schedule, now);
+}
+
+void schedule_callbacks_sent(struct schedule *schedule, int64_t now) {
+	schedule->cycle = SCHEDULE_CYCLE_NONE;
+	if (wake_expired(schedule, now)) {
+		schedule->callbacks_wake = 0;
+	}
 }
 
 static void earliest(int64_t *best, int64_t candidate) {
@@ -210,7 +242,7 @@ int64_t schedule_deadline(const struct schedule *schedule, int64_t now) {
 			earliest(&best, render_window(schedule));
 		}
 	}
-	if (schedule->callbacks_due) {
+	if (schedule->cycle != SCHEDULE_CYCLE_NONE) {
 		earliest(&best, now);
 	}
 	earliest(&best, schedule->callbacks_wake);
@@ -230,7 +262,7 @@ void schedule_pause(struct schedule *schedule, void **pending, void **queued) {
 	schedule->pending = NULL;
 	schedule->queued = NULL;
 	schedule->redraw = false;
-	schedule->callbacks_due = false;
+	schedule->cycle = SCHEDULE_CYCLE_NONE;
 	schedule->callbacks_wake = 0;
 	schedule->active = false;
 }
@@ -239,7 +271,7 @@ void schedule_resume(struct schedule *schedule) {
 	schedule->active = true;
 	schedule->have_vblank = false;
 	schedule->redraw = true;
-	schedule->callbacks_due = false;
+	schedule->cycle = SCHEDULE_CYCLE_NONE;
 	schedule->callbacks_wake = 0;
 	reset_budget(schedule);
 }
