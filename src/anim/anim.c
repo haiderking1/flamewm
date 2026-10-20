@@ -3,6 +3,10 @@
 #include <math.h>
 
 #include "core/server.h"
+#include "util/timer.h"
+
+// this long without a frame and the watchdog steps them
+#define STALL_MS 100
 
 // ---- curves ----
 
@@ -64,12 +68,45 @@ double lerp(double a, double b, double t) {
 void anims_init(struct flame_anims *anims, struct flame_server *server) {
 	anims->server = server;
 	wl_list_init(&anims->running);
+	anims->watchdog = NULL;
+	anims->last_tick = 0;
 }
 
 void anims_finish(struct flame_anims *anims) {
 	while (!wl_list_empty(&anims->running)) {
 		struct flame_anim *anim = wl_container_of(anims->running.next, anim, link);
 		anim_cancel(anim);
+	}
+	if (anims->watchdog) {
+		wl_event_source_remove(anims->watchdog);
+		anims->watchdog = NULL;
+	}
+}
+
+static int handle_watchdog(void *data) {
+	struct flame_anims *anims = data;
+	if (wl_list_empty(&anims->running)) {
+		return 0;
+	}
+	int64_t now = now_ns();
+	if (now - anims->last_tick >= (int64_t)STALL_MS * 1000000) {
+		anims_tick(anims, now);
+	}
+	if (!wl_list_empty(&anims->running)) {
+		wl_event_source_timer_update(anims->watchdog, STALL_MS);
+	}
+	return 0;
+}
+
+static void watch(struct flame_anims *anims) {
+	if (anims->server->terminating) {
+		return; // the loop's going away
+	}
+	if (!anims->watchdog) {
+		anims->watchdog = wl_event_loop_add_timer(anims->server->loop, handle_watchdog, anims);
+	}
+	if (anims->watchdog) {
+		wl_event_source_timer_update(anims->watchdog, STALL_MS);
 	}
 }
 
@@ -121,12 +158,14 @@ void anim_start(struct flame_anims *anims, struct flame_anim *anim, int duration
 	// its first step is the next frame's: show where it starts
 	anim->step(anim, 0, 0);
 	outputs_schedule_frame(&anims->server->outputs);
+	watch(anims);
 }
 
 void anims_tick(struct flame_anims *anims, int64_t target) {
 	if (wl_list_empty(&anims->running)) {
 		return;
 	}
+	anims->last_tick = now_ns();
 	// steps can start, cancel and free animations: one at a time, each
 	// taken off the list before its step
 	struct wl_list due;
