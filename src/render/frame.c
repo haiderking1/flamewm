@@ -572,7 +572,7 @@ static void send_callbacks(struct flame_frame *frame, int64_t now) {
 	struct timespec when = ns_timespec(now);
 	// prev is the last frame built, the one that just went out
 	feedback_frame_done(&frame->prev, &when);
-	schedule_callbacks_sent(&frame->schedule);
+	schedule_callbacks_sent(&frame->schedule, now);
 	if (frame->hooks.callbacks_sent) {
 		frame->hooks.callbacks_sent(frame->hooks.data, &when);
 	}
