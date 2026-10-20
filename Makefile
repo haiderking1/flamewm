@@ -4,6 +4,7 @@ VERSION := 0.1.0-dev
 PREFIX  ?= /usr/local
 BUILD   ?= build
 TARGET  := $(BUILD)/flamewm
+CTL     := $(BUILD)/flamectl
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -37,7 +38,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET)
+all: $(TARGET) $(CTL)
 
 $(TARGET): $(OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -45,6 +46,11 @@ $(TARGET): $(OBJS)
 $(BUILD)/obj/%.o: src/%.c | $(PROTO_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(FLAME_CFLAGS) -c -o $@ $<
+
+# the ipc client, plain libc
+$(CTL): tools/flamectl/flamectl.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 $(OPT) $(WARN) -D_POSIX_C_SOURCE=200809L $(SAN) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 $(BUILD)/gen/%-protocol.h: protocols/%.xml
 	@mkdir -p $(dir $@)
@@ -70,6 +76,7 @@ clangd: $(PROTO_HEADERS)
 
 install: release
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
+	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
 
 clean:
 	rm -rf build build-asan build-release

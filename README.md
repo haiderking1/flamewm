@@ -36,7 +36,11 @@ src/
   input/        seat, keyboards, cursor
   bindings/     keybind matching + the actions they run
   config/       compiled in defaults, lua later
-  util/         listener helpers, spawn, macros
+  ipc/          flame's own socket for bars and scripts: commands in, state out
+  util/         listener helpers, spawn, macros, string buffers
+
+tools/
+  flamectl/     the ipc from a shell
 
 protocols/      protocol xml wlroots doesn't ship headers for, generated at build
 ```
@@ -76,10 +80,40 @@ window focuses it, a window that moves under a still cursor doesn't. holding
 a mouse button, an open launcher or a fullscreen window keep focus where it is.
 `focus_follows_mouse` in `config/defaults.c` turns it off.
 
+## ipc
+
+flame has its own socket, nothing third party in between. everything flame
+starts gets it in `$FLAMEWM_SOCKET` (`$XDG_RUNTIME_DIR/flamewm.<wayland display>.sock`).
+one line per message: send a command, get `{"ok":true}` or
+`{"ok":false,"error":"..."}` back.
+
+| command | does |
+| --- | --- |
+| `subscribe` | the state now, and again every time it changes |
+| `state` | the state now, once |
+| `workspace <1-10>` | go there |
+| `movetoworkspace <1-10>` | send the focused window there |
+| `focus next` / `focus prev` | |
+| `fullscreen` | toggle it on the focused window |
+| `close` | close the focused window |
+| `quit` | |
+
+the state is one json line:
+
+```json
+{"event":"state","workspace":1,
+ "workspaces":[{"id":1,"name":"1","windows":2,"active":true,"fullscreen":false}, ...],
+ "window":{"app_id":"foot","title":"~","fullscreen":false}}
+```
+
+`flamectl` does it from a shell: `flamectl workspace 3`, `flamectl subscribe`.
+quickshell can talk to the socket straight away with a `Socket`.
+
 ## status
 
 single output, bspwm tiling only. xdg-shell and layer-shell (waybar, rofi,
-fuzzel, swaybg, mako...). no floating, no fullscreen yet. no xwayland on purpose.
+fuzzel, swaybg, mako...), fullscreen, 10 workspaces with an ipc socket for
+bars. no floating yet. no xwayland on purpose.
 
 ## license
 
