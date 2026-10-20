@@ -55,7 +55,9 @@ void layers_update_focus(struct flame_layers *layers);
 bool layers_keyboard_locked(struct flame_layers *layers);
 // a window got focused, an on demand layer lets go of the keyboard
 void layers_drop_keyboard(struct flame_layers *layers);
-void layers_click(struct flame_layers *layers, struct wlr_surface *surface);
+// clicked, or hovered with focus follows mouse: a layer that takes the
+// keyboard on demand gets it
+void layers_offer_keyboard(struct flame_layers *layers, struct wlr_surface *surface);
 
 struct flame_layer_surface *layer_surface_from_wlr(struct wlr_surface *surface);
 

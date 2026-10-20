@@ -52,6 +52,7 @@ const struct flame_config flame_default_config = {
 	.repeat_delay = 250,
 
 	.drag_modifier = MOD,
+	.focus_follows_mouse = true,
 
 	.cursor_theme = NULL,
 	.cursor_size = 24,

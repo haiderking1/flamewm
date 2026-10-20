@@ -62,9 +62,10 @@ void layers_drop_keyboard(struct flame_layers *layers) {
 	layers->focused = NULL;
 }
 
-void layers_click(struct flame_layers *layers, struct wlr_surface *surface) {
+void layers_offer_keyboard(struct flame_layers *layers, struct wlr_surface *surface) {
 	struct flame_layer_surface *layer = layer_surface_from_wlr(surface);
-	if (layer && wants_keyboard(layer) && !layers_keyboard_locked(layers)) {
+	if (layer && layer != layers->focused && wants_keyboard(layer)
+			&& !layers_keyboard_locked(layers)) {
 		give(layers, layer);
 	}
 }
