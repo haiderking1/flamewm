@@ -87,6 +87,30 @@ test: $(TESTS) $(BUILD)/tests/harness $(XTESTS)
 	@for t in $(TESTS); do $$t || exit 1; done
 	@for t in $(XTESTS); do $(BUILD)/tests/harness $$t || exit 1; done
 
+# end to end: headless flames, real X and wayland clients, fake pointer input.
+# the clipboard and drag and drop every way. needs wl-clipboard (deps.md)
+E2E := $(BUILD)/e2e
+XDG_SHELL_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/stable/xdg-shell/xdg-shell.xml
+
+$(E2E)/xdg-shell-client-protocol.h: $(XDG_SHELL_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/xdg-shell-protocol.c: $(XDG_SHELL_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
+	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
+		$(shell pkg-config --cflags --libs wayland-client)
+
+$(E2E)/%: tests/e2e/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
+
+e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip
+	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
+
 # address + ub sanitizers, own build dir so objects never mix
 asan:
 	@$(MAKE) --no-print-directory BUILD=build-asan \
@@ -112,6 +136,6 @@ install: release
 clean:
 	rm -rf build build-asan build-release
 
-.PHONY: all asan release run clangd install clean test
+.PHONY: all asan release run clangd install clean test e2e
 
 -include $(OBJS:.o=.d)

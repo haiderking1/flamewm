@@ -37,12 +37,14 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
 ## tests
 
-`make test` only, flamewm never links these.
+`make test` and `make e2e` only, flamewm never links these.
 
 | dep | pkg-config | why |
 | --- | --- | --- |
 | libxcb + xcb-xinput, xcb-randr, xcb-xkb, xcb-xfixes (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` `xcb-xkb` `xcb-xfixes` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c` |
 | libxkbcommon-x11 (comes with `libxkbcommon`) | `xkbcommon-x11` | the XKB test reads the keymap back the way kitty and alacritty do |
+| wayland (client side) | `wayland-client` | `make e2e`: the wayland drag and drop client |
+| wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
 
 ## runtime
 
