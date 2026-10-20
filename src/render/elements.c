@@ -157,6 +157,27 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		wlr_surface_for_each_surface(surface_node->surface, collect_surface, collect);
 		collect->clip = NULL;
 		break;
+	case FLAME_NODE_BUFFER:;
+		struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
+		struct wlr_box buffer_box = {x, y, buffer->width, buffer->height};
+		if (!buffer->texture || wlr_box_empty(&buffer_box)) {
+			break;
+		}
+		if (!elements_push_texture(collect->list, buffer, buffer->texture, buffer->key,
+				buffer_box, collect->area)) {
+			collect->failed = true;
+			break;
+		}
+		if (collect->list->len > 0) {
+			struct flame_element *pushed = &collect->list->data[collect->list->len - 1];
+			if (pushed->id == buffer) {
+				pushed->opaque_texture = buffer->opaque;
+				pushed->buffer_node = buffer;
+				pushed->wait_timeline = buffer->wait_timeline;
+				pushed->wait_point = buffer->wait_point;
+			}
+		}
+		break;
 	}
 }
 
@@ -219,6 +240,11 @@ void elements_occlude(struct flame_element_list *list) {
 
 		if (element->type == FLAME_ELEMENT_RECT) {
 			if (element->color[3] >= 1.0f) {
+				pixman_region32_union_rect(&element->opaque, &element->opaque, clip.x,
+					clip.y, clip.width, clip.height);
+			}
+		} else if (element->type == FLAME_ELEMENT_TEXTURE) {
+			if (element->opaque_texture) {
 				pixman_region32_union_rect(&element->opaque, &element->opaque, clip.x,
 					clip.y, clip.width, clip.height);
 			}

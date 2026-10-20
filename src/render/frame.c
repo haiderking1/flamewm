@@ -140,6 +140,18 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	const struct wlr_output_event_present *event = data;
 	// a flip without a timestamp anchors on dispatch time instead
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
+	// buffer nodes drawn into that frame hear it made it
+	if (frame->pending_draw) {
+		struct flame_frame_presented presented = {
+			.draw_id = frame->pending_draw,
+			.presented = event->presented,
+			.when = timespec_ns(&event->when),
+			.seq = event->seq,
+			.refresh = event->refresh,
+		};
+		frame->pending_draw = 0;
+		wl_signal_emit_mutable(&frame->events.presented, &presented);
+	}
 }
 
 static bool commit(struct flame_frame *frame, struct wlr_output_state *state,
@@ -194,6 +206,7 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 		bool ok = commit(frame, &frame->queued, frame->queued_kind);
 		drop_queued(frame);
 		if (ok) {
+			frame->pending_draw = frame->queued_draw;
 			schedule_promoted(schedule, now_ns());
 			timing_successor(&frame->timing, true);
 		} else {
@@ -236,6 +249,8 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	frame->hooks = hooks;
 	frame->whole = true;
 	frame->callback_cycle = 1;
+	wl_signal_init(&frame->events.presented);
+	wl_signal_init(&frame->events.destroy);
 	wlr_damage_ring_init(&frame->ring);
 	pixman_region32_init(&frame->pending);
 	elements_init(&frame->prev);
@@ -295,6 +310,9 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 }
 
 void frame_finish(struct flame_frame *frame) {
+	if (frame->events.destroy.listener_list.next) {
+		wl_signal_emit_mutable(&frame->events.destroy, frame);
+	}
 	if (frame->scene_changed.link.next) {
 		listener_disconnect(&frame->scene_changed);
 		listener_disconnect(&frame->scene_damage);
@@ -397,10 +415,14 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	bool blend = pixman_region32_not_empty(&translucent);
 	pixman_region32_fini(&translucent);
 
-	// ours (the pointer) has nothing to wait for and nobody to give it back to
+	// textures of ours (the pointer) have nothing to wait for, buffer nodes
+	// (X11 windows) carry their own acquire point
 	bool client = element->type == FLAME_ELEMENT_SURFACE;
 	struct wlr_linux_drm_syncobj_surface_v1_state *sync =
 		client ? wlr_linux_drm_syncobj_v1_get_surface_state(element->surface) : NULL;
+	struct wlr_drm_syncobj_timeline *wait_timeline =
+		sync ? sync->acquire_timeline : element->wait_timeline;
+	uint64_t wait_point = sync ? sync->acquire_point : element->wait_point;
 	enum wl_output_transform transform = wlr_output_transform_compose(
 		wlr_output_transform_invert(element->transform), target->transform);
 	wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
@@ -410,11 +432,15 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 		.transform = transform,
 		.clip = &region,
 		.blend_mode = blend ? WLR_RENDER_BLEND_MODE_PREMULTIPLIED : WLR_RENDER_BLEND_MODE_NONE,
-		.wait_timeline = sync ? sync->acquire_timeline : NULL,
-		.wait_point = sync ? sync->acquire_point : 0,
+		.wait_timeline = wait_timeline,
+		.wait_point = wait_point,
 	});
 	if (client) {
 		sampled(frame, element->surface);
+	} else if (element->buffer_node && element->buffer_node->impl
+			&& element->buffer_node->impl->sampled) {
+		element->buffer_node->impl->sampled(element->buffer_node, frame, frame->draw_id,
+			frame->in_timeline, frame->in_point);
 	}
 	pixman_region32_fini(&region);
 }
@@ -468,6 +494,7 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	wlr_damage_ring_rotate_buffer(&frame->ring, buffer, &repaint);
 
 	frame->in_point++;
+	frame->draw_id++;
 	// everything this frame asks of the gpu, cursors included
 	gpu_time_begin(&frame->gpu);
 	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(frame->render->renderer,
@@ -643,6 +670,10 @@ static void render(struct flame_frame *frame, int64_t now) {
 			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
 		}
 
+		// what buffer nodes will hear about this frame, nothing new for a
+		// cursor move or a client buffer scanned out
+		uint64_t draw_id = kind == TIMING_COMPOSITED ? frame->draw_id : 0;
+
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
@@ -650,6 +681,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 			drew = commit(frame, &state, kind);
 			wlr_output_state_finish(&state);
 			if (drew) {
+				frame->pending_draw = draw_id;
 				schedule_submitted(schedule, &frame->submitted_ticket, now_ns());
 			} else {
 				frame->whole = true;
@@ -659,6 +691,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 			frame->queued = state;
 			frame->has_queued = true;
 			frame->queued_kind = kind;
+			frame->queued_draw = draw_id;
 			schedule_queued(schedule, &frame->queued_ticket);
 			timing_successor_prepared(&frame->timing);
 			drew = true;

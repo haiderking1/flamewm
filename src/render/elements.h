@@ -7,7 +7,9 @@
 #include <wayland-server-protocol.h>
 #include <wlr/util/box.h>
 
+struct flame_buffer_node;
 struct flame_scene;
+struct wlr_drm_syncobj_timeline;
 struct wlr_buffer;
 struct wlr_surface;
 struct wlr_texture;
@@ -41,6 +43,11 @@ struct flame_element {
 	struct wlr_buffer *buffer; // to tell a new buffer from the same one
 	// textures: what's on it. ours get recreated, maybe at the same address
 	const void *image;
+	bool opaque_texture;
+	// textures from buffer nodes: whose, and the gpu work to wait for
+	struct flame_buffer_node *buffer_node;
+	struct wlr_drm_syncobj_timeline *wait_timeline;
+	uint64_t wait_point;
 
 	// layout coords: what isn't covered by anything opaque above it, and
 	// what of it is opaque itself. filled by elements_occlude

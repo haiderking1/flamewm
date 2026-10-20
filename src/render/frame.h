@@ -21,6 +21,15 @@
 struct flame_render;
 struct wlr_session;
 
+// a frame reached the screen, see events.presented
+struct flame_frame_presented {
+	uint64_t draw_id; // what buffer nodes were told when they were drawn
+	bool presented; // false: it was dropped, never shown
+	int64_t when; // kernel flip timestamp, CLOCK_MONOTONIC ns
+	uint32_t seq; // vblank counter
+	int refresh; // ns, 0 for unknown
+};
+
 // what the output around a frame wants to hear about
 struct flame_frame_hooks {
 	void *data;
@@ -80,6 +89,15 @@ struct flame_frame {
 	// explicit sync: our drawing finished / KMS let go of a buffer
 	struct wlr_drm_syncobj_timeline *in_timeline, *out_timeline;
 	uint64_t in_point, out_point;
+
+	// every drawn frame gets a number, buffer nodes hear it when they're drawn
+	// and events.presented says when that number reached the screen
+	uint64_t draw_id;
+	uint64_t pending_draw, queued_draw; // the KMS slot's and the successor's
+	struct {
+		struct wl_signal presented; // struct flame_frame_presented
+		struct wl_signal destroy;
+	} events;
 
 	struct flame_frame_timing timing; // FLAME_FRAME_TIMING probes
 	struct flame_gpu_time gpu; // for the schedule's lead and the probes

@@ -111,6 +111,8 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	// this also advertises the wl_output global to clients
 	wlr_output_layout_add_auto(outputs->layout, wlr_output);
 
+	wl_signal_emit_mutable(&outputs->events.new_frame, &output->frames);
+
 	wlr_log(WLR_INFO, "output %s up: %dx%d@%.3fHz scale %.2f", wlr_output->name,
 		wlr_output->width, wlr_output->height, wlr_output->refresh / 1000.0, wlr_output->scale);
 }
@@ -132,6 +134,7 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 bool outputs_init(struct flame_outputs *outputs, struct flame_server *server) {
 	outputs->server = server;
 	wl_list_init(&outputs->list);
+	wl_signal_init(&outputs->events.new_frame);
 
 	outputs->layout = wlr_output_layout_create(server->display);
 	if (!outputs->layout) {

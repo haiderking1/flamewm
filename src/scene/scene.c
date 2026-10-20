@@ -110,6 +110,31 @@ struct flame_surface_node *scene_surface_create(struct flame_tree *parent,
 	return node;
 }
 
+struct flame_buffer_node *scene_buffer_create(struct flame_tree *parent,
+		const struct flame_buffer_node_impl *impl, void *data) {
+	struct flame_buffer_node *node = calloc(1, sizeof(*node));
+	if (!node) {
+		return NULL;
+	}
+	node_init(&node->node, FLAME_NODE_BUFFER, parent->node.scene, parent);
+	node->impl = impl;
+	node->data = data;
+	return node;
+}
+
+void scene_buffer_set(struct flame_buffer_node *node, struct wlr_texture *texture,
+		const void *key, int width, int height, bool opaque,
+		struct wlr_drm_syncobj_timeline *wait_timeline, uint64_t wait_point) {
+	node->texture = texture;
+	node->key = key;
+	node->width = width;
+	node->height = height;
+	node->opaque = opaque;
+	node->wait_timeline = wait_timeline;
+	node->wait_point = wait_point;
+	scene_changed(node->node.scene);
+}
+
 void scene_node_destroy(struct flame_node *node) {
 	if (!node) {
 		return;
@@ -131,6 +156,7 @@ void scene_node_destroy(struct flame_node *node) {
 		listener_disconnect(&surface->surface_destroy);
 		break;
 	case FLAME_NODE_RECT:
+	case FLAME_NODE_BUFFER:
 		break;
 	}
 
@@ -282,6 +308,16 @@ static struct flame_node *node_at(struct flame_node *node, int x, int y, double 
 			return node;
 		}
 		return NULL;
+	case FLAME_NODE_BUFFER:;
+		struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
+		struct wlr_box area = {x, y, buffer->width, buffer->height};
+		if (!buffer->texture || !wlr_box_contains_point(&area, lx, ly)) {
+			return NULL;
+		}
+		*surface = NULL;
+		*sx = lx - x;
+		*sy = ly - y;
+		return node;
 	}
 	return NULL;
 }
