@@ -64,10 +64,14 @@ struct xsel_dnd {
 	uint32_t last_x, last_y;
 };
 
+// one X drag as wayland sees it: which X window it is and what it offers
+// are its own, a second X drag can start while this one's drop is read
 struct xdnd_source {
 	struct wlr_data_source base;
 	struct xsel_dnd *dnd;
-	bool dropped;
+	uint32_t x_source; // the X app's window
+	struct wl_array targets; // uint32_t, one per mime type
+	bool dropped, finished;
 	struct wl_event_source *finish_idle;
 };
 
@@ -120,7 +124,7 @@ static void source_send(struct wlr_data_source *base, const char *mime, int32_t 
 		return;
 	}
 	xsel_fetch(dnd->owner, dnd->atoms.selection,
-		xsel_target_of(&dnd->x_mimes, &dnd->x_targets, mime), fd);
+		xsel_target_of(&base->mime_types, &source->targets, mime), fd);
 }
 
 static void source_accept(struct wlr_data_source *base, uint32_t serial, const char *mime) {
@@ -142,8 +146,9 @@ static void source_dnd_drop(struct wlr_data_source *base) {
 static void source_dnd_finish(struct wlr_data_source *base) {
 	struct xdnd_source *source = wl_container_of(base, source, base);
 	struct xsel_dnd *dnd = source->dnd;
-	if (dnd && dnd->x_source) {
-		send(dnd, dnd->x_source, dnd->atoms.finished, dnd->proxy->id, 1,
+	if (dnd && source->x_source && !source->finished) {
+		source->finished = true;
+		send(dnd, source->x_source, dnd->atoms.finished, dnd->proxy->id, 1,
 			action_atom(dnd, base->current_dnd_action), 0, 0);
 	}
 	if (!source->finish_idle && dnd) {
@@ -154,12 +159,19 @@ static void source_dnd_finish(struct wlr_data_source *base) {
 
 static void source_destroy(struct wlr_data_source *base) {
 	struct xdnd_source *source = wl_container_of(base, source, base);
+	struct xsel_dnd *dnd = source->dnd;
+	// dropped and never finished (the wayland app went, or dropped its
+	// offer): the X app is still waiting to hear, it didn't go through
+	if (dnd && source->dropped && !source->finished && source->x_source) {
+		send(dnd, source->x_source, dnd->atoms.finished, dnd->proxy->id, 0, 0, 0, 0);
+	}
 	if (source->finish_idle) {
 		wl_event_source_remove(source->finish_idle);
 	}
-	if (source->dnd && source->dnd->source == source) {
-		source->dnd->source = NULL;
+	if (dnd && dnd->source == source) {
+		dnd->source = NULL;
 	}
+	wl_array_release(&source->targets);
 	free(source);
 }
 
@@ -198,16 +210,28 @@ static bool start_wayland_drag(struct xsel_dnd *dnd, struct wlr_surface *surface
 		return false;
 	}
 	source->dnd = dnd;
+	source->x_source = dnd->x_source;
 	wlr_data_source_init(&source->base, &source_impl);
+	wl_array_init(&source->targets);
 	char **each;
+	size_t i = 0;
 	wl_array_for_each(each, &dnd->x_mimes) {
 		char **slot = wl_array_add(&source->base.mime_types, sizeof(*slot));
-		if (slot) {
-			*slot = strdup(*each);
+		uint32_t *target = wl_array_add(&source->targets, sizeof(*target));
+		if (!slot || !target || !(*slot = strdup(*each))) {
+			wlr_data_source_destroy(&source->base);
+			return false;
 		}
+		*target = ((uint32_t *)dnd->x_targets.data)[i++];
 	}
-	source->base.actions = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
-		| WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE | WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
+	// what the X app asked for: a copy stays a copy, a move can be a copy
+	// too, ask leaves it to the target
+	uint32_t action = wl_action_of(dnd, dnd->x_action);
+	source->base.actions = action == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+		? action : action | WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+	if (action == WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK) {
+		source->base.actions |= WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+	}
 	struct wlr_drag *drag = wlr_drag_create(client, &source->base, NULL);
 	if (!drag) {
 		wlr_data_source_destroy(&source->base);
@@ -301,6 +325,9 @@ static void x_drop(struct xsel_dnd *dnd, const uint32_t data[5]) {
 	bool accepted = drag && drag->focus && dnd->source && dnd->source->base.accepted
 		&& dnd->source->base.current_dnd_action;
 	if (!accepted) {
+		if (dnd->source) {
+			dnd->source->finished = true; // told here, not again on destroy
+		}
 		send(dnd, dnd->x_source, dnd->atoms.finished, dnd->proxy->id, 0, 0, 0, 0);
 		x_leave(dnd);
 		return;
@@ -367,9 +394,15 @@ static void wl_source_forget(struct xsel_dnd *dnd) {
 	dnd->wl_source = NULL;
 }
 
+static void wl_drag_end(struct xsel_dnd *dnd);
+
 static void handle_wl_source_destroy(struct wl_listener *listener, void *data) {
 	struct xsel_dnd *dnd = wl_container_of(listener, dnd, wl_source_destroy);
 	wl_source_forget(dnd);
+	// the drop the X app was reading has nothing behind it anymore
+	if (dnd->dropped) {
+		wl_drag_end(dnd);
+	}
 }
 
 static void wl_drag_end(struct xsel_dnd *dnd) {
@@ -406,6 +439,13 @@ static void x_target_leave(struct xsel_dnd *dnd) {
 			wlr_data_source_accept(source, 0, NULL);
 		}
 		wl_drag_end(dnd);
+	}
+}
+
+void xselection_dnd_drag_gone(struct flame_xselection *xselection) {
+	struct xsel_dnd *dnd = dnd_of(xselection);
+	if (dnd && !dnd->dropped) {
+		x_target_leave(dnd);
 	}
 }
 
@@ -505,14 +545,21 @@ bool xselection_dnd_over_x(struct flame_xselection *xselection, double lx, doubl
 	return true;
 }
 
+// the drop didn't go through: the wayland app hears cancelled, so a move
+// doesn't delete anything
+static void wl_drop_failed(struct xsel_dnd *dnd) {
+	struct wlr_data_source *source = dnd->wl_source;
+	wl_drag_end(dnd);
+	if (source) {
+		wlr_data_source_destroy(source);
+	}
+}
+
 static int handle_finish_timeout(void *data) {
 	struct xsel_dnd *dnd = data;
 	dnd->finish_timeout = NULL;
 	wlr_log(WLR_DEBUG, "xdnd: the X app never finished the drop");
-	if (dnd->wl_source) {
-		wlr_data_source_dnd_finish(dnd->wl_source);
-	}
-	wl_drag_end(dnd);
+	wl_drop_failed(dnd);
 	return 0;
 }
 
@@ -521,7 +568,9 @@ bool xselection_dnd_drop_x(struct flame_xselection *xselection, uint32_t button,
 	struct xsel_dnd *dnd = dnd_of(xselection);
 	struct wlr_seat *seat = dnd ? seat_of(dnd) : NULL;
 	struct wlr_drag *drag = seat ? seat->drag : NULL;
-	if (!dnd || !dnd->x_target || !drag || xselection_drag_is_x(drag)) {
+	// only the button the drag is held with drops, and only once
+	if (!dnd || !dnd->x_target || dnd->dropped || !drag || xselection_drag_is_x(drag)
+			|| button != seat->pointer_state.grab_button) {
 		return false;
 	}
 	if (!dnd->accepted || !drag->source) {
@@ -609,10 +658,18 @@ void xselection_client_message(struct flame_xselection *xselection, uint32_t win
 			send_position(dnd, 0);
 		}
 	} else if (type == dnd->atoms.finished && dnd->dropped) {
-		if (dnd->wl_source) {
-			wlr_data_source_dnd_finish(dnd->wl_source);
+		if (!(data[1] & 1)) {
+			wl_drop_failed(dnd); // the X app didn't take it
+			return;
+		}
+		struct wlr_data_source *finished = dnd->wl_source;
+		if (finished && data[2]) {
+			wlr_data_source_dnd_action(finished, wl_action_of(dnd, data[2]));
 		}
 		wl_drag_end(dnd);
+		if (finished) {
+			wlr_data_source_dnd_finish(finished);
+		}
 	}
 }
 
@@ -647,6 +704,9 @@ bool xsel_dnd_init(struct flame_xselection *xselection) {
 	uint32_t version = XDND_VERSION;
 	if (!dnd->proxy || !xserver_set_property(x, dnd->proxy, dnd->atoms.aware, dnd->atoms.atom,
 			32, &version, 1)) {
+		if (dnd->proxy) {
+			xserver_flame_window_destroy(x, dnd->proxy);
+		}
 		free(dnd);
 		return false;
 	}
