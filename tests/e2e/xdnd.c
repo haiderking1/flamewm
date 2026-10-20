@@ -2,6 +2,7 @@
 //   xdnd source TEXT [secs]   a window; press in it and drag TEXT (UTF8_STRING, text/plain)
 //   xdnd target [secs]        a window; takes text drops, prints "dropped: TEXT", exits
 //   xdnd popup [secs]         an override-redirect window, like a menu
+//   xdnd dialog [secs]        a dialog window (_NET_WM_WINDOW_TYPE_DIALOG), 400x300
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -82,6 +83,10 @@ int main(int argc, char **argv) {
 		? XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK
 		: XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, popup ? popup_values : values);
 	xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, strlen(mode), mode);
+	if (!strcmp(mode, "dialog")) {
+		xcb_atom_t type = atom("_NET_WM_WINDOW_TYPE"), dialog = atom("_NET_WM_WINDOW_TYPE_DIALOG");
+		xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, type, XCB_ATOM_ATOM, 32, 1, &dialog);
+	}
 	if (!strcmp(mode, "target")) {
 		uint32_t version = 5;
 		xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, aware, XCB_ATOM_ATOM, 32, 1, &version);

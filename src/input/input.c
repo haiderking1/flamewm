@@ -1,5 +1,6 @@
 #include "input/input.h"
 
+#include <stdlib.h>
 #include <wlr/backend.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
@@ -83,6 +84,9 @@ bool input_init(struct flame_input *input, struct flame_server *server) {
 		handle_new_input);
 	// there's always a pointer, with or without a mouse plugged in yet
 	input_update_capabilities(input);
+	if (getenv("FLAME_TEST_INPUT")) {
+		fake_keyboard_create(input);
+	}
 	listener_connect(&input->request_set_selection,
 		&input->seat->events.request_set_selection, handle_request_set_selection);
 	listener_connect(&input->request_set_primary_selection,
@@ -96,5 +100,6 @@ void input_finish(struct flame_input *input) {
 	listener_disconnect(&input->request_set_selection);
 	listener_disconnect(&input->request_set_primary_selection);
 	dnd_finish(&input->dnd);
+	fake_keyboard_destroy(input);
 	cursor_finish(&input->cursor);
 }

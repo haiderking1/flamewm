@@ -22,11 +22,12 @@ sleep 0.5
 export DISPLAY=\$FLAMEWM_X11_DISPLAY
 cd "$WORK"
 $script
+$CTL quit > /dev/null 2>&1
 EOF
 	chmod +x "$WORK/case.sh"
 	: > "$WORK/out"
-	timeout 30 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 "$FLAME" -s "$WORK/case.sh" \
-		> "$WORK/flame.log" 2>&1
+	timeout 30 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 "$FLAME" $CASE_ARGS \
+		-s "$WORK/case.sh" > "$WORK/flame.log" 2>&1
 	ok=1
 	for want in "$@"; do
 		grep -qF -- "$want" "$WORK/out" || ok=0
@@ -132,6 +133,53 @@ for i in 1 2 3 4 5; do
 done
 timeout 2 $CTL state > /dev/null && echo responsive
 $BIN/xwins | tail -2 | grep -c popup | sed 's/^/popups on top: /'" "responsive" "popups on top: 2"
+
+# x and y of an X window as xwins says, "X Y W H"
+XGEO="sed -n 's/.* \\(-*[0-9]*\\),\\(-*[0-9]*\\) \\([0-9]*\\)x\\([0-9]*\\)/\\1 \\2 \\3 \\4/p'"
+
+case_run "floating: an X dialog floats, centered at its own size" "
+$BIN/xdnd dialog 8 > /dev/null 2>&1 &
+sleep 0.8
+$BIN/xwins | grep dialog
+$CTL state | grep -o '\"floating\":[a-z]*'" "dialog 440,210 400x300" '"floating":true'
+
+case_run "floating: a fixed size wayland window floats" "
+$BIN/wldnd fixed '' 8 > /dev/null 2>&1 &
+sleep 0.8
+$CTL state | grep -o '\"floating\":[a-z]*,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0-9]*,\"height\":[0-9]*'" \
+	'"floating":true,"x":478,"y":238,"width":324,"height":244'
+
+case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
+$BIN/xdnd target 12 > /dev/null 2>&1 &
+sleep 0.8
+$CTL togglefloating > /dev/null
+sleep 0.3
+set -- \$($BIN/xwins | grep target | $XGEO)
+x=\$1; y=\$2; w=\$3; h=\$4
+$CTL state | grep -o '\"floating\":[a-z]*'
+$CTL key super press > /dev/null
+$CTL pointer move \$((x + 20)) \$((y + 20)) > /dev/null
+$CTL pointer button left press > /dev/null
+$CTL pointer move \$((x + 80)) \$((y + 60)) > /dev/null
+$CTL pointer button left release > /dev/null
+sleep 0.3
+set -- \$($BIN/xwins | grep target | $XGEO)
+echo moved by \$((\$1 - x)),\$((\$2 - y)) size \$((\$3 - w)),\$((\$4 - h))
+x=\$1; y=\$2; w=\$3; h=\$4
+$CTL pointer move \$((x + w - 10)) \$((y + h - 10)) > /dev/null
+$CTL pointer button right press > /dev/null
+$CTL pointer move \$((x + w + 40)) \$((y + h + 20)) > /dev/null
+sleep 0.1
+$CTL pointer button right release > /dev/null
+$CTL key super release > /dev/null
+sleep 0.5
+set -- \$($BIN/xwins | grep target | $XGEO)
+echo resized by \$((\$3 - w)),\$((\$4 - h)) moved \$((\$1 - x)),\$((\$2 - y))
+$CTL togglefloating > /dev/null
+sleep 0.3
+$CTL state | grep -o '\"floating\":[a-z]*,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0-9]*'" \
+	'"floating":true' "moved by 60,40 size 0,0" "resized by 50,30 moved 0,0" \
+	'"floating":false,"x":6,"y":6,"width":1268'
 
 rm -rf "$WORK"
 exit $failed

@@ -3,12 +3,14 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <wlr/util/box.h>
 
 struct flame_server;
 struct flame_view;
 struct tree_node;
 
-// mod + mouse on a tiled window, like hyprland and raven:
+// mod + mouse on a floating window moves it (left) or resizes it from the
+// nearest corner (right). on a tiled window, like hyprland and raven:
 // - left drag picks it up, it rides the cursor on top of everything, its slot
 //   stays empty, and dropping it on another window swaps the two
 // - right drag resizes in place: the edges nearest to where you grabbed follow
@@ -36,6 +38,9 @@ struct flame_drag {
 	double start_x, start_y; // cursor when it started
 	int origin_x, origin_y; // where the window sat when it started (move)
 	struct flame_drag_axis horizontal, vertical; // (resize)
+	// a floating window: its box when it started, which corner follows
+	struct wlr_box float_start;
+	bool float_right, float_bottom;
 	bool resize_pending; // the cursor moved since the last frame (resize)
 	// mouse buttons whose press we ate, so only their releases get eaten too
 	uint32_t swallowed;

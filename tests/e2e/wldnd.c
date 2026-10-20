@@ -1,6 +1,7 @@
 // wayland drag and drop test client
 //   wldnd source TEXT   a window; press a button in it and it drags TEXT (with an icon)
 //   wldnd target        a window; accepts text drops, prints "dropped: TEXT", exits
+//   wldnd fixed         a window that only comes in 320x240
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdbool.h>
@@ -282,6 +283,12 @@ int main(int argc, char **argv) {
 	toplevel = xdg_surface_get_toplevel(xs);
 	xdg_toplevel_add_listener(toplevel, &top_listener, NULL);
 	xdg_toplevel_set_title(toplevel, mode);
+	if (!strcmp(mode, "fixed")) {
+		xdg_toplevel_set_min_size(toplevel, 320, 240);
+		xdg_toplevel_set_max_size(toplevel, 320, 240);
+		width = 320;
+		height = 240;
+	}
 	wl_surface_commit(surface);
 	time_t end = time(NULL) + (argc > 3 ? atoi(argv[3]) : 15);
 	while (!done && time(NULL) < end) {

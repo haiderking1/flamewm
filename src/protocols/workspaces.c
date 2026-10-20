@@ -42,7 +42,7 @@ static void sync(struct flame_ext_workspaces *workspaces) {
 		// wlroots only tells clients about what actually changed
 		wlr_ext_workspace_handle_v1_set_active(workspaces->handles[i], active);
 		wlr_ext_workspace_handle_v1_set_hidden(workspaces->handles[i],
-			!active && wl_list_empty(&workspace->views));
+			!active && workspace_view_count(workspace) == 0);
 	}
 }
 

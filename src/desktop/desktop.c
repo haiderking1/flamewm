@@ -8,6 +8,7 @@
 
 bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	struct flame_tree *tiled = server->render.layers[FLAME_LAYER_TILED];
+	struct flame_tree *floating = server->render.layers[FLAME_LAYER_FLOATING];
 	struct flame_tree *fullscreen = server->render.layers[FLAME_LAYER_FULLSCREEN];
 
 	desktop->server = server;
@@ -20,7 +21,7 @@ bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	scene_node_set_enabled(&desktop->staging->node, false);
 
 	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
-		workspace_init(&desktop->workspaces[i], i, tiled, fullscreen);
+		workspace_init(&desktop->workspaces[i], i, tiled, floating, fullscreen);
 	}
 	desktop->active = &desktop->workspaces[0];
 	workspace_set_visible(desktop->active, true);
@@ -75,6 +76,11 @@ void desktop_arrange(struct flame_desktop *desktop) {
 	wl_list_for_each(view, &workspace->views, link) {
 		bool fullscreen = view == owner && view->fullscreen_wanted;
 		transaction_add(txn, view, fullscreen ? output->box : view->node->box, fullscreen);
+	}
+	// floats land in the same frame as the tiles around them
+	wl_list_for_each(view, &workspace->floats, link) {
+		bool fullscreen = view == owner && view->fullscreen_wanted;
+		transaction_add(txn, view, fullscreen ? output->box : view->float_box, fullscreen);
 	}
 	transaction_commit(txn);
 }
@@ -141,7 +147,12 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
 	drag_tree_changed(&desktop->server->input.drag);
-	if (!workspace_add_view(workspace, view)) {
+	if (view->float_wanted) {
+		view->floating = true;
+		view->float_box = floating_initial_box(desktop, view);
+		view->has_float_box = true;
+		workspace_add_float(workspace, view);
+	} else if (!workspace_add_view(workspace, view)) {
 		return;
 	}
 	fullscreen_claim_if_wanted(desktop, view);
@@ -165,6 +176,8 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	drag_tree_changed(&desktop->server->input.drag);
 	// a remap starts from whatever the client asks for next, not a stale claim
 	view->fullscreen_wanted = false;
+	view->floating = false;
+	view->has_float_box = false;
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);
@@ -238,7 +251,10 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	}
 
 	workspace_remove_view(source, view);
-	if (!workspace_add_view(target, view)) {
+	if (view->floating) {
+		workspace_add_float(target, view);
+		target->last_focused = view;
+	} else if (!workspace_add_view(target, view)) {
 		// couldn't get a leaf over there, put it back where it was
 		workspace_add_view(source, view);
 	} else {

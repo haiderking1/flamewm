@@ -28,6 +28,7 @@ static const struct command {
 	{ "movetoworkspace", action_move_to_workspace, ARG_WORKSPACE },
 	{ "focus", action_focus, ARG_DIRECTION },
 	{ "fullscreen", action_fullscreen, ARG_NONE },
+	{ "togglefloating", action_toggle_floating, ARG_NONE },
 	{ "close", action_close, ARG_NONE },
 	{ "quit", action_quit, ARG_NONE },
 };
@@ -127,6 +128,20 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 	}
 	if (!strcmp(name, "pointer")) {
 		pointer_command(client, &save);
+		return;
+	}
+	if (!strcmp(name, "key")) {
+		const char *key = strtok_r(NULL, " \t\r", &save);
+		const char *how = strtok_r(NULL, " \t\r", &save);
+		if (!getenv("FLAME_TEST_INPUT")) {
+			reply_error(client, "start flame with FLAME_TEST_INPUT=1 for this");
+		} else if (!key || !how) {
+			reply_error(client, "key NAME press|release");
+		} else {
+			// answer first: the key can be a keybind that quits
+			reply_ok(client);
+			fake_key(&client->ipc->server->input, key, !strcmp(how, "press"));
+		}
 		return;
 	}
 	const char *word = strtok_r(NULL, " \t\r", &save);

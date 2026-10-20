@@ -6,7 +6,7 @@
 #include "util/strbuf.h"
 
 static int window_count(struct flame_workspace *workspace) {
-	return wl_list_length(&workspace->views);
+	return workspace_view_count(workspace);
 }
 
 static void write_window(struct strbuf *out, struct flame_view *view) {
@@ -18,7 +18,11 @@ static void write_window(struct strbuf *out, struct flame_view *view) {
 	strbuf_json_string(out, view_app_id(view));
 	strbuf_printf(out, ",\"title\":");
 	strbuf_json_string(out, view_title(view));
-	strbuf_printf(out, ",\"fullscreen\":%s}", view->fullscreen_wanted ? "true" : "false");
+	strbuf_printf(out, ",\"fullscreen\":%s,\"floating\":%s", view->fullscreen_wanted ? "true" : "false",
+		view->floating ? "true" : "false");
+	struct wlr_box box = view->geometry;
+	strbuf_printf(out, ",\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}", box.x, box.y, box.width,
+		box.height);
 }
 
 void ipc_state_write(struct flame_desktop *desktop, struct strbuf *out) {

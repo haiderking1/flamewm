@@ -32,8 +32,12 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 	if (view) {
 		view->workspace->last_focused = view;
 		view_set_focused(view, true);
-		// keeps its popups above the neighbours
+		// keeps its popups above the neighbours, a float above the others
 		scene_node_raise_to_top(&view->tree->node);
+		if (view->floating) {
+			wl_list_remove(&view->link);
+			wl_list_insert(view->workspace->floats.prev, &view->link);
+		}
 	}
 	focus_restore_keyboard(desktop);
 	desktop_notify(desktop);
@@ -50,10 +54,17 @@ void focus_cycle(struct flame_desktop *desktop, int direction) {
 		return;
 	}
 
-	struct wl_list *head = &current->workspace->views;
+	// tiles in leaf order, then the floats, round and round
+	struct flame_workspace *workspace = current->workspace;
+	struct wl_list *lists[2] = {&workspace->views, &workspace->floats};
+	int in = current->floating ? 1 : 0;
 	struct wl_list *link = direction > 0 ? current->link.next : current->link.prev;
-	if (link == head) {
-		link = direction > 0 ? head->next : head->prev;
+	for (int hops = 0; link == lists[in] && hops < 2; hops++) {
+		in = !in; // off the end of one list onto the other
+		link = direction > 0 ? lists[in]->next : lists[in]->prev;
+	}
+	if (link == lists[in]) {
+		return; // it's alone
 	}
 	struct flame_view *next = wl_container_of(link, next, link);
 	focus_view(desktop, next);
@@ -94,6 +105,15 @@ struct flame_view *focus_after_close(struct flame_desktop *desktop, struct wlr_b
 	if (workspace->fullscreen) {
 		return workspace->fullscreen; // the only one you can see
 	}
+	// the float on top under the pointer, floats sit above everything
+	struct wlr_cursor *pointer = server->input.cursor.wlr;
+	struct flame_view *view;
+	wl_list_for_each_reverse(view, &workspace->floats, link) {
+		if (server->config->focus_follows_mouse
+				&& wlr_box_contains_point(&view->float_box, pointer->x, pointer->y)) {
+			return view;
+		}
+	}
 	if (!output || wl_list_empty(&workspace->views)) {
 		return focus_fallback(workspace);
 	}
@@ -106,7 +126,6 @@ struct flame_view *focus_after_close(struct flame_desktop *desktop, struct wlr_b
 	// between is what feels wrong (hyprland's focus_on_close = 1)
 	struct wlr_cursor *cursor = server->input.cursor.wlr;
 	if (server->config->focus_follows_mouse) {
-		struct flame_view *view;
 		wl_list_for_each(view, &workspace->views, link) {
 			if (wlr_box_contains_point(&view->node->box, cursor->x, cursor->y)) {
 				return view;

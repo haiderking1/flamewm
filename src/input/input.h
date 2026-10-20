@@ -6,6 +6,7 @@
 
 #include "input/cursor.h"
 #include "input/dnd.h"
+#include "input/fake.h"
 #include "input/drag.h"
 
 struct flame_server;
@@ -18,6 +19,7 @@ struct flame_input {
 	struct flame_drag drag;
 	struct flame_dnd dnd;
 	struct wl_list keyboards; // flame_keyboard.link
+	struct flame_fake_keyboard *fake; // FLAME_TEST_INPUT=1 only
 
 	struct wl_listener new_input;
 	struct wl_listener request_set_selection;
