@@ -1,0 +1,40 @@
+#ifndef FLAME_CORE_SERVER_H
+#define FLAME_CORE_SERVER_H
+
+#include <stdbool.h>
+#include <wayland-server-core.h>
+
+#include "backend/backend.h"
+#include "core/signals.h"
+#include "desktop/desktop.h"
+#include "input/input.h"
+#include "output/output.h"
+#include "render/render.h"
+#include "shell/xdg.h"
+
+struct flame_config;
+
+// the root everything hangs off. each subsystem owns its own state, this just
+// holds them together and decides the order they come up and go down in
+struct flame_server {
+	struct wl_display *display;
+	struct wl_event_loop *loop;
+	const char *socket;
+	const struct flame_config *config;
+
+	struct flame_signals signals;
+	struct flame_backend backend;
+	struct flame_outputs outputs;
+	struct flame_render render;
+	struct flame_desktop desktop;
+	struct flame_input input;
+	struct flame_xdg xdg;
+};
+
+bool server_init(struct flame_server *server, const struct flame_config *config);
+bool server_start(struct flame_server *server, const char *startup_cmd);
+void server_run(struct flame_server *server);
+void server_terminate(struct flame_server *server);
+void server_finish(struct flame_server *server);
+
+#endif
