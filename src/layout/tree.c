@@ -70,6 +70,31 @@ void tree_swap(struct tree_node *a, struct tree_node *b) {
 	b->view = view;
 }
 
+struct tree_node *tree_edge_split(struct tree_node *leaf, enum tree_split split, bool far) {
+	struct tree_node *child = leaf;
+	for (struct tree_node *parent = leaf->parent; parent; parent = parent->parent) {
+		if (parent->split == split
+				&& (far ? parent->first == child : parent->second == child)) {
+			return parent;
+		}
+		child = parent;
+	}
+	return NULL;
+}
+
+int tree_first_size(const struct tree_node *node) {
+	return node->split == TREE_SPLIT_VERTICAL ? node->first->box.width : node->first->box.height;
+}
+
+void tree_set_first_size(struct tree_node *node, int size, int gap, int min) {
+	int span = (node->split == TREE_SPLIT_VERTICAL ? node->box.width : node->box.height) - gap;
+	if (span <= 2 * min) {
+		return;
+	}
+	size = CLAMP(size, min, span - min);
+	node->ratio = (float)size / (float)span;
+}
+
 struct tree_node *tree_insert(struct tree_node **root, struct tree_node *target,
 		struct flame_view *view) {
 	struct tree_node *leaf = calloc(1, sizeof(*leaf));
