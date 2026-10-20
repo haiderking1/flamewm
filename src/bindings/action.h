@@ -10,6 +10,8 @@ void action_close(struct flame_server *server, const union flame_arg *arg);
 void action_focus(struct flame_server *server, const union flame_arg *arg); // i: +1/-1
 void action_fullscreen(struct flame_server *server, const union flame_arg *arg);
 void action_toggle_floating(struct flame_server *server, const union flame_arg *arg);
+void action_reload(struct flame_server *server, const union flame_arg *arg);
+void action_lua(struct flame_server *server, const union flame_arg *arg); // i: a lua ref
 void action_workspace(struct flame_server *server, const union flame_arg *arg); // i: index
 void action_move_to_workspace(struct flame_server *server, const union flame_arg *arg); // i: index
 

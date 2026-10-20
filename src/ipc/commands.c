@@ -29,6 +29,7 @@ static const struct command {
 	{ "focus", action_focus, ARG_DIRECTION },
 	{ "fullscreen", action_fullscreen, ARG_NONE },
 	{ "togglefloating", action_toggle_floating, ARG_NONE },
+	{ "reload", action_reload, ARG_NONE },
 	{ "close", action_close, ARG_NONE },
 	{ "quit", action_quit, ARG_NONE },
 };

@@ -30,6 +30,7 @@ static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_f, action_fullscreen, { 0 } },
 	{ MOD | SHIFT, XKB_KEY_space, action_toggle_floating, { 0 } },
 	{ MOD | SHIFT, XKB_KEY_q, action_quit, { 0 } },
+	{ MOD | SHIFT, XKB_KEY_r, action_reload, { 0 } },
 	WORKSPACE(XKB_KEY_1, 0),
 	WORKSPACE(XKB_KEY_2, 1),
 	WORKSPACE(XKB_KEY_3, 2),

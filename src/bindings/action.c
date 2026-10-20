@@ -1,5 +1,6 @@
 #include "bindings/action.h"
 
+#include "config/config.h"
 #include "core/server.h"
 #include "util/spawn.h"
 
@@ -29,6 +30,14 @@ void action_toggle_floating(struct flame_server *server, const union flame_arg *
 	if (server->desktop.focused) {
 		floating_toggle(&server->desktop, server->desktop.focused);
 	}
+}
+
+void action_reload(struct flame_server *server, const union flame_arg *arg) {
+	server_reload_config(server);
+}
+
+void action_lua(struct flame_server *server, const union flame_arg *arg) {
+	config_run_lua_bind(server, arg->i);
 }
 
 void action_workspace(struct flame_server *server, const union flame_arg *arg) {

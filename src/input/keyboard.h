@@ -18,5 +18,7 @@ struct flame_keyboard {
 
 // frees itself when the device goes away
 void keyboard_create(struct flame_input *input, struct wlr_input_device *device);
+// the config changed: every keyboard gets its layout and repeat
+void keyboards_apply_config(struct flame_input *input);
 
 #endif
