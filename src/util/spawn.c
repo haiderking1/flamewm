@@ -1,6 +1,7 @@
 #include "util/spawn.h"
 
 #include <signal.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wlr/util/log.h>
@@ -18,6 +19,9 @@ void spawn(const char *const argv[]) {
 		sigemptyset(&set);
 		sigprocmask(SIG_SETMASK, &set, NULL);
 		signal(SIGPIPE, SIG_DFL);
+		// realtime doesn't carry over (SCHED_RESET_ON_FORK), a raised nice
+		// would, apps run like any other process
+		setpriority(PRIO_PROCESS, 0, 0);
 		setsid();
 
 		pid_t child = fork();
