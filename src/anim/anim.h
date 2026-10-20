@@ -35,6 +35,10 @@ struct flame_anim {
 struct flame_anims {
 	struct flame_server *server;
 	struct wl_list running; // flame_anim.link
+	// no output drawing frames (screens off, none there): they step
+	// themselves from here, so nothing hangs half way
+	struct wl_event_source *watchdog;
+	int64_t last_tick; // ns
 };
 
 void anims_init(struct flame_anims *anims, struct flame_server *server);
