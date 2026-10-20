@@ -191,6 +191,28 @@ void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, u
 	}
 }
 
+void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
+		uint32_t mask, int evtype, const struct xs_event *event) {
+	struct xs_interest *interest;
+	wl_list_for_each(interest, &window->interests, link) {
+		if ((interest->mask & mask)
+				&& !xs_xi_client_selected(interest->client, window, evtype)) {
+			xs_event_send(interest->client, event);
+		}
+	}
+}
+
+bool xs_event_wanted_input(struct xs_window *window, uint32_t mask, int evtype) {
+	struct xs_interest *interest;
+	wl_list_for_each(interest, &window->interests, link) {
+		if ((interest->mask & mask)
+				&& !xs_xi_client_selected(interest->client, window, evtype)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // ---- telling flame ----
 
 static void handle_changed_idle(void *data) {
@@ -608,6 +630,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->pictures);
 	wl_list_init(&xserver->glyphset_ids);
 	wl_list_init(&xserver->randr_selects);
+	wl_list_init(&xserver->xi_selects);
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
 	if (!xs_atoms_init(&xserver->atoms)) {
@@ -751,6 +774,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	}
 	xs_render_finish(xserver);
 	xs_randr_client_gone(xserver, NULL);
+	xs_xi_client_gone(xserver, NULL);
 	free(xserver->monitors);
 	xserver->monitors = NULL;
 	xserver->monitors_len = 0;

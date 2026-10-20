@@ -130,6 +130,8 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 static void handle_motion(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
 	struct wlr_pointer_motion_event *event = data;
+	xshell_pointer_raw_motion(&cursor->server->xshell, event->delta_x, event->delta_y,
+		event->unaccel_dx, event->unaccel_dy, event->time_msec);
 	wlr_cursor_move(cursor->wlr, &event->pointer->base, event->delta_x, event->delta_y);
 	process_motion(cursor, event->time_msec, true);
 }

@@ -33,7 +33,10 @@ struct flame_xshell {
 	// the X window the pointer is over, flame's idea of it. 0 for none
 	uint32_t pointer_window;
 	uint16_t buttons; // held, in X's state bits
-	double scroll[2]; // vertical, horizontal: what didn't add up to a click yet
+	// the key held down that repeats (X keycode, 0 for none) and when it
+	// repeats next. X apps get their repeats from the server
+	uint8_t repeat_key;
+	struct flame_timer repeat_timer;
 
 	// the msc X apps see, Present paces them on it. NVIDIA flips carry no
 	// vblank counter, so it's counted here: the clock output's flips move it
@@ -107,6 +110,10 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 	uint32_t time);
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 	uint32_t time);
+// the mouse moved, before acceleration too: games over X read it raw. only
+// while an X window has the pointer or the keyboard
+void xshell_pointer_raw_motion(struct flame_xshell *xshell, double dx, double dy,
+	double raw_dx, double raw_dy, uint32_t time);
 // apps drew into a top-level's backing with the cpu (core requests,
 // MIT-SHM): what changed goes up to its texture
 void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,

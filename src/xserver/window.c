@@ -119,6 +119,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 	}
 	xs_present_window_gone(xserver, window->id);
 	xs_randr_window_gone(xserver, window->id);
+	xs_xi_window_gone(xserver, window->id);
 	xs_draw_window_freed(window);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
@@ -419,7 +420,9 @@ static void focus_event(struct flame_xserver *xserver, uint8_t type, uint32_t id
 	xs_event_put8(&event, 1, 3); // NotifyNonlinear
 	xs_event_put32(&event, 4, window->id);
 	xs_event_put8(&event, 8, 0); // NotifyNormal
-	xs_event_deliver(xserver, window, XS_MASK_FOCUS, &event);
+	int evtype = type == XS_EVENT_FOCUS_IN ? XS_XI_FOCUS_IN : XS_XI_FOCUS_OUT;
+	xs_event_deliver_input(xserver, window, XS_MASK_FOCUS, evtype, &event);
+	xs_xi_focus(xserver, evtype, window);
 }
 
 void xs_focus_set(struct flame_xserver *xserver, uint32_t focus, uint8_t revert) {
@@ -505,6 +508,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	xs_shm_detach_all(xserver, client);
 	xs_render_client_gone(xserver, client);
 	xs_randr_client_gone(xserver, client);
+	xs_xi_client_gone(xserver, client);
 	struct xs_fence *fence, *ftmp;
 	wl_list_for_each_safe(fence, ftmp, &xserver->fences, link) {
 		if (fence->owner == client) {
