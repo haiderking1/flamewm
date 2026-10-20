@@ -7,6 +7,9 @@ if [ -z "$FLAMEWM_X11_DISPLAY" ]; then
 fi
 [ $# -gt 0 ] || { echo "usage: flame-x11 <app> [args]" >&2; exit 1; }
 export DISPLAY="$FLAMEWM_X11_DISPLAY"
-# toolkits that can do both would pick wayland first, this is about X
+# toolkits that can do both would pick wayland first, this is about X.
+# unsetting WAYLAND_DISPLAY alone isn't enough: they fall back to the
+# default socket (wayland-0), whoever has it. each one gets told outright
 unset WAYLAND_DISPLAY
+export GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11 CLUTTER_BACKEND=x11
 exec "$@"
