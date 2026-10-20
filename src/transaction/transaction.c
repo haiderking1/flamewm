@@ -1,5 +1,6 @@
 #include "transaction/transaction.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <pixman.h>
 #include <time.h>
@@ -86,6 +87,7 @@ struct txn_child {
 	bool was_opaque;
 	int unfinished; // new size buffers so far that looked half drawn
 	int old_buffer_width, old_buffer_height;
+	int old_width, old_height;
 	bool locked;
 	uint32_t lock_seq;
 	struct wl_listener client_commit;
@@ -125,23 +127,69 @@ static void refresh_ready(struct flame_view *view) {
 	}
 }
 
-static bool fully_opaque(const struct wlr_surface_state *state) {
-	pixman_box32_t box = {0, 0, state->width, state->height};
-	return state->width > 0 && state->height > 0
+// opaque over all of area (surface coords). an empty area means the whole
+// surface. chromium keeps a transparent margin around its window, only the
+// window itself has to be covered
+static bool fully_opaque(const struct wlr_surface_state *state, struct wlr_box area) {
+	struct wlr_box surface = {0, 0, state->width, state->height};
+	struct wlr_box inside;
+	area = !wlr_box_empty(&area) && wlr_box_intersection(&inside, &surface, &area)
+		? inside : surface;
+	pixman_box32_t box = {area.x, area.y, area.x + area.width, area.y + area.height};
+	return !wlr_box_empty(&area)
 		&& pixman_region32_contains_rectangle((pixman_region32_t *)&state->opaque, &box)
 			== PIXMAN_REGION_IN;
 }
+
+static struct wlr_box root_area(struct flame_view *view, bool pending) {
+	return view->impl->window_geometry(view, pending);
+}
+
+static const struct wlr_box whole_surface = {0};
 
 // past this many new size buffers that still look half drawn, take it
 // anyway: a few frames late beats stalling until the deadline
 #define MAX_UNFINISHED_FRAMES 3
 
-// the commit being made attaches a buffer with a size other than old
-static bool new_size_buffer(struct wlr_surface *surface, int old_width, int old_height) {
-	return (surface->pending.committed & WLR_SURFACE_STATE_BUFFER)
-		&& surface->pending.buffer
-		&& (surface->pending.buffer_width != old_width
-			|| surface->pending.buffer_height != old_height);
+// the buffer shows up pixel for pixel: no viewport stretching it, at most
+// cropping it. chromium keeps one oversized buffer and crops it to whatever
+// size it drew this time
+static bool unscaled(const struct wlr_surface_state *state) {
+	double width, height;
+	if (state->viewport.has_src) {
+		width = state->viewport.src.width;
+		height = state->viewport.src.height;
+	} else {
+		int scale = state->scale > 0 ? state->scale : 1;
+		width = (double)state->buffer_width / scale;
+		height = (double)state->buffer_height / scale;
+		if (state->transform & WL_OUTPUT_TRANSFORM_90) {
+			double tmp = width;
+			width = height;
+			height = tmp;
+		}
+	}
+	return fabs(width - state->width) < 0.5 && fabs(height - state->height) < 0.5;
+}
+
+struct old_size {
+	int buffer_width, buffer_height;
+	int width, height;
+};
+
+// the commit being made attaches a buffer drawn at a new size: the buffer
+// itself changed size, or the surface did while showing it unscaled. a
+// viewport stretching the old buffer to the new size (firefox does that
+// before it draws) doesn't count
+static bool new_size_buffer(struct wlr_surface *surface, struct old_size old) {
+	const struct wlr_surface_state *state = &surface->pending;
+	if (!(state->committed & WLR_SURFACE_STATE_BUFFER) || !state->buffer) {
+		return false;
+	}
+	if (state->buffer_width != old.buffer_width || state->buffer_height != old.buffer_height) {
+		return true;
+	}
+	return (state->width != old.width || state->height != old.height) && unscaled(state);
 }
 
 // firefox's first frame at a new size has the old layout painted into it, the
@@ -149,19 +197,20 @@ static bool new_size_buffer(struct wlr_surface *surface, int old_width, int old_
 // painted frame is the right/bottom strip. so a surface that used to be fully
 // opaque and now declares only part of itself opaque isn't done yet. an empty
 // opaque region just means it stopped claiming opacity, that one's fine
-static bool looks_finished(struct wlr_surface *surface, bool was_opaque) {
-	return !was_opaque || fully_opaque(&surface->pending)
+static bool looks_finished(struct wlr_surface *surface, struct wlr_box area,
+		bool was_opaque) {
+	return !was_opaque || fully_opaque(&surface->pending, area)
 		|| !pixman_region32_not_empty(&surface->pending.opaque);
 }
 
 // a new size buffer that looks finished, or enough of them that we stop
 // waiting for one that does
-static bool redraws(struct wlr_surface *surface, int old_width, int old_height,
+static bool redraws(struct wlr_surface *surface, struct old_size old, struct wlr_box area,
 		bool was_opaque, int *unfinished) {
-	if (!new_size_buffer(surface, old_width, old_height)) {
+	if (!new_size_buffer(surface, old)) {
 		return false;
 	}
-	if (looks_finished(surface, was_opaque)) {
+	if (looks_finished(surface, area, was_opaque)) {
 		return true;
 	}
 	return ++*unfinished >= MAX_UNFINISHED_FRAMES;
@@ -177,7 +226,7 @@ static void log_commit(const char *who, struct flame_view *view, struct wlr_surf
 		surface->pending.buffer_width, surface->pending.buffer_height,
 		(surface->pending.committed & WLR_SURFACE_STATE_BUFFER) && surface->pending.buffer,
 		opaque->x1, opaque->y1, opaque->x2 - opaque->x1, opaque->y2 - opaque->y1,
-		fully_opaque(&surface->pending), view->txn.locked, view->txn.root_stale);
+		fully_opaque(&surface->pending, whole_surface), view->txn.locked, view->txn.root_stale);
 }
 
 static void child_free(struct txn_child *child) {
@@ -198,8 +247,9 @@ static void handle_child_commit(struct wl_listener *listener, void *data) {
 	bool resized = surface->pending.width != old_width || surface->pending.height != old_height;
 	// firefox resizes through its viewport first and only draws the new size
 	// a few commits later, so a new size alone doesn't count, the pixels do
-	bool redrawn = redraws(surface, child->old_buffer_width, child->old_buffer_height,
-		child->was_opaque, &child->unfinished);
+	struct old_size old = {child->old_buffer_width, child->old_buffer_height,
+		child->old_width, child->old_height};
+	bool redrawn = redraws(surface, old, whole_surface, child->was_opaque, &child->unfinished);
 
 	if (!child->locked) {
 		// old size frames still fit the old box, let them through
@@ -263,9 +313,11 @@ static void track_child(struct wlr_surface *surface, int sx, int sy, void *data)
 		return;
 	}
 	child->stale = true;
-	child->was_opaque = fully_opaque(&surface->current);
+	child->was_opaque = fully_opaque(&surface->current, whole_surface);
 	child->old_buffer_width = surface->current.buffer_width;
 	child->old_buffer_height = surface->current.buffer_height;
+	child->old_width = surface->current.width;
+	child->old_height = surface->current.height;
 	listener_connect(&child->client_commit, &surface->events.client_commit,
 		handle_child_commit);
 	listener_connect(&child->destroy, &surface->events.destroy, handle_child_destroy);
@@ -287,10 +339,12 @@ static void track_children(struct flame_view *view) {
 	struct wlr_surface *root = view_surface(view);
 	view->txn.root_stale = context.resizing && root->current.width == context.old_width
 		&& root->current.height == context.old_height;
-	view->txn.root_was_opaque = fully_opaque(&root->current);
+	view->txn.root_was_opaque = fully_opaque(&root->current, root_area(view, false));
 	view->txn.root_unfinished = 0;
 	view->txn.old_buffer_width = root->current.buffer_width;
 	view->txn.old_buffer_height = root->current.buffer_height;
+	view->txn.old_width = root->current.width;
+	view->txn.old_height = root->current.height;
 
 	wlr_surface_for_each_surface(root, track_child, &context);
 
@@ -449,8 +503,10 @@ static void handle_client_commit(struct wl_listener *listener, void *data) {
 
 	struct wlr_surface *surface = view_surface(view);
 	log_commit("root", view, surface);
-	bool redrawn = redraws(surface, view->txn.old_buffer_width, view->txn.old_buffer_height,
-		view->txn.root_was_opaque, &view->txn.root_unfinished);
+	struct old_size old = {view->txn.old_buffer_width, view->txn.old_buffer_height,
+		view->txn.old_width, view->txn.old_height};
+	bool redrawn = redraws(surface, old, root_area(view, true), view->txn.root_was_opaque,
+		&view->txn.root_unfinished);
 	if (view->txn.locked) {
 		// queued behind the one we hold, keep it drawing
 		release_pending_callbacks(surface);

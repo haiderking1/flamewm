@@ -26,6 +26,10 @@ struct flame_view_impl {
 	void (*set_display_size)(struct flame_view *view, int width, int height);
 	// size of what the client actually drew, its window geometry
 	void (*content_size)(struct flame_view *view, int *width, int *height);
+	// where the window sits inside its root surface (csd shadows and such
+	// around it), from the commit being made or the one on screen. empty
+	// when the client never said, then it's the whole surface
+	struct wlr_box (*window_geometry)(struct flame_view *view, bool pending);
 	void (*set_activated)(struct flame_view *view, bool activated);
 	// the user is dragging its size around, sizes will change every frame
 	void (*set_resizing)(struct flame_view *view, bool resizing);
