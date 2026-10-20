@@ -122,4 +122,9 @@ void keyboard_create(struct flame_input *input, struct wlr_input_device *device)
 
 	wl_list_insert(&input->keyboards, &keyboard->link);
 	wlr_seat_set_keyboard(input->seat, wlr_keyboard);
+
+	// losing the last keyboard drops keyboard focus, so a replugged one has
+	// to hand it back or nothing can type until something gets clicked
+	input_update_capabilities(input);
+	focus_restore_keyboard(&input->server->desktop);
 }
