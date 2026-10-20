@@ -3,7 +3,6 @@
 #include <linux/input-event-codes.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_keyboard.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 
@@ -67,7 +66,7 @@ static bool begin_move(struct flame_drag *drag, struct flame_view *view) {
 	drag->origin_y = view->geometry.y;
 	view->grabbed = true;
 	// ride above every tile. all layer trees sit at 0,0 so it stays put
-	wlr_scene_node_reparent(&view->tree->node,
+	scene_node_reparent(&view->tree->node,
 		drag->server->render.layers[FLAME_LAYER_FLOATING]);
 	set_cursor_image(drag, "grabbing");
 	return true;
@@ -75,7 +74,7 @@ static bool begin_move(struct flame_drag *drag, struct flame_view *view) {
 
 static void move_motion(struct flame_drag *drag) {
 	struct wlr_cursor *cursor = pointer(drag);
-	wlr_scene_node_set_position(&drag->view->tree->node,
+	scene_node_set_position(&drag->view->tree->node,
 		drag->origin_x + (int)(cursor->x - drag->start_x),
 		drag->origin_y + (int)(cursor->y - drag->start_y));
 }
@@ -97,7 +96,7 @@ static void end_move(struct flame_drag *drag, bool drop) {
 		// stays at the drop point until the transaction places both
 		desktop_swap_views(&drag->server->desktop, view, target);
 	} else {
-		wlr_scene_node_set_position(&view->tree->node, view->geometry.x, view->geometry.y);
+		scene_node_set_position(&view->tree->node, view->geometry.x, view->geometry.y);
 	}
 	restore_pointer(drag);
 }

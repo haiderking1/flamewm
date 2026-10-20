@@ -11,9 +11,9 @@ struct tree_node;
 
 struct flame_workspace {
 	int index;
-	struct wlr_scene_tree *tree; // tiles, disabled while hidden
-	struct wlr_scene_tree *fullscreen_tree; // above the bars, hidden with the rest
-	struct wlr_scene_rect *backdrop; // black behind a fullscreen window
+	struct flame_tree *tree; // tiles, disabled while hidden
+	struct flame_tree *fullscreen_tree; // above the bars, hidden with the rest
+	struct flame_rect *backdrop; // black behind a fullscreen window
 	struct tree_node *layout; // bsp tree, NULL when empty
 	struct wl_list views; // flame_view.link, in leaf order
 	struct flame_view *last_focused;
@@ -23,7 +23,7 @@ struct flame_workspace {
 };
 
 void workspace_init(struct flame_workspace *workspace, int index,
-	struct wlr_scene_tree *tiled, struct wlr_scene_tree *fullscreen);
+	struct flame_tree *tiled, struct flame_tree *fullscreen);
 void workspace_set_visible(struct flame_workspace *workspace, bool visible);
 
 // the leaf a new window splits: the focused one, else the last

@@ -1,6 +1,5 @@
 #include "desktop/desktop.h"
 
-#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
 #include "config/config.h"
@@ -8,17 +7,17 @@
 #include "layout/tree.h"
 
 bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
-	struct wlr_scene_tree *tiled = server->render.layers[FLAME_LAYER_TILED];
-	struct wlr_scene_tree *fullscreen = server->render.layers[FLAME_LAYER_FULLSCREEN];
+	struct flame_tree *tiled = server->render.layers[FLAME_LAYER_TILED];
+	struct flame_tree *fullscreen = server->render.layers[FLAME_LAYER_FULLSCREEN];
 
 	desktop->server = server;
 	wl_signal_init(&desktop->events.changed);
-	desktop->staging = wlr_scene_tree_create(tiled);
+	desktop->staging = scene_tree_create(tiled);
 	if (!desktop->staging) {
 		wlr_log(WLR_ERROR, "failed to create staging tree");
 		return false;
 	}
-	wlr_scene_node_set_enabled(&desktop->staging->node, false);
+	scene_node_set_enabled(&desktop->staging->node, false);
 
 	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
 		workspace_init(&desktop->workspaces[i], i, tiled, fullscreen);
@@ -169,7 +168,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);
-	wlr_scene_node_reparent(&view->tree->node, desktop->staging);
+	scene_node_reparent(&view->tree->node, desktop->staging);
 	fullscreen_refresh_backdrops(desktop);
 
 	if (desktop->focused == view) {
@@ -255,19 +254,7 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 
 struct flame_view *desktop_view_at(struct flame_desktop *desktop, double lx, double ly,
 		struct wlr_surface **surface, double *sx, double *sy) {
-	struct wlr_scene *scene = desktop->server->render.scene;
-	struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, lx, ly, sx, sy);
-
-	*surface = NULL;
-	if (!node) {
-		return NULL;
-	}
-	if (node->type == WLR_SCENE_NODE_BUFFER) {
-		struct wlr_scene_surface *scene_surface =
-			wlr_scene_surface_try_from_buffer(wlr_scene_buffer_from_node(node));
-		if (scene_surface) {
-			*surface = scene_surface->surface;
-		}
-	}
-	return view_from_node(node);
+	struct flame_node *node =
+		scene_node_at(&desktop->server->render.scene, lx, ly, surface, sx, sy);
+	return node ? view_from_node(node) : NULL;
 }

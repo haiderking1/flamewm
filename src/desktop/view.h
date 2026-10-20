@@ -12,7 +12,7 @@ struct flame_desktop;
 struct flame_view;
 struct flame_workspace;
 struct tree_node;
-struct wlr_scene_node;
+struct flame_node;
 
 // what a shell (xdg now, xwayland later) has to provide for its windows
 struct flame_view_impl {
@@ -56,9 +56,9 @@ struct flame_view {
 	struct wl_list link; // flame_workspace.views, same order as the tree's leaves
 	struct tree_node *node; // our leaf in the workspace tree
 
-	struct wlr_scene_tree *tree; // node.data points back here
-	struct wlr_scene_rect *border[FLAME_BORDER_COUNT];
-	struct wlr_scene_tree *content; // the shell puts its surface tree in here
+	struct flame_tree *tree; // node.data points back here
+	struct flame_rect *border[FLAME_BORDER_COUNT];
+	struct flame_tree *content; // the shell puts its surface tree in here
 
 	// what's on screen, border included. targets live in txn until applied
 	struct wlr_box geometry;
@@ -102,6 +102,6 @@ const char *view_app_id(struct flame_view *view);
 const char *view_title(struct flame_view *view);
 
 // walks up the scene graph from any node to the view owning it
-struct flame_view *view_from_node(struct wlr_scene_node *node);
+struct flame_view *view_from_node(struct flame_node *node);
 
 #endif

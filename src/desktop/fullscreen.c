@@ -1,6 +1,5 @@
 #include "desktop/fullscreen.h"
 
-#include <wlr/types/wlr_scene.h>
 
 #include "core/server.h"
 
@@ -80,11 +79,11 @@ void fullscreen_refresh_backdrops(struct flame_desktop *desktop) {
 		}
 
 		bool on = any && have_area;
-		wlr_scene_node_set_enabled(&workspace->backdrop->node, on);
+		scene_node_set_enabled(&workspace->backdrop->node, on);
 		if (on) {
-			wlr_scene_node_set_position(&workspace->backdrop->node, area.x, area.y);
-			wlr_scene_rect_set_size(workspace->backdrop, area.width, area.height);
-			wlr_scene_node_lower_to_bottom(&workspace->backdrop->node);
+			scene_node_set_position(&workspace->backdrop->node, area.x, area.y);
+			scene_rect_set_size(workspace->backdrop, area.width, area.height);
+			scene_node_lower_to_bottom(&workspace->backdrop->node);
 		}
 	}
 }

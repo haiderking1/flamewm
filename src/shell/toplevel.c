@@ -2,12 +2,12 @@
 
 #include <stdlib.h>
 #include <strings.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
 #include "core/server.h"
+#include "shell/xdg_tree.h"
 #include "util/listener.h"
 #include "util/macros.h"
 
@@ -59,7 +59,7 @@ static void update_clip(struct flame_toplevel *toplevel) {
 		return;
 	}
 	toplevel->clip = clip;
-	wlr_scene_subsurface_tree_set_clip(&toplevel->scene_tree->node, &clip);
+	scene_surface_set_clip(toplevel->xdg_tree->surface, &clip);
 }
 
 // every configure carries the full picture. the tiled edges stay set even in
@@ -312,9 +312,14 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 	view_init(&toplevel->view, &toplevel_impl, &server->desktop);
 
 	// popups find their parent tree through xdg_surface->data
-	toplevel->scene_tree =
-		wlr_scene_xdg_surface_create(toplevel->view.content, xdg_toplevel->base);
-	xdg_toplevel->base->data = toplevel->scene_tree;
+	// popups find their parent's tree through xdg_surface->data
+	toplevel->xdg_tree = xdg_tree_create(toplevel->view.content, xdg_toplevel->base);
+	if (!toplevel->xdg_tree) {
+		wlr_log(WLR_ERROR, "out of memory");
+		view_finish(&toplevel->view);
+		free(toplevel);
+		return;
+	}
 
 	struct wlr_surface *surface = xdg_toplevel->base->surface;
 	listener_connect(&toplevel->map, &surface->events.map, handle_map);

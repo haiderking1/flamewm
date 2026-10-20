@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
@@ -14,7 +13,7 @@
 
 // a top surface that grabs the keyboard is a launcher: it has to show over a
 // fullscreen window, a bar doesn't (raven's rule, no per-app lists)
-static struct wlr_scene_tree *scene_layer(struct flame_server *server,
+static struct flame_tree *scene_layer(struct flame_server *server,
 		enum zwlr_layer_shell_v1_layer layer, bool grabs_keyboard) {
 	switch (layer) {
 	case ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND:
@@ -30,7 +29,7 @@ static struct wlr_scene_tree *scene_layer(struct flame_server *server,
 }
 
 // a bottom layer's menus would end up under the tiles otherwise
-static struct wlr_scene_tree *popup_layer(struct flame_server *server,
+static struct flame_tree *popup_layer(struct flame_server *server,
 		enum zwlr_layer_shell_v1_layer layer, bool grabs_keyboard) {
 	return scene_layer(server, MAX(layer, ZWLR_LAYER_SHELL_V1_LAYER_TOP), grabs_keyboard);
 }
@@ -76,10 +75,10 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	// layer or keyboard interactivity can change on any commit
 	surface->layer = wlr->current.layer;
 	bool grabs = grabs_keyboard(&wlr->current);
-	struct wlr_scene_tree *tree = scene_layer(server, surface->layer, grabs);
-	if (surface->scene->tree->node.parent != tree) {
-		wlr_scene_node_reparent(&surface->scene->tree->node, tree);
-		wlr_scene_node_reparent(&surface->popups->node,
+	struct flame_tree *tree = scene_layer(server, surface->layer, grabs);
+	if (surface->tree->node.parent != tree) {
+		scene_node_reparent(&surface->tree->node, tree);
+		scene_node_reparent(&surface->popups->node,
 			popup_layer(server, surface->layer, grabs));
 	}
 	// first commit needs its configure, later ones only when state changed,
@@ -106,8 +105,8 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&surface->destroy);
 
 	wl_list_remove(&surface->link);
-	// the scene helper drops its own tree, the popup tree is ours
-	wlr_scene_node_destroy(&surface->popups->node);
+	scene_node_destroy(&surface->tree->node);
+	scene_node_destroy(&surface->popups->node);
 	surface->wlr->data = NULL;
 
 	struct flame_output *output = surface->output;
@@ -153,13 +152,16 @@ static void handle_new_surface(struct wl_listener *listener, void *data) {
 	surface->output = wlr->output->data;
 	surface->layer = wlr->pending.layer;
 	bool grabs = grabs_keyboard(&wlr->pending);
-	surface->scene = wlr_scene_layer_surface_v1_create(
-		scene_layer(server, surface->layer, grabs), wlr);
-	surface->popups = wlr_scene_tree_create(popup_layer(server, surface->layer, grabs));
-	if (!surface->scene || !surface->popups) {
+	surface->tree = scene_tree_create(scene_layer(server, surface->layer, grabs));
+	surface->popups = scene_tree_create(popup_layer(server, surface->layer, grabs));
+	if (!surface->tree || !surface->popups
+			|| !scene_surface_create(surface->tree, wlr->surface)) {
 		wlr_log(WLR_ERROR, "failed to create layer surface scene");
+		if (surface->tree) {
+			scene_node_destroy(&surface->tree->node);
+		}
 		if (surface->popups) {
-			wlr_scene_node_destroy(&surface->popups->node);
+			scene_node_destroy(&surface->popups->node);
 		}
 		free(surface);
 		wlr_layer_surface_v1_destroy(wlr);

@@ -1,6 +1,5 @@
 #include "protocols/globals.h"
 
-#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_ext_data_control_v1.h>
@@ -20,8 +19,8 @@
 bool globals_init(struct flame_server *server) {
 	struct wl_display *display = server->display;
 
-	bool ok = wlr_compositor_create(display, 6, server->render.renderer)
-		&& wlr_subcompositor_create(display)
+	// wl_compositor itself comes from render/, it's tied to our renderer
+	bool ok = wlr_subcompositor_create(display)
 		// clipboard, primary selection, clipboard managers
 		&& wlr_data_device_manager_create(display)
 		&& wlr_primary_selection_v1_device_manager_create(display)

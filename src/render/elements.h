@@ -1,0 +1,64 @@
+#ifndef FLAME_RENDER_ELEMENTS_H
+#define FLAME_RENDER_ELEMENTS_H
+
+#include <pixman.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <wayland-server-protocol.h>
+#include <wlr/util/box.h>
+
+struct flame_scene;
+struct wlr_buffer;
+struct wlr_surface;
+struct wlr_texture;
+
+// one thing a frame draws, flattened out of the scene: a solid rect or one
+// client surface (subsurfaces are elements of their own). bottom to top
+enum flame_element_type {
+	FLAME_ELEMENT_RECT,
+	FLAME_ELEMENT_SURFACE,
+};
+
+struct flame_element {
+	enum flame_element_type type;
+	// what it is from one frame to the next: the rect node or the wl_surface.
+	// only ever compared, an id from an old frame may point at freed memory
+	const void *id;
+	struct wlr_box box; // layout coords, where it's drawn
+	struct wlr_box clip; // layout coords, the part of box allowed to show
+
+	float color[4]; // rects, premultiplied
+
+	struct wlr_surface *surface; // surfaces
+	struct wlr_texture *texture;
+	struct wlr_fbox src;
+	enum wl_output_transform transform;
+	struct wlr_buffer *buffer; // to tell a new buffer from the same one
+
+	// layout coords: what isn't covered by anything opaque above it, and
+	// what of it is opaque itself. filled by elements_occlude
+	pixman_region32_t visible;
+	pixman_region32_t opaque;
+};
+
+struct flame_element_list {
+	struct flame_element *data;
+	size_t len, cap;
+};
+
+void elements_init(struct flame_element_list *list);
+void elements_finish(struct flame_element_list *list);
+void elements_clear(struct flame_element_list *list);
+
+// everything enabled in the scene that lands on area, bottom to top
+bool elements_collect(struct flame_element_list *list, struct flame_scene *scene,
+	struct wlr_box area);
+// fills visible and opaque, top down
+void elements_occlude(struct flame_element_list *list);
+
+// the same element in another frame's list, NULL when it wasn't there. hint
+// is where to look first, lists barely change between frames
+const struct flame_element *elements_find(const struct flame_element_list *list,
+	const void *id, size_t hint, size_t *index);
+
+#endif

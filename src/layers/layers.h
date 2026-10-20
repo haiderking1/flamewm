@@ -7,6 +7,7 @@
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
 struct flame_output;
+struct flame_tree;
 struct flame_server;
 struct wlr_surface;
 
@@ -18,9 +19,9 @@ struct flame_layer_surface {
 	struct flame_layers *layers;
 	struct wlr_layer_surface_v1 *wlr; // wlr->data points back here
 	struct flame_output *output; // NULL once its output is gone
-	struct wlr_scene_layer_surface_v1 *scene;
+	struct flame_tree *tree; // at its spot on the output, holds the surface
 	// its popups, kept above the tiles even when the surface sits below them
-	struct wlr_scene_tree *popups;
+	struct flame_tree *popups;
 	enum zwlr_layer_shell_v1_layer layer; // scene tree it's in right now
 
 	struct wl_listener map;

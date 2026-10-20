@@ -1,12 +1,12 @@
 #include "shell/popup.h"
 
 #include <stdlib.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
 #include "core/server.h"
 #include "layers/layers.h"
+#include "shell/xdg_tree.h"
 #include "util/listener.h"
 
 // where the surface at the bottom of a popup chain sits on screen, popup
@@ -23,15 +23,15 @@ static bool root_origin(struct wlr_xdg_popup *xdg_popup, int *lx, int *ly) {
 
 	struct wlr_xdg_toplevel *toplevel = wlr_xdg_toplevel_try_from_wlr_surface(parent);
 	if (toplevel && toplevel->base->data) {
-		struct wlr_scene_tree *tree = toplevel->base->data;
+		struct flame_tree *tree = toplevel->base->data;
 		struct flame_view *view = view_from_node(&tree->node);
 		if (view) {
-			return wlr_scene_node_coords(&view->content->node, lx, ly);
+			return scene_node_coords(&view->content->node, lx, ly);
 		}
 	}
 	struct flame_layer_surface *layer = layer_surface_from_wlr(parent);
 	if (layer) {
-		return wlr_scene_node_coords(&layer->scene->tree->node, lx, ly);
+		return scene_node_coords(&layer->tree->node, lx, ly);
 	}
 	return false;
 }
@@ -73,7 +73,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 }
 
 void popup_create(struct flame_server *server, struct wlr_xdg_popup *xdg_popup,
-		struct wlr_scene_tree *parent_tree) {
+		struct flame_tree *parent_tree) {
 	struct flame_popup *popup = calloc(1, sizeof(*popup));
 	if (!popup) {
 		wlr_log(WLR_ERROR, "out of memory");
@@ -83,7 +83,11 @@ void popup_create(struct flame_server *server, struct wlr_xdg_popup *xdg_popup,
 	popup->xdg = xdg_popup;
 
 	// nested inside the parent's tree, so it moves and hides with it
-	xdg_popup->base->data = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
+	if (!xdg_tree_create(parent_tree, xdg_popup->base)) {
+		wlr_log(WLR_ERROR, "out of memory");
+		free(popup);
+		return;
+	}
 
 	listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
 		handle_commit);

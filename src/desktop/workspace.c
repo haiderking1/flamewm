@@ -1,20 +1,20 @@
 #include "desktop/workspace.h"
 
-#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
 #include "desktop/view.h"
 #include "layout/tree.h"
+#include "scene/scene.h"
 
 void workspace_init(struct flame_workspace *workspace, int index,
-		struct wlr_scene_tree *tiled, struct wlr_scene_tree *fullscreen) {
+		struct flame_tree *tiled, struct flame_tree *fullscreen) {
 	static const float black[4] = {0, 0, 0, 1};
 
 	workspace->index = index;
-	workspace->tree = wlr_scene_tree_create(tiled);
-	workspace->fullscreen_tree = wlr_scene_tree_create(fullscreen);
-	workspace->backdrop = wlr_scene_rect_create(workspace->fullscreen_tree, 0, 0, black);
-	wlr_scene_node_set_enabled(&workspace->backdrop->node, false);
+	workspace->tree = scene_tree_create(tiled);
+	workspace->fullscreen_tree = scene_tree_create(fullscreen);
+	workspace->backdrop = scene_rect_create(workspace->fullscreen_tree, 0, 0, black);
+	scene_node_set_enabled(&workspace->backdrop->node, false);
 	workspace->layout = NULL;
 	wl_list_init(&workspace->views);
 	workspace->last_focused = NULL;
@@ -23,8 +23,8 @@ void workspace_init(struct flame_workspace *workspace, int index,
 }
 
 void workspace_set_visible(struct flame_workspace *workspace, bool visible) {
-	wlr_scene_node_set_enabled(&workspace->tree->node, visible);
-	wlr_scene_node_set_enabled(&workspace->fullscreen_tree->node, visible);
+	scene_node_set_enabled(&workspace->tree->node, visible);
+	scene_node_set_enabled(&workspace->fullscreen_tree->node, visible);
 }
 
 struct tree_node *workspace_insert_target(struct flame_workspace *workspace) {
