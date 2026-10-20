@@ -33,7 +33,7 @@ struct select {
 };
 
 // one made up from the root while flame has no outputs, so there's always one
-static const struct xs_monitor *monitors(struct flame_xserver *xserver, size_t *len) {
+const struct xs_monitor *xs_monitors(struct flame_xserver *xserver, size_t *len) {
 	static struct xs_monitor fallback;
 	if (xserver->monitors_len > 0) {
 		*len = xserver->monitors_len;
@@ -53,7 +53,7 @@ static const struct xs_monitor *monitors(struct flame_xserver *xserver, size_t *
 
 static const struct xs_monitor *find(struct flame_xserver *xserver, uint32_t id) {
 	size_t len;
-	const struct xs_monitor *all = monitors(xserver, &len);
+	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	for (size_t i = 0; i < len; i++) {
 		if (all[i].id == id) {
 			return &all[i];
@@ -170,7 +170,7 @@ static void get_screen_info(struct xs_client *client, const struct xin *in) {
 		return;
 	}
 	size_t len;
-	const struct xs_monitor *all = monitors(xserver, &len);
+	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	int rate = 0;
 	for (size_t i = 0; i < len; i++) {
 		rate = refresh_of(&all[i]) > rate ? refresh_of(&all[i]) : rate;
@@ -226,7 +226,7 @@ static void get_screen_resources(struct xs_client *client, const struct xin *in,
 		return;
 	}
 	size_t len;
-	const struct xs_monitor *all = monitors(xserver, &len);
+	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	char names[1024];
 	size_t names_len = 0;
 	for (size_t i = 0; i < len; i++) {
@@ -380,7 +380,7 @@ static void get_panning(struct xs_client *client, const struct xin *in) {
 
 static void get_output_primary(struct xs_client *client) {
 	size_t len;
-	const struct xs_monitor *all = monitors(client->xserver, &len);
+	const struct xs_monitor *all = xs_monitors(client->xserver, &len);
 	uint32_t primary = 0;
 	for (size_t i = 0; i < len; i++) {
 		if (all[i].primary) {
@@ -401,7 +401,7 @@ static void get_monitors(struct xs_client *client, const struct xin *in) {
 		return;
 	}
 	size_t len;
-	const struct xs_monitor *all = monitors(xserver, &len);
+	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	struct xout out;
 	xs_reply_begin(client, &out, 0);
 	xout32(&out, xserver->monitors_time);
@@ -561,7 +561,7 @@ static void send_resource_change(struct flame_xserver *xserver, struct select *s
 
 void xs_randr_changed(struct flame_xserver *xserver) {
 	size_t len;
-	const struct xs_monitor *all = monitors(xserver, &len);
+	const struct xs_monitor *all = xs_monitors(xserver, &len);
 	struct select *select;
 	wl_list_for_each(select, &xserver->randr_selects, link) {
 		for (size_t i = 0; i < len; i++) {
