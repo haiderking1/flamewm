@@ -233,8 +233,8 @@ static void handle_damage_idle(void *data) {
 	xserver->damage_idle = NULL;
 	struct xs_window *window;
 	wl_list_for_each(window, &xserver->windows, all_link) {
-		if (!window->damaged) {
-			continue;
+		if (!window->damaged || !window->painted) {
+			continue; // not painted yet: its damage keeps adding up
 		}
 		window->damaged = false;
 		if (window->backing && xserver->hooks.damage) {
@@ -244,7 +244,22 @@ static void handle_damage_idle(void *data) {
 	}
 }
 
+// what changed, handed over once the window has been painted. the
+// background alone (None leaves the new backing black) isn't worth showing:
+// a menu would flash black until the app draws it
+static void damage_quiet(struct flame_xserver *xserver, struct xs_window *top,
+		const pixman_region32_t *region);
+
+// the app drew: from now on the window shows
 static void damage(struct flame_xserver *xserver, struct xs_window *top,
+		const pixman_region32_t *region) {
+	if (top && top->backing) {
+		top->painted = true;
+	}
+	damage_quiet(xserver, top, region);
+}
+
+static void damage_quiet(struct flame_xserver *xserver, struct xs_window *top,
 		const pixman_region32_t *region) {
 	if (!top || !top->backing || !pixman_region32_not_empty(region)) {
 		return;
@@ -647,7 +662,7 @@ static void draw_boxes(struct xs_client *client, struct target *t, const struct 
 
 // paint a window's background over region (image coords), ParentRelative
 // borrowing its parent's
-static void paint_background(struct flame_xserver *xserver, struct xs_window *window,
+static bool paint_background(struct flame_xserver *xserver, struct xs_window *window,
 		const struct target *t, const pixman_region32_t *region) {
 	struct xs_window *owner = window;
 	while (owner->background == XS_BACKGROUND_PARENT && owner->parent && owner->parent->parent) {
@@ -668,9 +683,10 @@ static void paint_background(struct flame_xserver *xserver, struct xs_window *wi
 		gc.ts_x = (int16_t)(ox - tx - t->dx);
 		gc.ts_y = (int16_t)(oy - ty - t->dy);
 	} else if (owner->background != XS_BACKGROUND_PIXEL) {
-		return; // None: whatever was there stays
+		return false; // None: whatever was there stays
 	}
 	paint(xserver, t, &gc, region);
+	return true;
 }
 
 static void send_expose(struct flame_xserver *xserver, struct xs_window *window, int x, int y,
@@ -694,8 +710,10 @@ static void expose_area(struct flame_xserver *xserver, struct xs_window *window,
 		pixman_region32_t region;
 		pixman_region32_init_rect(&region, t.dx + x, t.dy + y, (unsigned)w, (unsigned)h);
 		pixman_region32_intersect(&region, &region, &t.clip);
-		paint_background(xserver, window, &t, &region);
-		damage(xserver, t.top, &region);
+		if (paint_background(xserver, window, &t, &region)) {
+			t.top->painted = true; // a real color or tile is something to show
+		}
+		damage_quiet(xserver, t.top, &region);
 		pixman_region32_fini(&region);
 		target_finish(&t);
 	}
@@ -756,6 +774,7 @@ void xs_draw_window_hidden(struct flame_xserver *xserver, struct xs_window *wind
 			window->backing = NULL;
 		}
 		window->damaged = false;
+		window->painted = false;
 		pixman_region32_clear(&window->damage);
 		return;
 	}
@@ -1465,8 +1484,10 @@ static void clear_area(struct xs_client *client, const struct xin *in) {
 		pixman_region32_t region;
 		pixman_region32_init_rect(&region, t.dx + x, t.dy + y, (unsigned)w, (unsigned)h);
 		pixman_region32_intersect(&region, &region, &t.clip);
-		paint_background(xserver, window, &t, &region);
-		damage(xserver, t.top, &region);
+		if (paint_background(xserver, window, &t, &region)) {
+			t.top->painted = true; // a real color or tile is something to show
+		}
+		damage_quiet(xserver, t.top, &region);
 		pixman_region32_fini(&region);
 		target_finish(&t);
 	}
