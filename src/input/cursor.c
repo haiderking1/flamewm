@@ -85,6 +85,9 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 	struct wlr_seat *seat = server->input.seat;
 	render_pointer_move(&server->render, cursor->wlr->x, cursor->wlr->y);
 
+	if (moved) {
+		xbridge_pointer_input(&server->xbridge, false);
+	}
 	if (drag_active(&server->input.drag)) {
 		if (moved) {
 			drag_motion(&server->input.drag);
@@ -92,6 +95,17 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 		return;
 	}
 	if (held_motion(cursor, time_msec)) {
+		return;
+	}
+
+	// an X11 window: its events go through flame's X server, not the seat
+	struct flame_view *xview;
+	if (xshell_pointer_motion(&server->xshell, cursor->wlr->x, cursor->wlr->y, time_msec,
+			&xview)) {
+		if (moved && xview) {
+			follow_mouse(server, xview, NULL);
+		}
+		wlr_seat_pointer_clear_focus(seat);
 		return;
 	}
 
@@ -103,7 +117,9 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 		follow_mouse(server, view, surface);
 	}
 
-	if (!surface) {
+	// an X11 app's menu is open: like its pointer grab, the app's other
+	// windows don't see the pointer go by
+	if (!surface || xbridge_menu_holds_pointer(&server->xbridge, surface)) {
 		wlr_seat_pointer_clear_focus(seat);
 		return;
 	}
@@ -131,7 +147,20 @@ static void handle_button(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_button_event *event = data;
 
 	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
+	xbridge_pointer_input(&server->xbridge, true);
 	if (drag_button(&server->input.drag, event->button, pressed)) {
+		return;
+	}
+	if (xshell_pointer_button(&server->xshell, event->button, pressed, event->time_msec)) {
+		if (pressed) {
+			double sx, sy;
+			struct wlr_surface *surface;
+			struct flame_view *view = desktop_view_at(&server->desktop,
+				cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
+			if (view) {
+				focus_view(&server->desktop, view);
+			}
+		}
 		return;
 	}
 
@@ -140,7 +169,17 @@ static void handle_button(struct wl_listener *listener, void *data) {
 		struct wlr_surface *surface;
 		struct flame_view *view = desktop_view_at(&server->desktop,
 			cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
+		if (surface && server->input.seat->pointer_state.focused_surface != surface) {
+			// an open menu held the pointer back, the click lands where it is,
+			// so clicking outside the menu still closes it
+			wlr_seat_pointer_notify_enter(server->input.seat, surface, sx, sy);
+		}
+		if (surface) {
+			xbridge_pointer_pressed(&server->xbridge, surface);
+		}
 		if (view) {
+			// a view glued inside it (steam's store page) takes the keys
+			view_pressed(view, surface);
 			focus_view(&server->desktop, view);
 		} else if (surface) {
 			layers_offer_keyboard(&server->layers, surface);
@@ -158,6 +197,11 @@ static void handle_axis(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, axis);
 	struct wlr_pointer_axis_event *event = data;
 	if (drag_active(&cursor->server->input.drag)) {
+		return;
+	}
+	if (xshell_pointer_axis(&cursor->server->xshell,
+			event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL, event->delta,
+			event->time_msec)) {
 		return;
 	}
 	wlr_seat_pointer_notify_axis(cursor->server->input.seat, event->time_msec,

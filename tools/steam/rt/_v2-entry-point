@@ -1,0 +1,21 @@
+#!/bin/sh
+# steam launches steamwebhelper through its runtime's entry point, found via
+# $STEAM_RUNTIME_STEAMRT. this one adds --ozone-platform=wayland to the
+# webhelper's arguments and hands everything to steam's real runtime
+# steam's install: ~/.steam/bin64 points into it
+root="${STEAM_ROOT:-$(dirname "$(readlink -f "$HOME/.steam/bin64")")}"
+real="$root/steamrt64/pv-runtime/steam-runtime-steamrt/_v2-entry-point"
+# args: [entry point options] -- <wrapper script> <webhelper args>
+n=$#
+seen=
+wrapped=
+for arg in "$@"; do
+	set -- "$@" "$arg"
+	if [ -n "$seen" ] && [ -z "$wrapped" ]; then
+		set -- "$@" --ozone-platform=wayland
+		wrapped=1
+	fi
+	[ "$arg" = "--" ] && seen=1
+done
+shift "$n"
+exec "$real" "$@"

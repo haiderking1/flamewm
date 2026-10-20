@@ -1,0 +1,12 @@
+#!/bin/sh
+# run an app on flamewm's own X server instead of wayland:
+#   flame-x11 vkcube --wsi xcb
+if [ -z "$FLAMEWM_X11_DISPLAY" ]; then
+	echo "flame-x11: not inside flamewm (no FLAMEWM_X11_DISPLAY)" >&2
+	exit 1
+fi
+[ $# -gt 0 ] || { echo "usage: flame-x11 <app> [args]" >&2; exit 1; }
+export DISPLAY="$FLAMEWM_X11_DISPLAY"
+# toolkits that can do both would pick wayland first, this is about X
+unset WAYLAND_DISPLAY
+exec "$@"

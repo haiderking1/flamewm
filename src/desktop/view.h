@@ -38,6 +38,12 @@ struct flame_view_impl {
 	// what bars show. NULL when the client never said
 	const char *(*app_id)(struct flame_view *view);
 	const char *(*title)(struct flame_view *view);
+	// optional: its content is on screen here now, layout coords
+	void (*placed)(struct flame_view *view, struct wlr_box content);
+	// optional: who types when it has focus, when that's not its surface
+	struct wlr_surface *(*keyboard_surface)(struct flame_view *view);
+	// optional: a button went down on surface, somewhere inside the view
+	void (*pressed)(struct flame_view *view, struct wlr_surface *surface);
 };
 
 enum flame_border_side {
@@ -98,6 +104,10 @@ void view_set_focused(struct flame_view *view, bool focused);
 void view_set_resizing(struct flame_view *view, bool resizing);
 void view_close(struct flame_view *view);
 struct wlr_surface *view_surface(struct flame_view *view);
+// where the keyboard goes when it's focused
+struct wlr_surface *view_keyboard_surface(struct flame_view *view);
+// a click landed on surface inside it, before it gets focused
+void view_pressed(struct flame_view *view, struct wlr_surface *surface);
 const char *view_app_id(struct flame_view *view);
 const char *view_title(struct flame_view *view);
 

@@ -1,0 +1,16 @@
+#!/bin/sh
+# steam on flamewm, no xwayland. its UI (CEF in steamwebhelper) draws over
+# wayland straight to flame, valve's window bookkeeping (map, hide, title,
+# focus) talks to flame's own X server, which never draws anything.
+# games it starts get turned away by that X server and go wayland
+if [ -z "$FLAMEWM_X11_DISPLAY" ]; then
+	echo "flame-steam: not running inside flamewm, starting plain steam" >&2
+	exec steam "$@"
+fi
+here=$(dirname "$(readlink -f "$0")")
+export DISPLAY="$FLAMEWM_X11_DISPLAY"
+# steam starts its webhelper through this runtime, ours adds the wayland flag
+export STEAM_RUNTIME_STEAMRT="$here/rt"
+# proton builds that have wine's wayland driver use it
+export PROTON_ENABLE_WAYLAND="${PROTON_ENABLE_WAYLAND:-1}"
+exec steam "$@"

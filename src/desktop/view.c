@@ -104,6 +104,9 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 
 	view->shown = true;
 	scene_node_set_enabled(&view->tree->node, true);
+	if (view->impl->placed) {
+		view->impl->placed(view, (struct wlr_box){box.x + bw, box.y + bw, width, height});
+	}
 }
 
 void view_hide(struct flame_view *view) {
@@ -134,6 +137,18 @@ void view_close(struct flame_view *view) {
 
 struct wlr_surface *view_surface(struct flame_view *view) {
 	return view->impl->surface(view);
+}
+
+struct wlr_surface *view_keyboard_surface(struct flame_view *view) {
+	struct wlr_surface *surface =
+		view->impl->keyboard_surface ? view->impl->keyboard_surface(view) : NULL;
+	return surface ? surface : view_surface(view);
+}
+
+void view_pressed(struct flame_view *view, struct wlr_surface *surface) {
+	if (view->impl->pressed) {
+		view->impl->pressed(view, surface);
+	}
 }
 
 const char *view_app_id(struct flame_view *view) {

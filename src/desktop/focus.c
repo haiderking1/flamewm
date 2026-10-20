@@ -16,7 +16,7 @@ void focus_restore_keyboard(struct flame_desktop *desktop) {
 	}
 	layers_drop_keyboard(&server->layers);
 	input_keyboard_enter(&server->input,
-		desktop->focused ? view_surface(desktop->focused) : NULL);
+		desktop->focused ? view_keyboard_surface(desktop->focused) : NULL);
 }
 
 void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
