@@ -58,6 +58,34 @@ void workspace_remove_view(struct flame_workspace *workspace, struct flame_view 
 	}
 }
 
+// swap two links in place, neighbours need special care
+static void swap_links(struct wl_list *a, struct wl_list *b) {
+	if (a->next == b) {
+		wl_list_remove(a);
+		wl_list_insert(b, a);
+	} else if (b->next == a) {
+		wl_list_remove(b);
+		wl_list_insert(a, b);
+	} else {
+		struct wl_list *a_prev = a->prev;
+		struct wl_list *b_prev = b->prev;
+		wl_list_remove(a);
+		wl_list_remove(b);
+		wl_list_insert(b_prev, a);
+		wl_list_insert(a_prev, b);
+	}
+}
+
+void workspace_swap_views(struct flame_workspace *workspace, struct flame_view *a,
+		struct flame_view *b) {
+	tree_swap(a->node, b->node);
+	struct tree_node *node = a->node;
+	a->node = b->node;
+	b->node = node;
+	// the list follows leaf order, so it swaps too
+	swap_links(&a->link, &b->link);
+}
+
 struct flame_view *workspace_first_view(struct flame_workspace *workspace) {
 	if (wl_list_empty(&workspace->views)) {
 		return NULL;

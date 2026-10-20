@@ -27,6 +27,10 @@ struct tree_node *workspace_insert_target(struct flame_workspace *workspace);
 bool workspace_add_view(struct flame_workspace *workspace, struct flame_view *view);
 void workspace_remove_view(struct flame_workspace *workspace, struct flame_view *view);
 
+// both must live here. trades their tiles and their spot in the list
+void workspace_swap_views(struct flame_workspace *workspace, struct flame_view *a,
+	struct flame_view *b);
+
 struct flame_view *workspace_first_view(struct flame_workspace *workspace);
 
 #endif

@@ -51,6 +51,8 @@ struct flame_view {
 	// what's on screen, border included. targets live in txn until applied
 	struct wlr_box geometry;
 	bool shown;
+	// held by a mouse drag, the drag owns where its tree sits
+	bool grabbed;
 
 	struct flame_view_txn txn;
 };

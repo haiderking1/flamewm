@@ -35,6 +35,10 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view);
 void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view);
 
+// swap two windows on the visible workspace, lands as one transaction
+void desktop_swap_views(struct flame_desktop *desktop, struct flame_view *a,
+	struct flame_view *b);
+
 void desktop_switch_workspace(struct flame_desktop *desktop, int index);
 void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	struct flame_view *view, int index);

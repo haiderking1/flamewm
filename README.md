@@ -62,6 +62,7 @@ mod is super.
 | `super+j` / `super+k` | focus next / prev |
 | `super+1..9` | go to workspace |
 | `super+shift+1..9` | send window to workspace |
+| `super` + left drag | drop a window on another to swap them |
 | `super+shift+q` | quit |
 | `ctrl+alt+f1..f12` | switch vt (tty only) |
 

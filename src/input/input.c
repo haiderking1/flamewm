@@ -62,6 +62,7 @@ bool input_init(struct flame_input *input, struct flame_server *server) {
 	if (!cursor_init(&input->cursor, server)) {
 		return false;
 	}
+	drag_init(&input->drag, server);
 
 	listener_connect(&input->new_input, &server->backend.wlr->events.new_input,
 		handle_new_input);
