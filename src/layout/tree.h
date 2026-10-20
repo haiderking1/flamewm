@@ -42,4 +42,14 @@ struct tree_node *tree_last_leaf(struct tree_node *root);
 // two leaves trade windows, the tree's shape stays the same
 void tree_swap(struct tree_node *a, struct tree_node *b);
 
+// the split whose dividing line is one of leaf's edges along this axis:
+// its far edge (right/bottom) when far, else its near edge (left/top).
+// NULL when that edge is the screen edge
+struct tree_node *tree_edge_split(struct tree_node *leaf, enum tree_split split, bool far);
+// size of a split's first child along its axis, from the last layout
+int tree_first_size(const struct tree_node *node);
+// move a split's dividing line so its first child gets size pixels, both
+// children keep at least min
+void tree_set_first_size(struct tree_node *node, int size, int gap, int min);
+
 #endif
