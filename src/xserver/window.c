@@ -21,6 +21,7 @@ struct xs_window *xs_window_create(struct flame_xserver *xserver, struct xs_clie
 	wl_list_init(&window->children);
 	wl_list_init(&window->properties);
 	wl_list_init(&window->interests);
+	pixman_region32_init(&window->damage);
 	if (parent) {
 		wl_list_insert(parent->children.prev, &window->link); // on top
 	} else {
@@ -42,18 +43,6 @@ static void deliver_structure(struct flame_xserver *xserver, struct xs_window *w
 		xs_event_put32(event, 4, window->parent->id);
 		xs_event_deliver(xserver, window->parent, XS_MASK_SUBSTRUCTURE, event);
 	}
-}
-
-static void expose(struct flame_xserver *xserver, struct xs_window *window) {
-	if (!xs_window_viewable(window) || window->class != 1) {
-		return;
-	}
-	struct xs_event event = {0};
-	xs_event_put8(&event, 0, XS_EVENT_EXPOSE);
-	xs_event_put32(&event, 4, window->id);
-	xs_event_put16(&event, 12, window->width);
-	xs_event_put16(&event, 14, window->height);
-	xs_event_deliver(xserver, window, XS_MASK_EXPOSURE, &event);
 }
 
 static bool inside(const struct xs_window *window, const struct xs_window *ancestor) {
@@ -86,13 +75,8 @@ void xs_window_map(struct flame_xserver *xserver, struct xs_window *window) {
 	xs_event_put32(&event, 8, window->id);
 	xs_event_put8(&event, 12, window->override_redirect);
 	deliver_structure(xserver, window, &event);
-	expose(xserver, window);
-	struct xs_window *child;
-	wl_list_for_each(child, &window->children, link) {
-		if (child->mapped) {
-			expose(xserver, child);
-		}
-	}
+	// it and whatever's mapped inside get their backgrounds and Expose
+	xs_draw_window_shown(xserver, window);
 	xs_changed(xserver);
 }
 
@@ -105,6 +89,7 @@ void xs_window_unmap(struct flame_xserver *xserver, struct xs_window *window) {
 	xs_event_put8(&event, 0, XS_EVENT_UNMAP_NOTIFY);
 	xs_event_put32(&event, 8, window->id);
 	deliver_structure(xserver, window, &event);
+	xs_draw_window_hidden(xserver, window);
 	if (focus_inside(xserver, window)) {
 		xs_focus_lost(xserver, window);
 	}
@@ -133,6 +118,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 		}
 	}
 	xs_present_window_gone(xserver, window->id);
+	xs_draw_window_freed(window);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
 	free(window);
@@ -187,6 +173,7 @@ static void restack(struct xs_window *window, struct xs_window *sibling, uint8_t
 void xs_window_configure(struct flame_xserver *xserver, struct xs_window *window,
 		uint16_t mask, int x, int y, int width, int height, int border, uint32_t sibling,
 		uint8_t stack) {
+	int old_x = window->x, old_y = window->y, old_w = window->width, old_h = window->height;
 	if (mask & 1) {
 		window->x = (int16_t)x;
 	}
@@ -223,8 +210,9 @@ void xs_window_configure(struct flame_xserver *xserver, struct xs_window *window
 	xs_event_put16(&event, 24, window->border);
 	xs_event_put8(&event, 26, window->override_redirect);
 	deliver_structure(xserver, window, &event);
-	if ((mask & (4 | 8)) && window->mapped) {
-		expose(xserver, window);
+	if (window->mapped && (window->x != old_x || window->y != old_y
+			|| window->width != old_w || window->height != old_h)) {
+		xs_draw_window_moved(xserver, window, old_x, old_y, old_w, old_h);
 	}
 	if (resized) {
 		// vulkan swapchains learn they're the wrong size from this
@@ -470,6 +458,12 @@ void xs_pixmap_destroy(struct flame_xserver *xserver, struct xs_pixmap *pixmap) 
 	for (int i = 0; i < pixmap->planes; i++) {
 		close(pixmap->fds[i]);
 	}
+	if (pixmap->image) {
+		pixman_image_unref(pixmap->image);
+	}
+	if (pixmap->shm) {
+		xs_shm_unref(pixmap->shm);
+	}
 	wl_list_remove(&pixmap->link);
 	free(pixmap);
 }
@@ -501,6 +495,13 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 			xs_pixmap_destroy(xserver, pixmap);
 		}
 	}
+	struct xs_gc *gc, *gtmp;
+	wl_list_for_each_safe(gc, gtmp, &xserver->gcs, link) {
+		if (gc->owner == client) {
+			xs_gc_destroy(gc);
+		}
+	}
+	xs_shm_detach_all(xserver, client);
 	struct xs_fence *fence, *ftmp;
 	wl_list_for_each_safe(fence, ftmp, &xserver->fences, link) {
 		if (fence->owner == client) {
