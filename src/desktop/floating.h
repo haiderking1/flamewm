@@ -15,6 +15,9 @@ struct flame_view;
 // the output, border added. a window that floated before goes back there
 struct wlr_box floating_initial_box(struct flame_desktop *desktop, struct flame_view *view);
 
+// box kept where it can be grabbed: the output may have shrunk or gone
+struct wlr_box floating_on_screen(struct flame_desktop *desktop, struct wlr_box box);
+
 // tile it, or float it
 void floating_toggle(struct flame_desktop *desktop, struct flame_view *view);
 

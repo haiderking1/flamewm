@@ -32,12 +32,9 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 	if (view) {
 		view->workspace->last_focused = view;
 		view_set_focused(view, true);
-		// keeps its popups above the neighbours, a float above the others
+		// keeps its popups above the neighbours, a float above the others.
+		// the floats list keeps its order: that's what focus cycles through
 		scene_node_raise_to_top(&view->tree->node);
-		if (view->floating) {
-			wl_list_remove(&view->link);
-			wl_list_insert(view->workspace->floats.prev, &view->link);
-		}
 	}
 	focus_restore_keyboard(desktop);
 	desktop_notify(desktop);
@@ -108,8 +105,10 @@ struct flame_view *focus_after_close(struct flame_desktop *desktop, struct wlr_b
 	// the float on top under the pointer, floats sit above everything
 	struct wlr_cursor *pointer = server->input.cursor.wlr;
 	struct flame_view *view;
-	wl_list_for_each_reverse(view, &workspace->floats, link) {
-		if (server->config->focus_follows_mouse
+	struct flame_node *node;
+	wl_list_for_each_reverse(node, &workspace->float_tree->children, link) {
+		view = view_from_node(node);
+		if (view && server->config->focus_follows_mouse
 				&& wlr_box_contains_point(&view->float_box, pointer->x, pointer->y)) {
 			return view;
 		}

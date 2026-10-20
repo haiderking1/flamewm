@@ -276,7 +276,7 @@ void scene_surface_set_clip(struct flame_surface_node *node, const struct wlr_bo
 
 static struct flame_node *node_at(struct flame_node *node, int x, int y, double lx,
 		double ly, struct wlr_surface **surface, double *sx, double *sy) {
-	if (!node->enabled) {
+	if (!node->enabled || node->passthrough) {
 		return NULL;
 	}
 	x += node->x;

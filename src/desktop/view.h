@@ -92,6 +92,10 @@ struct flame_view {
 	// their shell meanwhile, so it doesn't redraw its prompt every frame
 	bool resizing;
 
+	// leaving without a close animation: it's turning into something else
+	bool unmap_quietly;
+	// the next placement doesn't animate the move: the mouse put it there
+	bool placed_by_hand;
 	// what init.lua's rules said when it opened, and its animations
 	struct flame_window_rule rule;
 	struct flame_view_anim *anim;

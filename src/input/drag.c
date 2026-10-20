@@ -98,6 +98,8 @@ static void end_move(struct flame_drag *drag, bool drop) {
 		}
 		struct flame_view *view = let_go(drag);
 		scene_node_set_position(&view->tree->node, box.x, box.y);
+		// it's there already, nothing to animate from where it was
+		view->placed_by_hand = box.x != view->geometry.x || box.y != view->geometry.y;
 		floating_set_box(&drag->server->desktop, view, box, false);
 		restore_pointer(drag);
 		return;
@@ -106,7 +108,10 @@ static void end_move(struct flame_drag *drag, bool drop) {
 	struct flame_view *view = let_go(drag);
 
 	if (target) {
-		// stays at the drop point until the transaction places both
+		// stays at the drop point until the transaction places both, and
+		// moves from there into its new tile
+		view->geometry.x = view->tree->node.x;
+		view->geometry.y = view->tree->node.y;
 		desktop_swap_views(&drag->server->desktop, view, target);
 	} else {
 		scene_node_set_position(&view->tree->node, view->geometry.x, view->geometry.y);
@@ -288,8 +293,12 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	drag->start_y = cursor->y;
 	drag->float_start = view->float_box;
 
-	// whatever it's playing is done: the mouse has it
+	// whatever it's playing is done: the mouse has it. and where a float
+	// shows is its box, nothing in flight between them
 	window_anim_stop(view);
+	if (view->floating) {
+		transaction_flush(&server->desktop.transaction);
+	}
 	bool started = drag->mode == FLAME_DRAG_MOVE
 		? begin_move(drag, view) : begin_resize(drag, view);
 	if (!started) {

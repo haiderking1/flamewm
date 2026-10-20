@@ -163,7 +163,9 @@ static struct wlr_box shown_box(struct flame_view_anim *state, struct wlr_box pl
 }
 
 void window_anim_placed(struct flame_view *view, struct wlr_box was, bool first) {
-	if (!wanted(view) || view->grabbed || view->resizing
+	bool by_hand = view->placed_by_hand;
+	view->placed_by_hand = false;
+	if (by_hand || !wanted(view) || view->grabbed || view->resizing
 			|| view->workspace != view->desktop->active) {
 		window_anim_stop(view);
 		return;
@@ -239,7 +241,7 @@ void window_anim_focus(struct flame_view *view, bool focused) {
 // ---- closing ----
 
 void window_anim_snapshot(struct flame_view *view) {
-	if (!wanted(view) || !view->shown || view->workspace != view->desktop->active
+	if (!wanted(view) || !view->shown || view->desktop->server->terminating || view->workspace != view->desktop->active
 			|| type_of(view->rule.close, config_of(view)->close) == FLAME_ANIM_NONE) {
 		return;
 	}
@@ -292,6 +294,13 @@ void window_anim_closed(struct flame_view *view) {
 	};
 	slide_offset(view, box, &style.slide_dx, &style.slide_dy);
 	ghost_play(anims_of(view), parent, texture, box, &style);
+}
+
+void window_anim_discard(struct flame_view *view) {
+	if (view->anim && view->anim->snapshot) {
+		wlr_texture_destroy(view->anim->snapshot);
+		view->anim->snapshot = NULL;
+	}
 }
 
 void window_anim_free(struct flame_view *view) {

@@ -33,6 +33,8 @@ struct flame_node {
 	struct flame_tree *parent; // NULL for the root
 	struct wl_list link; // parent->children, bottom to top
 	bool enabled;
+	// drawn but not there for the pointer: a workspace sliding away
+	bool passthrough;
 	int x, y; // relative to the parent
 	void *data; // views point this back at themselves
 
