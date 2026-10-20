@@ -570,6 +570,36 @@ static bool prepare(struct flame_frame *frame, const struct flame_render_target 
 	return ready;
 }
 
+// a cursor commit sends the buffer on screen again. when that's a client's
+// (direct scanout), KMS letting go of the previous commit no longer means
+// the client may have it back: this commit holds it too. without that, the
+// client reuses it while it's still on screen (a video player decodes the
+// next frame into it, black blocks whenever the mouse moves)
+static void keep_scanout_buffer(struct flame_frame *frame,
+		const struct flame_element *candidate, struct wlr_output_state *state) {
+	if (!frame->scanout.active || !candidate || !candidate->surface || !candidate->buffer
+			|| !frame->out_timeline) {
+		return;
+	}
+	struct wlr_buffer *buffer = candidate->buffer;
+	struct wlr_client_buffer *client = wlr_client_buffer_get(buffer);
+	if (client && client->source) {
+		buffer = client->source;
+	}
+	if (buffer != frame->front) {
+		return;
+	}
+	struct wlr_linux_drm_syncobj_surface_v1_state *sync =
+		wlr_linux_drm_syncobj_v1_get_surface_state(candidate->surface);
+	if (!sync) {
+		return; // implicit sync: the backend holds the buffer while it shows
+	}
+	frame->out_point++;
+	wlr_output_state_set_signal_timeline(state, frame->out_timeline, frame->out_point);
+	wlr_linux_drm_syncobj_v1_state_add_release_point(sync, frame->out_timeline,
+		frame->out_point, frame->output->event_loop);
+}
+
 // the schedule said now: build a frame from the latest scene and send it to
 // KMS, or hold it behind the pending one. nothing changed: no pageflip at all
 static void render(struct flame_frame *frame, int64_t now) {
@@ -608,6 +638,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		if (cursor_only) {
 			// no damage set: it's the same picture either way
 			wlr_output_state_set_buffer(&state, frame->front);
+			keep_scanout_buffer(frame, candidate, &state);
 		} else {
 			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
 		}
