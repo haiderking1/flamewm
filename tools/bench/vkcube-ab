@@ -1,0 +1,28 @@
+#!/bin/sh
+# the same app, both ways, side by side: vkcube on wayland and vkcube on
+# flamewm's X server. after a while, flame's own numbers for each:
+# a new buffer handed over -> the flip that first showed it.
+# needs FLAME_FRAME_TIMING on (flamewm.run has it) and vulkan-tools
+seconds=${1:-10}
+log=${FLAMEWM_LOG:-/tmp/flamewm.log}
+command -v vkcube >/dev/null || { echo "vkcube missing: sudo pacman -S vulkan-tools" >&2; exit 1; }
+[ -n "$FLAMEWM_X11_DISPLAY" ] || { echo "not inside flamewm" >&2; exit 1; }
+here=$(dirname "$(readlink -f "$0")")
+
+start=$(wc -l < "$log")
+vkcube --wsi wayland > /dev/null 2>&1 &
+wayland=$!
+"$here/../x11/flame-x11" vkcube --wsi xcb > /dev/null 2>&1 &
+x11=$!
+echo "vkcube wayland ($wayland) and X11 ($x11) running for ${seconds}s, keep them tiled..."
+sleep "$seconds"
+kill "$wayland" "$x11" 2>/dev/null
+
+tail -n +"$((start + 1))" "$log" | grep -a 'frame-timing' | grep -ao 'wayland_commit_to_flip_ms=[^ ]*\|x11_present_to_flip_ms=[^ ]*' |
+awk -F'[=/]' '$2 != "n" {
+	n[$1]++; mn[$1] += $2; avg[$1] += $3; if ($4 > mx[$1]) mx[$1] = $4
+}
+END {
+	print "\nbuffer handed to flame -> on screen (ms), min / mean / max per 2s report, averaged:"
+	for (k in n) printf "  %-26s %6.3f / %6.3f / %6.3f  (%d reports)\n", k, mn[k] / n[k], avg[k] / n[k], mx[k], n[k]
+}'
