@@ -30,6 +30,7 @@ struct flame_view_txn {
 	bool root_was_opaque;
 	int root_unfinished; // new size buffers so far that looked half drawn
 	int old_buffer_width, old_buffer_height;
+	int old_width, old_height; // surface size before, viewport included
 	struct wl_listener client_commit;
 	// desync subsurfaces (firefox's web content) commit on their own clock,
 	// so they get held too or they'd resize before their window does

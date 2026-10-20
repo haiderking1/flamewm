@@ -120,6 +120,11 @@ static void impl_content_size(struct flame_view *view, int *width, int *height) 
 		: toplevel->display_height;
 }
 
+static struct wlr_box impl_window_geometry(struct flame_view *view, bool pending) {
+	struct wlr_xdg_surface *base = from_view(view)->xdg->base;
+	return pending ? base->pending.geometry : base->current.geometry;
+}
+
 static void impl_set_activated(struct flame_view *view, bool activated) {
 	struct flame_toplevel *toplevel = from_view(view);
 	if (toplevel->xdg->base->initialized) {
@@ -148,6 +153,7 @@ static const struct flame_view_impl toplevel_impl = {
 	.acked = impl_acked,
 	.set_display_size = impl_set_display_size,
 	.content_size = impl_content_size,
+	.window_geometry = impl_window_geometry,
 	.set_activated = impl_set_activated,
 	.set_resizing = impl_set_resizing,
 	.close = impl_close,
