@@ -297,6 +297,9 @@ struct xs_hooks {
 	void (*selection_owner)(void *data, uint32_t selection, bool x_owned);
 	// an X client wants a selection flame owns
 	void (*selection_request)(void *data, struct xs_selection_request *request);
+	// a ClientMessage (format 32) for one of flame's windows: drag and drop
+	void (*client_message)(void *data, uint32_t window, uint32_t type,
+		const uint32_t message[5]);
 	void *data;
 };
 
@@ -396,6 +399,24 @@ void xserver_selection_answer(struct flame_xserver *xserver,
 struct xs_transfer *xserver_selection_convert(struct flame_xserver *xserver,
 	uint32_t selection, uint32_t target, xs_transfer_fn fn, void *data);
 void xserver_transfer_cancel(struct xs_transfer *transfer);
+// flame's own windows in the X tree, no client behind them: InputOnly,
+// unmapped until shown. show puts it on top of everything, at x, y root coords
+struct xs_window *xserver_flame_window_create(struct flame_xserver *xserver);
+void xserver_flame_window_destroy(struct flame_xserver *xserver, struct xs_window *window);
+void xserver_flame_window_show(struct flame_xserver *xserver, struct xs_window *window,
+	int x, int y, int width, int height);
+void xserver_flame_window_hide(struct flame_xserver *xserver, struct xs_window *window);
+// on any window, as a client would set it. units in format sized units
+bool xserver_set_property(struct flame_xserver *xserver, struct xs_window *window,
+	uint32_t name, uint32_t type, uint8_t format, const void *data, uint32_t units);
+void xserver_delete_property(struct flame_xserver *xserver, struct xs_window *window,
+	uint32_t name);
+// a ClientMessage, format 32, to whoever made window
+void xserver_send_client_message(struct flame_xserver *xserver, uint32_t window,
+	uint32_t type, const uint32_t data[5]);
+// the top-level X has at a root point (its stacking, not flame's), NULL for none
+struct xs_window *xserver_top_level_at(struct flame_xserver *xserver, int x, int y);
+void xserver_window_root_position(struct xs_window *window, int *x, int *y);
 // an atom by name, made when it doesn't exist. NULL name for unknown ones
 uint32_t xserver_atom(struct flame_xserver *xserver, const char *name);
 const char *xserver_atom_name(struct flame_xserver *xserver, uint32_t atom);

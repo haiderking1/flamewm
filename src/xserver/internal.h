@@ -305,6 +305,13 @@ void xs_selection_window_gone(struct flame_xserver *xserver, struct xs_window *w
 void xs_selection_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 void xs_selection_finish(struct flame_xserver *xserver);
 
+// ---- flame's own windows (flamewin.c) ----
+
+// SendEvent to one of flame's windows, to whoever made it: a selection's
+// answer, or a ClientMessage flame hears through its hook
+void xs_flame_window_event(struct flame_xserver *xserver, struct xs_window *window,
+	const struct xs_event *event);
+
 // ---- MIT-SHM (shm.c) ----
 
 void xs_shm_request(struct xs_client *client, const struct xin *request);
