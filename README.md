@@ -22,8 +22,13 @@ make test       # unit tests for the pure logic (the frame scheduler)
 flame decides when to draw, not wlroots: one frame waiting for KMS at a time,
 plus at most one prepared behind it (raven's scheduler). when nothing
 changed nothing gets drawn or flipped, clients still get their frame
-callbacks on the refresh grid. a lone fullscreen window whose buffer KMS
-can take goes straight to the display (direct scanout), no compositing.
+callbacks on the refresh grid, one turn per window per refresh. a lone
+fullscreen window whose buffer KMS can take goes straight to the display
+(direct scanout), no compositing.
+
+windows covered by something opaque still get frame callbacks, four times a
+second while they ask, so they don't freeze without burning the gpu, and
+their redraws don't repaint the screen.
 
 `FLAME_FRAME_PIPELINE` picks the policy:
 

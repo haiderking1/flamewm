@@ -25,9 +25,15 @@ struct flame_surface_state {
 
 	// the last frame it was in (on screen, maybe covered), see flame_scene.frame_seq
 	uint64_t drawn_seq;
-	// where that was, layout coords: the surface itself and the part that showed
+	// where that was, layout coords: the surface itself, and the bounding box
+	// of what actually showed (empty when something opaque covered it all)
 	int drawn_x, drawn_y;
-	struct wlr_box drawn_clip;
+	struct wlr_box drawn_visible;
+
+	// frame callbacks: the cycle it last had its turn in, and when (ns),
+	// or since when it's been waiting while covered
+	uint64_t callback_cycle;
+	int64_t callback_time;
 	// the output it was told it's on, NULL for none
 	struct wlr_output *entered;
 	// the scene node drawing it, when it's the root of one

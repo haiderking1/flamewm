@@ -17,10 +17,11 @@ static void before_render(void *data) {
 }
 
 // windows a transaction waits on may be hidden, they still need callbacks to
-// draw what it's waiting for. this keeps them coming once a refresh
-static void callbacks_sent(void *data, const struct timespec *now) {
+// draw what it's waiting for. this keeps them coming once a refresh: only new
+// cycles count, the revisits in between would turn this into a busy loop
+static void callbacks_sent(void *data, const struct timespec *now, bool new_cycle) {
 	struct flame_output *output = data;
-	if (transaction_frame_done(&output->server->desktop.transaction, now)) {
+	if (new_cycle && transaction_frame_done(&output->server->desktop.transaction, now)) {
 		frame_request(&output->frames);
 	}
 }

@@ -57,15 +57,16 @@ static bool shown(struct flame_surface_state *state) {
 
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct flame_surface_state *state = wl_container_of(listener, state, commit);
-	// what it redrew, where it was last drawn. moving or resizing it is the
-	// frame's business, it compares against the last one
-	if (scene_surface_drawn(state)) {
+	// what it redrew, where it was last drawn, only where it showed: a window
+	// covered by something opaque can redraw all it wants without a repaint.
+	// moving or resizing it is the frame's business, it compares frames
+	if (scene_surface_drawn(state) && !wlr_box_empty(&state->drawn_visible)) {
 		pixman_region32_t damage;
 		pixman_region32_init(&damage);
 		wlr_surface_get_effective_damage(state->surface, &damage);
 		pixman_region32_translate(&damage, state->drawn_x, state->drawn_y);
-		pixman_region32_intersect_rect(&damage, &damage, state->drawn_clip.x,
-			state->drawn_clip.y, state->drawn_clip.width, state->drawn_clip.height);
+		pixman_region32_intersect_rect(&damage, &damage, state->drawn_visible.x,
+			state->drawn_visible.y, state->drawn_visible.width, state->drawn_visible.height);
 		if (pixman_region32_not_empty(&damage)) {
 			wl_signal_emit_mutable(&state->scene->events.damage, &damage);
 		}
