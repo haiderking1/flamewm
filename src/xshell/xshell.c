@@ -264,6 +264,24 @@ static uint64_t msc_at(struct flame_xshell *xshell, int64_t t) {
 	return msc;
 }
 
+// the msc of a flip: its timestamp sits on a vblank, a hair before or after
+// the predicted grid point, so it rounds to the nearest one. msc_at would
+// floor a flip that came early to the vblank before it, and the app would
+// see that msc twice and then a gap
+static uint64_t msc_of_flip(struct flame_xshell *xshell, int64_t when) {
+	clock_sync(xshell);
+	uint64_t msc = xshell->clock.msc;
+	int64_t period = clock_period(xshell);
+	if (when > xshell->clock.when) {
+		msc += (uint64_t)((when - xshell->clock.when + period / 2) / period);
+	}
+	if (msc < xshell->clock.seen) {
+		return xshell->clock.seen;
+	}
+	xshell->clock.seen = msc;
+	return msc;
+}
+
 // when the vblank for msc comes, on the grid
 static int64_t msc_time(struct flame_xshell *xshell, uint64_t msc) {
 	clock_sync(xshell);
@@ -606,7 +624,7 @@ static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 	}
 	// buffer handed over -> on screen, next to the wayland one in frame timing
 	timing_latency(&frame->timing, true, event->when - xp->requested);
-	complete(xp, MODE_COPY, event->when, msc_at(xshell, event->when));
+	complete(xp, MODE_COPY, event->when, msc_of_flip(xshell, event->when));
 }
 
 static void handle_presented(struct wl_listener *listener, void *data) {
