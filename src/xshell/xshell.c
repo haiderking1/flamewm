@@ -1274,19 +1274,48 @@ bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delt
 	if (!xshell->pointer_window) {
 		return false;
 	}
-	// scrolling is buttons 4 to 7 on X, a click per wheel notch (15 units).
-	// touchpads send small steps, they add up
-	double *acc = &xshell->scroll[vertical ? 0 : 1];
-	*acc += delta;
-	uint16_t state = x_state(xshell);
-	while (*acc <= -15 || *acc >= 15) {
-		bool back = *acc < 0;
-		uint8_t button = vertical ? (back ? 4 : 5) : (back ? 6 : 7);
-		xserver_pointer_button(xshell->xserver, button, true, state, time);
-		xserver_pointer_button(xshell->xserver, button, false, state, time);
-		*acc += back ? 15 : -15;
-	}
+	xserver_pointer_scroll(xshell->xserver, vertical, delta, x_state(xshell), time);
 	return true;
+}
+
+void xshell_pointer_raw_motion(struct flame_xshell *xshell, double dx, double dy,
+		double raw_dx, double raw_dy, uint32_t time) {
+	if (xshell->pointer_window || is_xview(xshell->server->desktop.focused)) {
+		xserver_pointer_raw_motion(xshell->xserver, dx, dy, raw_dx, raw_dy, time);
+	}
+}
+
+static uint32_t now_ms(void) {
+	return (uint32_t)(now_ns() / 1000000);
+}
+
+static void handle_repeat_timer(void *data) {
+	struct flame_xshell *xshell = data;
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(xshell->server->input.seat);
+	if (!xshell->repeat_key || !keyboard || keyboard->repeat_info.rate <= 0
+			|| !is_xview(xshell->server->desktop.focused)) {
+		xshell->repeat_key = 0;
+		return;
+	}
+	xserver_key_repeat(xshell->xserver, xshell->repeat_key, x_state(xshell), now_ms());
+	timer_arm(&xshell->repeat_timer, now_ns() + 1000000000LL / keyboard->repeat_info.rate);
+}
+
+// a press starts the repeat after the keyboard's delay, unless it's a key
+// that doesn't repeat (modifiers). its release, or any other press, ends it
+static void repeat_update(struct flame_xshell *xshell, uint8_t keycode, bool pressed) {
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(xshell->server->input.seat);
+	if (!pressed && keycode != xshell->repeat_key) {
+		return;
+	}
+	xshell->repeat_key = 0;
+	timer_arm(&xshell->repeat_timer, 0);
+	if (pressed && keyboard && keyboard->keymap && keyboard->repeat_info.rate > 0
+			&& xkb_keymap_key_repeats(keyboard->keymap, keycode)) {
+		xshell->repeat_key = keycode;
+		timer_arm(&xshell->repeat_timer,
+			now_ns() + (int64_t)keyboard->repeat_info.delay * 1000000);
+	}
 }
 
 bool xshell_key(struct flame_xshell *xshell, uint32_t keycode, bool pressed, uint32_t time) {
@@ -1294,6 +1323,7 @@ bool xshell_key(struct flame_xshell *xshell, uint32_t keycode, bool pressed, uin
 		return false;
 	}
 	xserver_key(xshell->xserver, (uint8_t)(keycode + 8), pressed, x_state(xshell), time);
+	repeat_update(xshell, (uint8_t)(keycode + 8), pressed);
 	return true;
 }
 
@@ -1352,6 +1382,10 @@ bool xshell_init(struct flame_xshell *xshell, struct flame_server *server,
 	if (!timer_init(&xshell->msc_timer, server->loop, handle_msc_timer, xshell)) {
 		return false;
 	}
+	if (!timer_init(&xshell->repeat_timer, server->loop, handle_repeat_timer, xshell)) {
+		timer_finish(&xshell->msc_timer);
+		return false;
+	}
 	listener_connect(&xshell->new_output, &server->outputs.events.new_frame,
 		handle_new_frame);
 	listener_connect(&xshell->desktop_changed, &server->desktop.events.changed,
@@ -1377,6 +1411,7 @@ void xshell_finish(struct flame_xshell *xshell) {
 		free(notify);
 	}
 	timer_finish(&xshell->msc_timer);
+	timer_finish(&xshell->repeat_timer);
 	listener_disconnect(&xshell->new_output);
 	listener_disconnect(&xshell->desktop_changed);
 }

@@ -299,6 +299,12 @@ struct flame_xserver {
 	size_t monitors_len;
 	uint32_t monitors_time, monitor_ids;
 	struct wl_list randr_selects;
+	// XInput 2, see xinput.c: who selected what, the scroll valuators (in
+	// wayland's axis units), wheel notches building up, and whether XI2
+	// clients have seen the valuators since the pointer came in
+	struct wl_list xi_selects;
+	double scroll[2], scroll_notches[2];
+	bool scroll_primed;
 	struct xs_window *root;
 	struct xs_atoms atoms;
 	uint32_t focus;
@@ -307,6 +313,7 @@ struct flame_xserver {
 	int pointer_x, pointer_y;
 	uint32_t pointer_window; // the deepest window it's in, 0 for none
 	uint32_t grab; // the window a held button grabbed, 0 for none
+	uint16_t state; // modifiers and buttons, as the last input had them
 	uint64_t slots[4]; // client id ranges in use
 	uint32_t timestamp; // ms, for events that carry one
 };
@@ -348,8 +355,18 @@ void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top
 void xserver_pointer_button(struct flame_xserver *xserver, uint8_t button, bool pressed,
 	uint16_t state, uint32_t time);
 void xserver_pointer_leave(struct flame_xserver *xserver, uint32_t time);
+// a wheel or touchpad scrolled over the pointer's X window, delta in
+// wayland's axis units (15 a notch)
+void xserver_pointer_scroll(struct flame_xserver *xserver, bool vertical, double delta,
+	uint16_t state, uint32_t time);
+// the mouse moved by this much, accelerated and not: games read it raw
+void xserver_pointer_raw_motion(struct flame_xserver *xserver, double dx, double dy,
+	double raw_dx, double raw_dy, uint32_t time);
 // to the X focus window. keycode is evdev + 8
 void xserver_key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
+	uint32_t time);
+// a held key repeats, flame keeps time
+void xserver_key_repeat(struct flame_xserver *xserver, uint8_t keycode, uint16_t state,
 	uint32_t time);
 // WM_DELETE_WINDOW when the app said it handles it, else the client goes.
 // true for the polite way

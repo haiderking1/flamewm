@@ -35,6 +35,14 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 wlroots also pulls in libinput, libseat (seatd), libliftoff,
 libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
+## tests
+
+`make test` only, flamewm never links these.
+
+| dep | pkg-config | why |
+| --- | --- | --- |
+| libxcb + xcb-xinput, xcb-randr (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c` |
+
 ## runtime
 
 | dep | for |

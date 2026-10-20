@@ -74,6 +74,11 @@ enum {
 #define XS_RANDR_OPCODE 138
 #define XS_RANDR_FIRST_EVENT 71
 #define XS_RANDR_FIRST_ERROR 151
+// XInput 2: devices, smooth scrolling, raw motion, see xinput.c. XI1's 17
+// event codes and 5 errors are taken even though nothing sends them
+#define XS_XI_OPCODE 139
+#define XS_XI_FIRST_EVENT 73
+#define XS_XI_FIRST_ERROR 155
 
 // ---- talking back (xserver.c) ----
 
@@ -99,6 +104,13 @@ void xs_event_send(struct xs_client *client, const struct xs_event *event);
 // to everyone who selected one of mask on window
 void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, uint32_t mask,
 	const struct xs_event *event);
+
+// input events: like xs_event_deliver, but a client that selected the XI2
+// event evtype on window gets that instead and is skipped here
+void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
+	uint32_t mask, int evtype, const struct xs_event *event);
+// anyone xs_event_deliver_input would send it to
+bool xs_event_wanted_input(struct xs_window *window, uint32_t mask, int evtype);
 
 // something xbridge cares about changed, it hears once per loop iteration
 void xs_changed(struct flame_xserver *xserver);
@@ -200,6 +212,58 @@ void xs_randr_client_gone(struct flame_xserver *xserver, struct xs_client *clien
 void xs_randr_window_gone(struct flame_xserver *xserver, uint32_t window);
 // the monitors changed: listeners hear
 void xs_randr_changed(struct flame_xserver *xserver);
+
+// ---- XInput 2 (xinput.c) ----
+
+enum {
+	XS_XI_KEY_PRESS = 2,
+	XS_XI_KEY_RELEASE = 3,
+	XS_XI_BUTTON_PRESS = 4,
+	XS_XI_BUTTON_RELEASE = 5,
+	XS_XI_MOTION = 6,
+	XS_XI_ENTER = 7,
+	XS_XI_LEAVE = 8,
+	XS_XI_FOCUS_IN = 9,
+	XS_XI_FOCUS_OUT = 10,
+	XS_XI_RAW_KEY_PRESS = 13,
+	XS_XI_RAW_KEY_RELEASE = 14,
+	XS_XI_RAW_BUTTON_PRESS = 15,
+	XS_XI_RAW_BUTTON_RELEASE = 16,
+	XS_XI_RAW_MOTION = 17,
+};
+
+#define XS_XI_KEY_REPEAT (1u << 16)
+#define XS_XI_POINTER_EMULATED (1u << 16)
+
+// a key, button or motion event the way XI2 tells it
+struct xs_input {
+	int evtype;
+	uint32_t detail; // keycode, button
+	uint32_t time;
+	uint16_t state; // core: modifiers, buttons, group
+	uint32_t flags; // XS_XI_KEY_REPEAT, XS_XI_POINTER_EMULATED
+	uint8_t scroll; // the scroll valuators that moved: 1 vertical, 2 horizontal
+	bool core_only; // XI2 has no such event (an autorepeat's release)
+};
+
+void xs_xi_request(struct xs_client *client, const struct xin *request);
+void xs_xi_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+void xs_xi_window_gone(struct flame_xserver *xserver, uint32_t window);
+// anyone, or client, selected evtype on window
+bool xs_xi_selected(struct flame_xserver *xserver, struct xs_window *window, int evtype);
+bool xs_xi_client_selected(struct xs_client *client, struct xs_window *window, int evtype);
+// to everyone selecting it on receiver. source: the deepest window, where it
+// happened
+void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receiver,
+	struct xs_window *source, const struct xs_input *input);
+// XI_Enter and XI_Leave, detail as in core crossing events
+void xs_xi_crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
+	uint8_t detail, uint16_t state, uint32_t time);
+void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window);
+// raw events go to whoever selected them on the root. motion: accelerated
+// and raw deltas
+void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,
+	double dy, double raw_dx, double raw_dy, uint32_t time);
 
 // ---- MIT-SHM (shm.c) ----
 

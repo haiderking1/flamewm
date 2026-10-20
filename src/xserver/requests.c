@@ -510,7 +510,7 @@ static void query_pointer(struct xs_client *client, const struct xin *in) {
 	xout16(&out, (uint16_t)y);
 	xout16(&out, (uint16_t)(x - wx));
 	xout16(&out, (uint16_t)(y - wy));
-	xout16(&out, 0); // buttons and modifiers
+	xout16(&out, xserver->state);
 	xs_reply_send(client, &out);
 }
 
@@ -696,6 +696,7 @@ static const struct extension {
 	{"MIT-SHM", XS_SHM_OPCODE, XS_SHM_FIRST_EVENT, XS_SHM_FIRST_ERROR},
 	{"RENDER", XS_RENDER_OPCODE, 0, XS_RENDER_FIRST_ERROR},
 	{"RANDR", XS_RANDR_OPCODE, XS_RANDR_FIRST_EVENT, XS_RANDR_FIRST_ERROR},
+	{"XInputExtension", XS_XI_OPCODE, XS_XI_FIRST_EVENT, XS_XI_FIRST_ERROR},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -1037,6 +1038,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_RANDR_OPCODE:
 		xs_randr_request(client, in);
+		break;
+	case XS_XI_OPCODE:
+		xs_xi_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs
