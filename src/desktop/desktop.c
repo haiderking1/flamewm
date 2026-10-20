@@ -139,6 +139,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	if (!workspace) {
 		return;
 	}
+	struct wlr_box closed = view->geometry;
 
 	drag_forget(&desktop->server->input.drag, view);
 	drag_tree_changed(&desktop->server->input.drag);
@@ -153,7 +154,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	if (desktop->focused == view) {
 		// drop it without deactivating, the surface may be on its way out
 		desktop->focused = NULL;
-		focus_view(desktop, focus_fallback(desktop->active));
+		focus_view(desktop, focus_after_close(desktop, closed));
 	}
 	desktop_arrange(desktop);
 }
