@@ -83,6 +83,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 		return;
 	}
 
+	drag_forget(&desktop->server->input.drag, view);
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);
@@ -96,6 +97,15 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	desktop_arrange(desktop);
 }
 
+void desktop_swap_views(struct flame_desktop *desktop, struct flame_view *a,
+		struct flame_view *b) {
+	if (a == b || a->workspace != desktop->active || b->workspace != desktop->active) {
+		return;
+	}
+	workspace_swap_views(desktop->active, a, b);
+	desktop_arrange(desktop);
+}
+
 void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 	if (index < 0 || index >= FLAME_WORKSPACE_COUNT) {
 		return;
@@ -105,7 +115,8 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 		return;
 	}
 
-	// a half applied layout on a workspace we're leaving is just noise
+	// a held window or a half applied layout make no sense on a hidden workspace
+	drag_cancel(&desktop->server->input.drag);
 	transaction_flush(&desktop->transaction);
 
 	focus_view(desktop, NULL);
@@ -128,6 +139,7 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 		return;
 	}
 
+	drag_forget(&desktop->server->input.drag, view);
 	transaction_flush(&desktop->transaction);
 
 	bool was_focused = desktop->focused == view;

@@ -19,6 +19,9 @@ struct flame_config {
 	int32_t repeat_rate; // keys per second
 	int32_t repeat_delay; // ms
 
+	// hold this and left drag a window onto another to swap them
+	uint32_t drag_modifier;
+
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;
 

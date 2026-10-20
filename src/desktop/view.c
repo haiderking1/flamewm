@@ -56,7 +56,9 @@ void view_place(struct flame_view *view, struct wlr_box box) {
 	int h = box.height;
 
 	view->geometry = box;
-	wlr_scene_node_set_position(&view->tree->node, box.x, box.y);
+	if (!view->grabbed) {
+		wlr_scene_node_set_position(&view->tree->node, box.x, box.y);
+	}
 
 	// four strips instead of one filled rect so transparent clients
 	// don't get the border color bleeding through them

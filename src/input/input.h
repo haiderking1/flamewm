@@ -5,6 +5,7 @@
 #include <wayland-server-core.h>
 
 #include "input/cursor.h"
+#include "input/drag.h"
 
 struct flame_server;
 
@@ -12,6 +13,7 @@ struct flame_input {
 	struct flame_server *server;
 	struct wlr_seat *seat;
 	struct flame_cursor cursor;
+	struct flame_drag drag;
 	struct wl_list keyboards; // flame_keyboard.link
 
 	struct wl_listener new_input;

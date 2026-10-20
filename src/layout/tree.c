@@ -64,6 +64,12 @@ struct tree_node *tree_last_leaf(struct tree_node *root) {
 	return root;
 }
 
+void tree_swap(struct tree_node *a, struct tree_node *b) {
+	struct flame_view *view = a->view;
+	a->view = b->view;
+	b->view = view;
+}
+
 struct tree_node *tree_insert(struct tree_node **root, struct tree_node *target,
 		struct flame_view *view) {
 	struct tree_node *leaf = calloc(1, sizeof(*leaf));

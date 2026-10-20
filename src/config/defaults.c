@@ -50,6 +50,8 @@ const struct flame_config flame_default_config = {
 	.repeat_rate = 30,
 	.repeat_delay = 250,
 
+	.drag_modifier = MOD,
+
 	.cursor_theme = NULL,
 	.cursor_size = 24,
 

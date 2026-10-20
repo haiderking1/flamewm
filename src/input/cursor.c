@@ -24,6 +24,11 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec) {
 	struct flame_server *server = cursor->server;
 	struct wlr_seat *seat = server->input.seat;
 
+	if (drag_active(&server->input.drag)) {
+		drag_motion(&server->input.drag);
+		return;
+	}
+
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
 	desktop_view_at(&server->desktop, cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
@@ -55,7 +60,12 @@ static void handle_button(struct wl_listener *listener, void *data) {
 	struct flame_server *server = cursor->server;
 	struct wlr_pointer_button_event *event = data;
 
-	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
+	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
+	if (drag_button(&server->input.drag, event->button, pressed)) {
+		return;
+	}
+
+	if (pressed) {
 		double sx, sy;
 		struct wlr_surface *surface;
 		struct flame_view *view = desktop_view_at(&server->desktop,
@@ -71,6 +81,9 @@ static void handle_button(struct wl_listener *listener, void *data) {
 static void handle_axis(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, axis);
 	struct wlr_pointer_axis_event *event = data;
+	if (drag_active(&cursor->server->input.drag)) {
+		return;
+	}
 	wlr_seat_pointer_notify_axis(cursor->server->input.seat, event->time_msec,
 		event->orientation, event->delta, event->delta_discrete, event->source,
 		event->relative_direction);

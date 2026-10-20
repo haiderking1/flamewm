@@ -39,4 +39,7 @@ struct wlr_box tree_prospective(struct tree_node *root, struct tree_node *target
 
 struct tree_node *tree_last_leaf(struct tree_node *root);
 
+// two leaves trade windows, the tree's shape stays the same
+void tree_swap(struct tree_node *a, struct tree_node *b);
+
 #endif
