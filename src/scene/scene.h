@@ -66,6 +66,9 @@ struct flame_scene {
 		struct wl_signal changed;
 		// a client redrew part of itself, pixman_region32_t in layout coords
 		struct wl_signal damage;
+		// a wl_surface is going away (struct wlr_surface), whatever holds on
+		// to it lets go
+		struct wl_signal surface_destroy;
 	} events;
 };
 

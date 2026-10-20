@@ -21,6 +21,18 @@ void elements_clear(struct flame_element_list *list) {
 	list->len = 0;
 }
 
+void elements_forget_surface(struct flame_element_list *list, struct wlr_surface *surface) {
+	for (size_t i = 0; i < list->len; i++) {
+		struct flame_element *element = &list->data[i];
+		if (element->type == FLAME_ELEMENT_SURFACE && element->surface == surface) {
+			element->type = FLAME_ELEMENT_GONE;
+			element->surface = NULL;
+			element->texture = NULL;
+			element->buffer = NULL;
+		}
+	}
+}
+
 void elements_finish(struct flame_element_list *list) {
 	elements_clear(list);
 	free(list->data);

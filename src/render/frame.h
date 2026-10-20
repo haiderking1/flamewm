@@ -86,6 +86,7 @@ struct flame_frame {
 
 	struct wl_listener scene_changed;
 	struct wl_listener scene_damage;
+	struct wl_listener surface_destroy;
 	struct wl_listener pointer_changed;
 	struct wl_listener output_needs_frame;
 	struct wl_listener output_commit;

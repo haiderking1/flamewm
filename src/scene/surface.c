@@ -26,6 +26,7 @@ struct flame_surface_state *scene_surface_state(struct wlr_surface *surface) {
 
 static void addon_destroy(struct wlr_addon *addon) {
 	struct flame_surface_state *state = wl_container_of(addon, state, addon);
+	wl_signal_emit_mutable(&state->scene->events.surface_destroy, state->surface);
 	listener_disconnect(&state->commit);
 	wl_list_remove(&state->link);
 	wlr_addon_finish(&state->addon);
