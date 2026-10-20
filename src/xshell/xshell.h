@@ -101,6 +101,8 @@ void xshell_syncobj_destroyed(struct flame_xshell *xshell, struct xs_syncobj *sy
 int xshell_open_device(struct flame_xshell *xshell);
 size_t xshell_modifiers(struct flame_xshell *xshell, uint32_t format, uint64_t *out,
 	size_t max);
+// the X top-level flame shows at a layout point, 0 when it's something else
+uint32_t xshell_window_at(struct flame_xshell *xshell, double lx, double ly);
 // the keyboard that typed: its keymap, repeat and modifiers are X's
 void xshell_keyboard(struct flame_xshell *xshell, struct wlr_keyboard *keyboard);
 

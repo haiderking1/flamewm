@@ -12,6 +12,7 @@
 
 #include "core/server.h"
 #include "util/listener.h"
+#include "xselection/internal.h"
 #include "xserver/xserver.h"
 
 #define UTF8_MIME "text/plain;charset=utf-8"
@@ -86,7 +87,7 @@ static struct xsel_move *move_new(struct flame_xselection *xselection, int fd) {
 
 // ---- mime types and atoms ----
 
-static const char *mime_of(struct flame_xselection *xselection, uint32_t target) {
+const char *xsel_mime_of(struct flame_xselection *xselection, uint32_t target) {
 	if (target == xselection->utf8_string) {
 		return UTF8_MIME;
 	}
@@ -98,7 +99,7 @@ static const char *mime_of(struct flame_xselection *xselection, uint32_t target)
 	return name && strchr(name, '/') ? name : NULL;
 }
 
-static bool offers(struct wl_array *mime_types, const char *mime) {
+bool xsel_offers(struct wl_array *mime_types, const char *mime) {
 	char **each;
 	wl_array_for_each(each, mime_types) {
 		if (!strcmp(*each, mime)) {
@@ -153,24 +154,8 @@ static void handle_x_answer(void *data, uint32_t type, const uint8_t *bytes, siz
 	}
 }
 
-static void source_send(struct xsel_source *source, const char *mime, int fd) {
-	if (!source->sel) {
-		close(fd); // flame is going down
-		return;
-	}
-	struct flame_xselection *xselection = source->sel->owner;
-	struct wl_array *mimes = source->sel->primary ? &source->primary.mime_types
-		: &source->data.mime_types;
-	uint32_t target = 0;
-	size_t i = 0;
-	char **each;
-	wl_array_for_each(each, mimes) {
-		if (!strcmp(*each, mime)) {
-			target = ((uint32_t *)source->targets.data)[i];
-			break;
-		}
-		i++;
-	}
+void xsel_fetch(struct flame_xselection *xselection, uint32_t selection, uint32_t target,
+		int fd) {
 	struct xsel_move *move = target ? move_new(xselection, fd) : NULL;
 	if (!move) {
 		if (!target) {
@@ -180,11 +165,34 @@ static void source_send(struct xsel_source *source, const char *mime, int fd) {
 	}
 	move->source = wl_event_loop_add_fd(xselection->server->loop, fd, 0,
 		handle_move_writable, move);
-	move->transfer = xserver_selection_convert(xselection->xserver, source->sel->atom, target,
+	move->transfer = xserver_selection_convert(xselection->xserver, selection, target,
 		handle_x_answer, move);
 	if (!move->source || !move->transfer) {
 		move_free(move);
 	}
+}
+
+uint32_t xsel_target_of(struct wl_array *mimes, struct wl_array *targets, const char *mime) {
+	size_t i = 0;
+	char **each;
+	wl_array_for_each(each, mimes) {
+		if (!strcmp(*each, mime)) {
+			return ((uint32_t *)targets->data)[i];
+		}
+		i++;
+	}
+	return 0;
+}
+
+static void source_send(struct xsel_source *source, const char *mime, int fd) {
+	if (!source->sel) {
+		close(fd); // flame is going down
+		return;
+	}
+	struct wl_array *mimes = source->sel->primary ? &source->primary.mime_types
+		: &source->data.mime_types;
+	xsel_fetch(source->sel->owner, source->sel->atom,
+		xsel_target_of(mimes, &source->targets, mime), fd);
 }
 
 static void source_free(struct xsel_source *source) {
@@ -234,13 +242,13 @@ static bool is_ours_primary(struct wlr_primary_selection_source *primary) {
 	return primary && primary->impl == &primary_impl;
 }
 
-static bool add_offer(struct xsel_source *source, struct wl_array *mimes, const char *mime,
+bool xsel_add_offer(struct wl_array *mimes, struct wl_array *targets, const char *mime,
 		uint32_t target) {
-	if (offers(mimes, mime)) {
+	if (xsel_offers(mimes, mime)) {
 		return true;
 	}
 	char **slot = wl_array_add(mimes, sizeof(*slot));
-	uint32_t *t = wl_array_add(&source->targets, sizeof(*t));
+	uint32_t *t = wl_array_add(targets, sizeof(*t));
 	if (!slot || !t || !(*slot = strdup(mime))) {
 		return false;
 	}
@@ -275,15 +283,15 @@ static void handle_targets(void *data, uint32_t type, const uint8_t *bytes, size
 	if (type == xselection->atom && len % 4 == 0) {
 		const uint32_t *targets = (const uint32_t *)bytes;
 		for (size_t i = 0; i < len / 4; i++) {
-			const char *mime = mime_of(xselection, targets[i]);
+			const char *mime = xsel_mime_of(xselection, targets[i]);
 			if (mime) {
-				ok = ok && add_offer(source, mimes, mime, targets[i]);
+				ok = ok && xsel_add_offer(mimes, &source->targets, mime, targets[i]);
 			}
 		}
 	} else {
 		// it doesn't say: text is a safe bet
-		ok = add_offer(source, mimes, UTF8_MIME, xselection->utf8_string)
-			&& add_offer(source, mimes, TEXT_MIME, xselection->string);
+		ok = xsel_add_offer(mimes, &source->targets, UTF8_MIME, xselection->utf8_string)
+			&& xsel_add_offer(mimes, &source->targets, TEXT_MIME, xselection->string);
 	}
 	if (!ok || mimes->size == 0) {
 		if (sel->primary) {
@@ -315,6 +323,9 @@ static struct xsel *sel_of(struct flame_xselection *xselection, uint32_t atom) {
 
 void xselection_owner_changed(struct flame_xselection *xselection, uint32_t selection,
 		bool x_owned) {
+	if (xsel_dnd_owner_changed(xselection, selection, x_owned)) {
+		return;
+	}
 	struct xsel *sel = sel_of(xselection, selection);
 	if (!sel) {
 		return;
@@ -368,16 +379,16 @@ static const char *wanted_mime(struct flame_xselection *xselection, struct wl_ar
 		uint32_t target) {
 	if (target == xselection->utf8_string || target == xselection->text
 			|| target == xselection->string) {
-		if (offers(mimes, UTF8_MIME)) {
+		if (xsel_offers(mimes, UTF8_MIME)) {
 			return UTF8_MIME;
 		}
-		if (offers(mimes, TEXT_MIME)) {
+		if (xsel_offers(mimes, TEXT_MIME)) {
 			return TEXT_MIME;
 		}
-		return offers(mimes, "UTF8_STRING") ? "UTF8_STRING" : NULL;
+		return xsel_offers(mimes, "UTF8_STRING") ? "UTF8_STRING" : NULL;
 	}
 	const char *name = xserver_atom_name(xselection->xserver, target);
-	return name && offers(mimes, name) ? name : NULL;
+	return name && xsel_offers(mimes, name) ? name : NULL;
 }
 
 static void answer_targets(struct flame_xselection *xselection,
@@ -386,7 +397,7 @@ static void answer_targets(struct flame_xselection *xselection,
 	size_t len = 0;
 	targets[len++] = xselection->targets;
 	targets[len++] = xselection->timestamp;
-	if (offers(mimes, UTF8_MIME) || offers(mimes, TEXT_MIME)) {
+	if (xsel_offers(mimes, UTF8_MIME) || xsel_offers(mimes, TEXT_MIME)) {
 		targets[len++] = xselection->utf8_string;
 		targets[len++] = xselection->string;
 		targets[len++] = xselection->text;
@@ -401,18 +412,40 @@ static void answer_targets(struct flame_xselection *xselection,
 		len * 4);
 }
 
+static void send_data(void *source, const char *mime, int fd) {
+	wlr_data_source_send(source, mime, fd);
+}
+
+static void send_primary(void *source, const char *mime, int fd) {
+	wlr_primary_selection_source_send(source, mime, fd);
+}
+
 void xselection_request(struct flame_xselection *xselection,
 		struct xs_selection_request *request) {
+	if (xselection_dnd_request(xselection, request)) {
+		return;
+	}
 	struct xsel *sel = sel_of(xselection, request->selection);
 	struct wlr_seat *seat = xselection->server->input.seat;
 	struct wlr_data_source *data = sel && !sel->primary ? seat->selection_source : NULL;
 	struct wlr_primary_selection_source *primary = sel && sel->primary
 		? seat->primary_selection_source : NULL;
-	struct wl_array *mimes = data ? &data->mime_types : primary ? &primary->mime_types : NULL;
-	if (!mimes || is_ours_data(data) || is_ours_primary(primary)) {
-		xserver_selection_answer(xselection->xserver, request, 0, 8, NULL, 0);
-		return;
+	if (is_ours_data(data) || is_ours_primary(primary)) {
+		data = NULL;
+		primary = NULL;
 	}
+	if (data) {
+		xsel_answer(xselection, request, &data->mime_types, send_data, data);
+	} else if (primary) {
+		xsel_answer(xselection, request, &primary->mime_types, send_primary, primary);
+	} else {
+		xserver_selection_answer(xselection->xserver, request, 0, 8, NULL, 0);
+	}
+}
+
+void xsel_answer(struct flame_xselection *xselection, struct xs_selection_request *request,
+		struct wl_array *mimes, void (*send)(void *source, const char *mime, int fd),
+		void *source) {
 	if (request->target == xselection->targets) {
 		answer_targets(xselection, request, mimes);
 		return;
@@ -449,12 +482,7 @@ void xselection_request(struct flame_xselection *xselection,
 		move_free(move);
 		return;
 	}
-	// the source owns the write end from here
-	if (data) {
-		wlr_data_source_send(data, mime, fds[1]);
-	} else {
-		wlr_primary_selection_source_send(primary, mime, fds[1]);
-	}
+	send(source, mime, fds[1]); // the source owns the write end from here
 }
 
 // a wayland app copied something (or the copy went away): flame holds it for
@@ -506,10 +534,16 @@ bool xselection_init(struct flame_xselection *xselection, struct flame_server *s
 		handle_set_selection);
 	listener_connect(&xselection->set_primary_selection, &seat->events.set_primary_selection,
 		handle_set_primary_selection);
+	if (!xsel_dnd_init(xselection)) {
+		listener_disconnect(&xselection->set_selection);
+		listener_disconnect(&xselection->set_primary_selection);
+		return false;
+	}
 	return true;
 }
 
 void xselection_finish(struct flame_xselection *xselection) {
+	xsel_dnd_finish(xselection);
 	listener_disconnect(&xselection->set_selection);
 	listener_disconnect(&xselection->set_primary_selection);
 	struct xsel *sels[] = {&xselection->clipboard, &xselection->primary};

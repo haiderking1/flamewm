@@ -60,6 +60,9 @@ static void handle_drag_destroy(struct wl_listener *listener, void *data) {
 static void handle_start_drag(struct wl_listener *listener, void *data) {
 	struct flame_dnd *dnd = wl_container_of(listener, dnd, start_drag);
 	struct wlr_drag *drag = data;
+	if (xselection_drag_is_x(drag)) {
+		return; // flame steers that one for an X app, the pointer stays the X app's
+	}
 	dnd->drag = drag;
 	listener_connect(&dnd->drag_destroy, &drag->events.destroy, handle_drag_destroy);
 	// the app dragging lost the pointer, it can't set the cursor anymore
