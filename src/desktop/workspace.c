@@ -7,16 +7,18 @@
 #include "scene/scene.h"
 
 void workspace_init(struct flame_workspace *workspace, int index,
-		struct flame_tree *tiled, struct flame_tree *fullscreen) {
+		struct flame_tree *tiled, struct flame_tree *floating, struct flame_tree *fullscreen) {
 	static const float black[4] = {0, 0, 0, 1};
 
 	workspace->index = index;
 	workspace->tree = scene_tree_create(tiled);
+	workspace->float_tree = scene_tree_create(floating);
 	workspace->fullscreen_tree = scene_tree_create(fullscreen);
 	workspace->backdrop = scene_rect_create(workspace->fullscreen_tree, 0, 0, black);
 	scene_node_set_enabled(&workspace->backdrop->node, false);
 	workspace->layout = NULL;
 	wl_list_init(&workspace->views);
+	wl_list_init(&workspace->floats);
 	workspace->last_focused = NULL;
 	workspace->fullscreen = NULL;
 	workspace_set_visible(workspace, false);
@@ -24,6 +26,7 @@ void workspace_init(struct flame_workspace *workspace, int index,
 
 void workspace_set_visible(struct flame_workspace *workspace, bool visible) {
 	scene_node_set_enabled(&workspace->tree->node, visible);
+	scene_node_set_enabled(&workspace->float_tree->node, visible);
 	scene_node_set_enabled(&workspace->fullscreen_tree->node, visible);
 }
 
@@ -54,8 +57,21 @@ bool workspace_add_view(struct flame_workspace *workspace, struct flame_view *vi
 	return true;
 }
 
+void workspace_add_float(struct flame_workspace *workspace, struct flame_view *view) {
+	wl_list_insert(workspace->floats.prev, &view->link);
+	view->node = NULL;
+	view->workspace = workspace;
+	view_reparent(view);
+}
+
+int workspace_view_count(struct flame_workspace *workspace) {
+	return wl_list_length(&workspace->views) + wl_list_length(&workspace->floats);
+}
+
 void workspace_remove_view(struct flame_workspace *workspace, struct flame_view *view) {
-	tree_remove(&workspace->layout, view->node);
+	if (view->node) {
+		tree_remove(&workspace->layout, view->node);
+	}
 	view->node = NULL;
 	wl_list_remove(&view->link);
 	wl_list_init(&view->link);
@@ -97,9 +113,12 @@ void workspace_swap_views(struct flame_workspace *workspace, struct flame_view *
 }
 
 struct flame_view *workspace_first_view(struct flame_workspace *workspace) {
-	if (wl_list_empty(&workspace->views)) {
-		return NULL;
+	struct flame_view *view;
+	if (!wl_list_empty(&workspace->views)) {
+		return wl_container_of(workspace->views.next, view, link);
 	}
-	struct flame_view *view = wl_container_of(workspace->views.next, view, link);
-	return view;
+	if (!wl_list_empty(&workspace->floats)) {
+		return wl_container_of(workspace->floats.prev, view, link); // the top one
+	}
+	return NULL;
 }

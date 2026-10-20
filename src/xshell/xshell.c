@@ -940,6 +940,41 @@ static bool is_xview(struct flame_view *view) {
 	return view && view->impl == &xview_impl;
 }
 
+// managed windows that float instead of tiling: dialogs, utility windows,
+// splash screens, anything transient for another, anything one size only
+static bool x_wants_float(struct flame_xshell *xshell, struct xs_window *x) {
+	struct flame_xserver *xserver = xshell->xserver;
+	if (xserver_property(xserver, x, "WM_TRANSIENT_FOR")) {
+		return true;
+	}
+	struct xs_property *type = xserver_property(xserver, x, "_NET_WM_WINDOW_TYPE");
+	if (type && type->format == 32) {
+		static const char *const floaty[] = {
+			"_NET_WM_WINDOW_TYPE_DIALOG", "_NET_WM_WINDOW_TYPE_UTILITY",
+			"_NET_WM_WINDOW_TYPE_SPLASH", "_NET_WM_WINDOW_TYPE_TOOLBAR",
+		};
+		for (uint32_t i = 0; i < type->units; i++) {
+			uint32_t atom;
+			memcpy(&atom, type->data + i * 4, 4);
+			const char *name = xserver_atom_name(xserver, atom);
+			for (size_t j = 0; name && j < sizeof(floaty) / sizeof(floaty[0]); j++) {
+				if (!strcmp(name, floaty[j])) {
+					return true;
+				}
+			}
+		}
+	}
+	// WM_NORMAL_HINTS: flags, 4 obsolete, then min and max size
+	struct xs_property *hints = xserver_property(xserver, x, "WM_NORMAL_HINTS");
+	if (hints && hints->format == 32 && hints->units >= 9) {
+		uint32_t v[9];
+		memcpy(v, hints->data, sizeof(v));
+		bool min = v[0] & 16, max = v[0] & 32;
+		return min && max && v[5] > 0 && v[5] == v[7] && v[6] == v[8];
+	}
+	return false;
+}
+
 static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct xs_window *x) {
 	struct flame_server *server = xshell->server;
 	struct flame_xwindow *window = calloc(1, sizeof(*window));
@@ -976,6 +1011,7 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	}
 	wl_list_insert(xshell->windows.prev, &window->link);
 	if (!window->floating) {
+		window->view.float_wanted = x_wants_float(xshell, x);
 		desktop_map_view(&server->desktop, &window->view);
 	}
 	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s", x->id,
@@ -1168,19 +1204,6 @@ static void floats_update(struct flame_xshell *xshell) {
 
 #define PARKED (-32000)
 
-// a tiled window X has above x
-static bool tiled_above(struct flame_xshell *xshell, struct xs_window *x) {
-	struct xs_window *above;
-	for (struct wl_list *at = x->link.next; at != &x->parent->children; at = at->next) {
-		above = wl_container_of(at, above, link);
-		struct flame_xwindow *window = window_of(xshell, above->id);
-		if (window && !window->floating) {
-			return true;
-		}
-	}
-	return false;
-}
-
 // X sees the screen the way flame shows it, for apps that look for windows
 // by X's tree (drag and drop targets, QueryPointer): tiled windows on other
 // workspaces parked out of sight, the focused one on top of the tiled ones,
@@ -1205,32 +1228,52 @@ static void x_stack_update(struct flame_xshell *xshell) {
 		}
 	}
 	// only what's out of place moves: this runs on every change, and moving
-	// windows is a change
-	if (is_xview(desktop->focused)) {
-		struct xs_window *x = x_of(from_view(desktop->focused));
-		if (x && tiled_above(xshell, x)) {
-			xserver_raise_window(xserver, x);
-		}
-	}
-	// floats above every tiled window, in the order they have among
-	// themselves. bottom to top, each one raised ends up above the last
-	struct xs_window *root = xserver->root;
-	struct xs_window *floats[256];
+	// windows is a change. the order X should have, bottom to top: tiles
+	// with the focused one last, floating windows the way flame stacks them,
+	// then menus and the like in the order they have
+	struct xs_window *want[512];
 	size_t len = 0;
+	struct xs_window *root = xserver->root;
+	struct xs_window *focused = is_xview(desktop->focused)
+		? x_of(from_view(desktop->focused)) : NULL;
 	struct xs_window *x;
 	wl_list_for_each(x, &root->children, link) {
 		window = window_of(xshell, x->id);
-		if (window && window->floating && len < 256) {
-			floats[len++] = x;
+		// floats on other workspaces are parked, they go down with the tiles
+		bool shown_float = window && window->view.floating
+			&& window->view.workspace == desktop->active;
+		if (window && !window->floating && !shown_float && x != focused && len < 512) {
+			want[len++] = x;
 		}
 	}
-	for (size_t i = 0; i < len; i++) {
-		if (tiled_above(xshell, floats[i])) {
-			for (size_t j = i; j < len; j++) {
-				xserver_raise_window(xserver, floats[j]);
-			}
-			break;
+	if (focused && !from_view(desktop->focused)->view.floating && len < 512) {
+		want[len++] = focused;
+	}
+	struct flame_view *view;
+	wl_list_for_each(view, &desktop->active->floats, link) {
+		x = is_xview(view) ? x_of(from_view(view)) : NULL;
+		if (x && len < 512) {
+			want[len++] = x;
 		}
+	}
+	wl_list_for_each(x, &root->children, link) {
+		window = window_of(xshell, x->id);
+		if (window && window->floating && len < 512) {
+			want[len++] = x;
+		}
+	}
+	// where X's order first differs, everything from there gets raised in
+	// the order wanted
+	size_t at = 0;
+	wl_list_for_each(x, &root->children, link) {
+		if (at < len && x == want[at]) {
+			at++;
+		} else if (window_of(xshell, x->id) && x->mapped) {
+			break; // one of ours out of place
+		}
+	}
+	for (size_t i = at; i < len; i++) {
+		xserver_raise_window(xserver, want[i]);
 	}
 }
 
@@ -1250,6 +1293,13 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 				window_create(xshell, x);
 			} else if (window->floating) {
 				scene_node_set_position(&window->float_tree->node, x->x, x->y);
+			} else if (window->view.floating && (x->width != window->width
+					|| x->height != window->height)) {
+				// a floating dialog resized itself: it gets that size
+				window->width = x->width;
+				window->height = x->height;
+				floating_content_resized(&xshell->server->desktop, &window->view, x->width,
+					x->height);
 			}
 		} else if (window) {
 			window_destroy(window);

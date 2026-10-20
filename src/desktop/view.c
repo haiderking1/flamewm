@@ -53,8 +53,8 @@ void view_reparent(struct flame_view *view) {
 	if (view->grabbed || !view->workspace) {
 		return; // a drag or the staging tree owns it
 	}
-	struct flame_tree *parent = view->fullscreen_shown
-		? view->workspace->fullscreen_tree : view->workspace->tree;
+	struct flame_tree *parent = view->fullscreen_shown ? view->workspace->fullscreen_tree
+		: view->floating ? view->workspace->float_tree : view->workspace->tree;
 	if (view->tree->node.parent != parent) {
 		scene_node_reparent(&view->tree->node, parent);
 	}
@@ -115,12 +115,16 @@ void view_hide(struct flame_view *view) {
 	scene_node_set_enabled(&view->tree->node, false);
 }
 
-void view_set_focused(struct flame_view *view, bool focused) {
+void view_refresh_border(struct flame_view *view, bool focused) {
 	const struct flame_config *config = view_config(view);
 	const float *color = focused ? config->border_focused_color : config->border_color;
 	for (int i = 0; i < FLAME_BORDER_COUNT; i++) {
 		scene_rect_set_color(view->border[i], color);
 	}
+}
+
+void view_set_focused(struct flame_view *view, bool focused) {
+	view_refresh_border(view, focused);
 	view->impl->set_activated(view, focused);
 }
 

@@ -77,6 +77,9 @@ void fullscreen_refresh_backdrops(struct flame_desktop *desktop) {
 		wl_list_for_each(view, &workspace->views, link) {
 			any |= view->fullscreen_shown;
 		}
+		wl_list_for_each(view, &workspace->floats, link) {
+			any |= view->fullscreen_shown;
+		}
 
 		bool on = any && have_area;
 		scene_node_set_enabled(&workspace->backdrop->node, on);

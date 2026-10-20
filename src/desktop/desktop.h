@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <wlr/util/box.h>
 
+#include "desktop/floating.h"
 #include "desktop/focus.h"
 #include "desktop/fullscreen.h"
 #include "desktop/view.h"

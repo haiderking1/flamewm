@@ -87,6 +87,20 @@ static struct flame_view *let_go(struct flame_drag *drag) {
 }
 
 static void end_move(struct flame_drag *drag, bool drop) {
+	if (drag->view->floating) {
+		// it stays where it was let go, a cancel puts it back
+		struct wlr_cursor *cursor = pointer(drag);
+		struct wlr_box box = drag->float_start;
+		if (drop) {
+			box.x += (int)(cursor->x - drag->start_x);
+			box.y += (int)(cursor->y - drag->start_y);
+		}
+		struct flame_view *view = let_go(drag);
+		scene_node_set_position(&view->tree->node, box.x, box.y);
+		floating_set_box(&drag->server->desktop, view, box, false);
+		restore_pointer(drag);
+		return;
+	}
 	struct flame_view *target = drop ? drop_target(drag) : NULL;
 	struct flame_view *view = let_go(drag);
 
@@ -131,6 +145,18 @@ static bool begin_resize(struct flame_drag *drag, struct flame_view *view) {
 	// the quarter you grab decides which edges follow you
 	bool right = cursor->x >= view->geometry.x + view->geometry.width / 2.0;
 	bool bottom = cursor->y >= view->geometry.y + view->geometry.height / 2.0;
+	if (view->floating) {
+		drag->float_right = right;
+		drag->float_bottom = bottom;
+		drag->resize_pending = false;
+		// whatever's in flight lands now, nothing comes back over the drag
+		while (transaction_active(&drag->server->desktop.transaction)) {
+			transaction_flush(&drag->server->desktop.transaction);
+		}
+		set_cursor_image(drag, bottom ? (right ? "se-resize" : "sw-resize")
+			: (right ? "ne-resize" : "nw-resize"));
+		return true;
+	}
 
 	drag->horizontal = grab_axis(view, TREE_SPLIT_VERTICAL, right, &right);
 	drag->vertical = grab_axis(view, TREE_SPLIT_HORIZONTAL, bottom, &bottom);
@@ -154,10 +180,42 @@ static void resize_motion(struct flame_drag *drag) {
 	}
 }
 
+static void apply_float_resize(struct flame_drag *drag) {
+	struct wlr_cursor *cursor = pointer(drag);
+	int dx = (int)(cursor->x - drag->start_x), dy = (int)(cursor->y - drag->start_y);
+	struct wlr_box box = drag->float_start;
+	// the grabbed corner follows the cursor, the opposite one stays put
+	if (drag->float_right) {
+		box.width += dx;
+	} else {
+		box.x += dx;
+		box.width -= dx;
+	}
+	if (drag->float_bottom) {
+		box.height += dy;
+	} else {
+		box.y += dy;
+		box.height -= dy;
+	}
+	if (box.width < MIN_TILE_SIZE) {
+		box.x -= drag->float_right ? 0 : MIN_TILE_SIZE - box.width;
+		box.width = MIN_TILE_SIZE;
+	}
+	if (box.height < MIN_TILE_SIZE) {
+		box.y -= drag->float_bottom ? 0 : MIN_TILE_SIZE - box.height;
+		box.height = MIN_TILE_SIZE;
+	}
+	floating_set_box(&drag->server->desktop, drag->view, box, true);
+}
+
 static void apply_resize(struct flame_drag *drag) {
 	struct wlr_cursor *cursor = pointer(drag);
 	int gap = drag->server->config->gap;
 	drag->resize_pending = false;
+	if (drag->view->floating) {
+		apply_float_resize(drag);
+		return;
+	}
 
 	// from where it started, not step by step, so nothing drifts. a dividing
 	// line follows the cursor whichever side of it the window sits on
@@ -176,8 +234,12 @@ static void apply_resize(struct flame_drag *drag) {
 
 // let go of the resize. the splits keep whatever size they got
 static void stop_resize(struct flame_drag *drag) {
+	struct flame_view *view = drag->view;
 	drag->view = NULL;
 	drag->resize_pending = false;
+	if (view->floating) {
+		view_set_resizing(view, false);
+	}
 	desktop_end_live(&drag->server->desktop);
 	restore_pointer(drag);
 }
@@ -223,6 +285,7 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	drag->mode = button == BTN_LEFT ? FLAME_DRAG_MOVE : FLAME_DRAG_RESIZE;
 	drag->start_x = cursor->x;
 	drag->start_y = cursor->y;
+	drag->float_start = view->float_box;
 
 	bool started = drag->mode == FLAME_DRAG_MOVE
 		? begin_move(drag, view) : begin_resize(drag, view);

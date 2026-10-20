@@ -44,6 +44,9 @@ struct flame_view_impl {
 	struct wlr_surface *(*keyboard_surface)(struct flame_view *view);
 	// optional: a button went down on surface, somewhere inside the view
 	void (*pressed)(struct flame_view *view, struct wlr_surface *surface);
+	// optional: the size it draws at on its own, whatever flame shows of it.
+	// where a floating window starts
+	void (*natural_size)(struct flame_view *view, int *width, int *height);
 };
 
 enum flame_border_side {
@@ -71,6 +74,13 @@ struct flame_view {
 	bool shown;
 	// held by a mouse drag, the drag owns where its tree sits
 	bool grabbed;
+
+	// floating: no tile, its own box above the tiles. float_box is where,
+	// border included, layout coords. float_wanted: the shell says it should
+	// float when it maps (dialogs, fixed size windows). has_float_box: it
+	// floated before, toggling back puts it where it was
+	bool floating, float_wanted, has_float_box;
+	struct wlr_box float_box;
 
 	// the client or the user wants it fullscreen
 	bool fullscreen_wanted;
@@ -101,6 +111,8 @@ void view_reparent(struct flame_view *view);
 void view_content_changed(struct flame_view *view);
 
 void view_set_focused(struct flame_view *view, bool focused);
+// its border in the config's colors, after the config changed
+void view_refresh_border(struct flame_view *view, bool focused);
 void view_set_resizing(struct flame_view *view, bool resizing);
 void view_close(struct flame_view *view);
 struct wlr_surface *view_surface(struct flame_view *view);

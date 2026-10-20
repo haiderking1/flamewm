@@ -25,6 +25,12 @@ void action_fullscreen(struct flame_server *server, const union flame_arg *arg) 
 	fullscreen_toggle(&server->desktop);
 }
 
+void action_toggle_floating(struct flame_server *server, const union flame_arg *arg) {
+	if (server->desktop.focused) {
+		floating_toggle(&server->desktop, server->desktop.focused);
+	}
+}
+
 void action_workspace(struct flame_server *server, const union flame_arg *arg) {
 	desktop_switch_workspace(&server->desktop, arg->i);
 }

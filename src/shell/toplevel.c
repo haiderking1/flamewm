@@ -120,6 +120,12 @@ static void impl_content_size(struct flame_view *view, int *width, int *height) 
 		: toplevel->display_height;
 }
 
+static void impl_natural_size(struct flame_view *view, int *width, int *height) {
+	struct wlr_box geometry = from_view(view)->xdg->base->geometry;
+	*width = geometry.width;
+	*height = geometry.height;
+}
+
 static struct wlr_box impl_window_geometry(struct flame_view *view, bool pending) {
 	struct wlr_xdg_surface *base = from_view(view)->xdg->base;
 	return pending ? base->pending.geometry : base->current.geometry;
@@ -222,6 +228,7 @@ static const struct flame_view_impl toplevel_impl = {
 	.acked = impl_acked,
 	.set_display_size = impl_set_display_size,
 	.content_size = impl_content_size,
+	.natural_size = impl_natural_size,
 	.window_geometry = impl_window_geometry,
 	.set_activated = impl_set_activated,
 	.set_resizing = impl_set_resizing,
@@ -390,12 +397,24 @@ static void handle_unmap(struct wl_listener *listener, void *data) {
 	toplevel->configured_fullscreen = false;
 }
 
+// dialogs (they have a parent) and windows that only come in one size float
+static bool wants_float(struct wlr_xdg_toplevel *xdg) {
+	struct wlr_xdg_toplevel_state *state = &xdg->current;
+	return xdg->parent || (state->min_width > 0 && state->min_height > 0
+		&& state->min_width == state->max_width && state->min_height == state->max_height);
+}
+
 // configures a window that hasn't mapped yet with exactly what it's going to
 // get, so its first buffer is the right size and nothing jumps on map:
-// the whole output if it asked for fullscreen, else its future tile
+// the whole output if it asked for fullscreen, else its future tile. a
+// floating one picks its own size
 static void configure_unmapped(struct flame_toplevel *toplevel) {
 	struct flame_desktop *desktop = toplevel->view.desktop;
 	bool fullscreen = toplevel->view.fullscreen_wanted;
+	if (toplevel->view.float_wanted && !fullscreen) {
+		send_state(toplevel, 0, 0, false);
+		return;
+	}
 
 	struct wlr_box box;
 	bool known = fullscreen ? fullscreen_area(desktop, &box)
@@ -438,6 +457,7 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	if (xdg->base->initial_commit) {
 		// fullscreen asked for before the first commit is honored right away
 		toplevel->view.fullscreen_wanted = xdg->requested.fullscreen;
+		toplevel->view.float_wanted = wants_float(xdg);
 		wlr_xdg_toplevel_set_wm_capabilities(xdg, WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
 		configure_unmapped(toplevel);
 		return;
@@ -446,6 +466,14 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	update_clip(toplevel);
 	if (toplevel->view.shown) {
 		view_content_changed(&toplevel->view);
+	}
+	if (toplevel->view.floating) {
+		// a floating window is the size it draws itself
+		if (toplevel->view.shown && !transaction_has(&toplevel->view)) {
+			floating_content_resized(toplevel->view.desktop, &toplevel->view,
+				xdg->base->geometry.width, xdg->base->geometry.height);
+		}
+		return;
 	}
 	reconcile_size(toplevel);
 }
