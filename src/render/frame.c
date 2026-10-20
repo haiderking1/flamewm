@@ -71,6 +71,14 @@ static void handle_wake(void *data) {
 
 // ---- what wakes us up ----
 
+// the lists keep surface pointers from the last frames: callbacks go out
+// from them until the next render, a dead one would be a use after free
+static void handle_surface_destroy(struct wl_listener *listener, void *data) {
+	struct flame_frame *frame = wl_container_of(listener, frame, surface_destroy);
+	elements_forget_surface(&frame->prev, data);
+	elements_forget_surface(&frame->cur, data);
+}
+
 static void handle_scene_changed(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, scene_changed);
 	frame_request(frame);
@@ -267,6 +275,8 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	listener_connect(&frame->scene_changed, &render->scene.events.changed,
 		handle_scene_changed);
 	listener_connect(&frame->scene_damage, &render->scene.events.damage, handle_scene_damage);
+	listener_connect(&frame->surface_destroy, &render->scene.events.surface_destroy,
+		handle_surface_destroy);
 	listener_connect(&frame->pointer_changed, &render->pointer.events.changed,
 		handle_pointer_changed);
 	listener_connect(&frame->output_needs_frame, &output->events.needs_frame,
@@ -288,6 +298,7 @@ void frame_finish(struct flame_frame *frame) {
 	if (frame->scene_changed.link.next) {
 		listener_disconnect(&frame->scene_changed);
 		listener_disconnect(&frame->scene_damage);
+		listener_disconnect(&frame->surface_destroy);
 		listener_disconnect(&frame->pointer_changed);
 		listener_disconnect(&frame->output_needs_frame);
 		listener_disconnect(&frame->output_commit);

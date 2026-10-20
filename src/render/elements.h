@@ -19,6 +19,9 @@ enum flame_element_type {
 	FLAME_ELEMENT_RECT,
 	FLAME_ELEMENT_SURFACE,
 	FLAME_ELEMENT_TEXTURE,
+	// a surface destroyed after the list was built: only its id and boxes
+	// are left, for the damage diff. nothing to draw or call back
+	FLAME_ELEMENT_GONE,
 };
 
 struct flame_element {
@@ -53,6 +56,8 @@ struct flame_element_list {
 void elements_init(struct flame_element_list *list);
 void elements_finish(struct flame_element_list *list);
 void elements_clear(struct flame_element_list *list);
+// surface is being destroyed: its elements turn into FLAME_ELEMENT_GONE
+void elements_forget_surface(struct flame_element_list *list, struct wlr_surface *surface);
 
 // everything enabled in the scene that lands on area, bottom to top
 bool elements_collect(struct flame_element_list *list, struct flame_scene *scene,
