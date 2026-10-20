@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <drm_fourcc.h>
 #include <time.h>
 #include <unistd.h>
 #include <wlr/interfaces/wlr_buffer.h>
@@ -974,7 +975,98 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	}
 	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s", x->id,
 		window->floating ? "floats" : "is a window");
+	// drawn into before flame got to it: what's there already shows
+	if (x->backing) {
+		pixman_region32_t all;
+		pixman_region32_init_rect(&all, 0, 0, (unsigned)pixman_image_get_width(x->backing),
+			(unsigned)pixman_image_get_height(x->backing));
+		xshell_damaged(xshell, x, &all);
+		pixman_region32_fini(&all);
+	}
 	return window;
+}
+
+// ---- windows drawn with the cpu ----
+
+// a top-level's backing as a wlr_buffer, for uploading it: the pixels stay
+// the X server's, a ref keeps them alive while the buffer is
+struct xcore {
+	struct wlr_buffer base;
+	pixman_image_t *image;
+};
+
+static void xcore_destroy(struct wlr_buffer *buffer) {
+	struct xcore *core = wl_container_of(buffer, core, base);
+	pixman_image_unref(core->image);
+	free(core);
+}
+
+static bool xcore_begin(struct wlr_buffer *buffer, uint32_t flags, void **data,
+		uint32_t *format, size_t *stride) {
+	struct xcore *core = wl_container_of(buffer, core, base);
+	*data = pixman_image_get_data(core->image);
+	*format = pixman_image_get_format(core->image) == PIXMAN_a8r8g8b8
+		? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888;
+	*stride = (size_t)pixman_image_get_stride(core->image);
+	return true;
+}
+
+static void xcore_end(struct wlr_buffer *buffer) {
+}
+
+static const struct wlr_buffer_impl xcore_impl = {
+	.destroy = xcore_destroy,
+	.begin_data_ptr_access = xcore_begin,
+	.end_data_ptr_access = xcore_end,
+};
+
+static void core_drop(struct flame_xwindow *window) {
+	if (window->core_texture) {
+		wlr_texture_destroy(window->core_texture);
+		window->core_texture = NULL;
+	}
+	if (window->core) {
+		wlr_buffer_drop(&window->core->base);
+		window->core = NULL;
+	}
+}
+
+void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
+		const pixman_region32_t *region) {
+	struct flame_xwindow *window = find_window(xshell, top->id);
+	if (!window || window->shown || !top->backing) {
+		return; // not shown here, or Present shows it
+	}
+	pixman_image_t *image = top->backing;
+	struct wlr_renderer *renderer = xshell->server->render.renderer;
+	bool fresh = !window->core || window->core->image != image || !window->core_texture;
+	if (!fresh && !wlr_texture_update_from_buffer(window->core_texture, &window->core->base,
+			region)) {
+		fresh = true; // the renderer can't update in place: upload it all
+	}
+	if (fresh) {
+		core_drop(window);
+		struct xcore *core = calloc(1, sizeof(*core));
+		if (!core) {
+			return;
+		}
+		core->image = pixman_image_ref(image);
+		wlr_buffer_init(&core->base, &xcore_impl, pixman_image_get_width(image),
+			pixman_image_get_height(image));
+		window->core = core;
+		window->core_texture = wlr_texture_from_buffer(renderer, &core->base);
+		if (!window->core_texture) {
+			wlr_log(WLR_ERROR, "xshell: can't upload X window 0x%x", top->id);
+			core_drop(window);
+			return;
+		}
+	}
+	// a new key every time: the frame repaints the window
+	scene_node_set_position(&window->content->node, 0, 0);
+	scene_buffer_set(window->content, window->core_texture,
+		(const void *)++window->core_serial, pixman_image_get_width(image),
+		pixman_image_get_height(image), pixman_image_get_format(image) != PIXMAN_a8r8g8b8,
+		NULL, 0);
 }
 
 static void window_destroy(struct flame_xwindow *window) {
@@ -998,6 +1090,8 @@ static void window_destroy(struct flame_xwindow *window) {
 		}
 		xpresent_free(xp);
 	}
+	scene_buffer_set(window->content, NULL, NULL, 0, 0, false, NULL, 0);
+	core_drop(window);
 	if (window->floating) {
 		scene_node_destroy(&window->float_tree->node);
 	} else {
