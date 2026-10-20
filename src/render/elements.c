@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wlr/types/wlr_buffer.h>
+#include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/util/log.h>
 
@@ -160,6 +161,39 @@ bool elements_collect(struct flame_element_list *list, struct flame_scene *scene
 	return !collect.failed;
 }
 
+bool elements_push_surface(struct flame_element_list *list, struct wlr_surface *surface,
+		int x, int y, struct wlr_box area) {
+	struct collect collect = {
+		.list = list,
+		.area = area,
+		.x = x,
+		.y = y,
+	};
+	wlr_surface_for_each_surface(surface, collect_surface, &collect);
+	return !collect.failed;
+}
+
+bool elements_push_texture(struct flame_element_list *list, const void *id,
+		struct wlr_texture *texture, const void *image, struct wlr_box box, struct wlr_box area) {
+	struct wlr_box clip;
+	if (wlr_box_empty(&box) || !wlr_box_intersection(&clip, &box, &area)) {
+		return true;
+	}
+	struct flame_element *element = push(list);
+	if (!element) {
+		return false;
+	}
+	element->type = FLAME_ELEMENT_TEXTURE;
+	element->id = id;
+	element->box = box;
+	element->clip = clip;
+	element->texture = texture;
+	element->image = image;
+	element->src = (struct wlr_fbox){.width = texture->width, .height = texture->height};
+	element->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	return true;
+}
+
 void elements_occlude(struct flame_element_list *list) {
 	pixman_region32_t above;
 	pixman_region32_init(&above);
@@ -176,7 +210,7 @@ void elements_occlude(struct flame_element_list *list) {
 				pixman_region32_union_rect(&element->opaque, &element->opaque, clip.x,
 					clip.y, clip.width, clip.height);
 			}
-		} else {
+		} else if (element->type == FLAME_ELEMENT_SURFACE) {
 			// whatever the client says is opaque, inside what can show
 			pixman_region32_copy(&element->opaque, &element->surface->opaque_region);
 			pixman_region32_translate(&element->opaque, element->box.x, element->box.y);

@@ -83,20 +83,10 @@ static void handle_scene_damage(struct wl_listener *listener, void *data) {
 	// scene_changed follows and asks for the frame
 }
 
-// software cursors moving, wlroots tells us where
-static void handle_output_damage(struct wl_listener *listener, void *data) {
-	struct flame_frame *frame = wl_container_of(listener, frame, output_damage);
-	const struct wlr_output_event_damage *event = data;
-	struct wlr_output *output = frame->output;
-
-	int width, height;
-	wlr_output_transformed_resolution(output, &width, &height);
-	pixman_region32_t damage;
-	pixman_region32_init(&damage);
-	wlr_region_transform(&damage, event->damage, wlr_output_transform_invert(output->transform),
-		width, height);
-	pixman_region32_union(&frame->pending_buffer, &frame->pending_buffer, &damage);
-	pixman_region32_fini(&damage);
+// the pointer moved or looks different. on the plane that's a cheap commit,
+// drawn it's a small repaint, the frame works out which
+static void handle_pointer_changed(struct wl_listener *listener, void *data) {
+	struct flame_frame *frame = wl_container_of(listener, frame, pointer_changed);
 	frame_request(frame);
 }
 
@@ -133,12 +123,23 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
 }
 
-static bool commit(struct flame_frame *frame, struct wlr_output_state *state, bool scanout) {
+static bool commit(struct flame_frame *frame, struct wlr_output_state *state,
+		enum timing_commit kind) {
 	bool ok = wlr_output_commit_state(frame->output, state);
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
+	} else {
+		// KMS took the cursor plane's changes along with it
+		frame_cursor_committed(&frame->cursor);
+		if (state->committed & WLR_OUTPUT_STATE_BUFFER) {
+			struct wlr_buffer *front = wlr_buffer_lock(state->buffer);
+			if (frame->front) {
+				wlr_buffer_unlock(frame->front);
+			}
+			frame->front = front;
+		}
 	}
-	if (!ok && scanout && !frame->scanout.suspended) {
+	if (!ok && kind == TIMING_SCANOUT && !frame->scanout.suspended) {
 		// it passed the test and still got refused: one full composition now,
 		// and no scanout attempts until the next vt switch
 		wlr_log(WLR_INFO, "%s: KMS refused a scanout frame, composing until the next vt switch",
@@ -147,7 +148,7 @@ static bool commit(struct flame_frame *frame, struct wlr_output_state *state, bo
 		frame->whole = true;
 		schedule_request_redraw(&frame->schedule);
 	}
-	timing_committed(&frame->timing, ok, scanout);
+	timing_committed(&frame->timing, ok, kind);
 	return ok;
 }
 
@@ -169,7 +170,7 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 	frame->stall_reported = false;
 
 	if (frame->has_queued) {
-		bool ok = commit(frame, &frame->queued, frame->queued_scanout);
+		bool ok = commit(frame, &frame->queued, frame->queued_kind);
 		drop_queued(frame);
 		if (ok) {
 			schedule_promoted(schedule, now_ns());
@@ -199,6 +200,7 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	frame->whole = true;
 	frame->stall_reported = false;
 	frame->scanout.suspended = false;
+	frame_cursor_reset(&frame->cursor);
 	queue_process(frame);
 }
 
@@ -215,11 +217,11 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	frame->callback_cycle = 1;
 	wlr_damage_ring_init(&frame->ring);
 	pixman_region32_init(&frame->pending);
-	pixman_region32_init(&frame->pending_buffer);
 	elements_init(&frame->prev);
 	elements_init(&frame->cur);
 	schedule_init(&frame->schedule, render->pipeline, refresh_period(output));
 	scanout_init(&frame->scanout, render, output);
+	frame_cursor_init(&frame->cursor, render, output);
 	timing_init(&frame->timing, output, &frame->schedule, render->frame_timing);
 	// the schedule's lead needs the gpu's side too, immediate doesn't look at it
 	if (render->frame_timing || render->pipeline != SCHEDULE_IMMEDIATE) {
@@ -247,7 +249,8 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	listener_connect(&frame->scene_changed, &render->scene.events.changed,
 		handle_scene_changed);
 	listener_connect(&frame->scene_damage, &render->scene.events.damage, handle_scene_damage);
-	listener_connect(&frame->output_damage, &output->events.damage, handle_output_damage);
+	listener_connect(&frame->pointer_changed, &render->pointer.events.changed,
+		handle_pointer_changed);
 	listener_connect(&frame->output_needs_frame, &output->events.needs_frame,
 		handle_output_needs_frame);
 	listener_connect(&frame->output_commit, &output->events.commit, handle_output_commit);
@@ -267,7 +270,7 @@ void frame_finish(struct flame_frame *frame) {
 	if (frame->scene_changed.link.next) {
 		listener_disconnect(&frame->scene_changed);
 		listener_disconnect(&frame->scene_damage);
-		listener_disconnect(&frame->output_damage);
+		listener_disconnect(&frame->pointer_changed);
 		listener_disconnect(&frame->output_needs_frame);
 		listener_disconnect(&frame->output_commit);
 		listener_disconnect(&frame->output_frame);
@@ -281,6 +284,11 @@ void frame_finish(struct flame_frame *frame) {
 	timer_finish(&frame->wake);
 	drop_queued(frame);
 	scanout_finish(&frame->scanout);
+	frame_cursor_finish(&frame->cursor);
+	if (frame->front) {
+		wlr_buffer_unlock(frame->front);
+		frame->front = NULL;
+	}
 	timing_finish(&frame->timing);
 	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {
@@ -296,7 +304,6 @@ void frame_finish(struct flame_frame *frame) {
 	elements_finish(&frame->prev);
 	elements_finish(&frame->cur);
 	pixman_region32_fini(&frame->pending);
-	pixman_region32_fini(&frame->pending_buffer);
 	wlr_damage_ring_finish(&frame->ring);
 }
 
@@ -361,8 +368,10 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	bool blend = pixman_region32_not_empty(&translucent);
 	pixman_region32_fini(&translucent);
 
+	// ours (the pointer) has nothing to wait for and nobody to give it back to
+	bool client = element->type == FLAME_ELEMENT_SURFACE;
 	struct wlr_linux_drm_syncobj_surface_v1_state *sync =
-		wlr_linux_drm_syncobj_v1_get_surface_state(element->surface);
+		client ? wlr_linux_drm_syncobj_v1_get_surface_state(element->surface) : NULL;
 	enum wl_output_transform transform = wlr_output_transform_compose(
 		wlr_output_transform_invert(element->transform), target->transform);
 	wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
@@ -375,7 +384,9 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 		.wait_timeline = sync ? sync->acquire_timeline : NULL,
 		.wait_point = sync ? sync->acquire_point : 0,
 	});
-	sampled(frame, element->surface);
+	if (client) {
+		sampled(frame, element->surface);
+	}
 	pixman_region32_fini(&region);
 }
 
@@ -446,7 +457,6 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	for (size_t i = 0; i < frame->cur.len; i++) {
 		draw_element(frame, pass, target, &frame->cur.data[i], &repaint);
 	}
-	wlr_output_add_software_cursors_to_render_pass(output, pass, &repaint);
 	pixman_region32_fini(&repaint);
 
 	bool submitted = wlr_render_pass_submit(pass);
@@ -478,7 +488,9 @@ static void build(struct flame_frame *frame, const struct flame_render_target *t
 	struct wlr_box logical = target->logical;
 
 	elements_clear(&frame->cur);
-	if (!elements_collect(&frame->cur, &frame->render->scene, logical)) {
+	// the pointer on top of everything, unless it's on the cursor plane
+	if (!elements_collect(&frame->cur, &frame->render->scene, logical)
+			|| !frame_cursor_build(&frame->cursor, target, &frame->cur)) {
 		frame->whole = true; // half a list, don't trust the next diff either
 	}
 	elements_occlude(&frame->cur);
@@ -490,16 +502,43 @@ static void build(struct flame_frame *frame, const struct flame_render_target *t
 	pixman_region32_intersect_rect(damage, damage, logical.x, logical.y,
 		logical.width, logical.height);
 
-	// then buffer coords, plus what wlroots told us about (cursors)
+	// then buffer coords
 	target_region_to_buffer(target, damage, true);
-	pixman_region32_union(damage, damage, &frame->pending_buffer);
-	pixman_region32_clear(&frame->pending_buffer);
 	if (frame->whole) {
 		frame->whole = false;
 		wlr_damage_ring_add_whole(&frame->ring);
 		pixman_region32_union_rect(damage, damage, 0, 0, output->width, output->height);
 	}
 	pixman_region32_intersect_rect(damage, damage, 0, 0, output->width, output->height);
+}
+
+// a changed frame into state: the candidate's own buffer when KMS takes it,
+// else drawn by us. false when neither worked
+static bool prepare(struct flame_frame *frame, const struct flame_render_target *target,
+		pixman_region32_t *damage, const struct flame_element *candidate,
+		struct wlr_output_state *state, enum timing_commit *kind) {
+	struct wlr_output *output = frame->output;
+	bool scanout = candidate && scanout_try(&frame->scanout, candidate, target, state,
+		frame->out_timeline, &frame->out_point);
+	bool ready;
+	if (scanout) {
+		// our buffers didn't see this frame, they catch up when we compose again
+		wlr_damage_ring_add(&frame->ring, damage);
+		ready = true;
+	} else {
+		if (frame->scanout.active) {
+			// back from scanout: the screen showed a client buffer, ours are old
+			wlr_damage_ring_add_whole(&frame->ring);
+			pixman_region32_union_rect(damage, damage, 0, 0, output->width, output->height);
+		}
+		ready = draw(frame, target, damage, state);
+	}
+	if (scanout != frame->scanout.active) {
+		wlr_log(WLR_DEBUG, "%s: direct scanout %s", output->name, scanout ? "on" : "off");
+	}
+	frame->scanout.active = scanout;
+	*kind = scanout ? TIMING_SCANOUT : TIMING_COMPOSITED;
+	return ready;
 }
 
 // the schedule said now: build a frame from the latest scene and send it to
@@ -517,41 +556,38 @@ static void render(struct flame_frame *frame, int64_t now) {
 	pixman_region32_init(&damage);
 	build(frame, &target, &damage);
 	// the diff in build needed the old frame_seq, from here on this is the frame
-	feedback_drawn(&frame->render->surfaces, output, &frame->cur);
+	feedback_drawn(&frame->render->surfaces, output, &frame->cur,
+		frame_cursor_surface(&frame->cursor));
 
 	// wlroots wanting a real commit (screencopy) counts as a change
 	bool changed = pixman_region32_not_empty(&damage) || output->needs_frame;
+	// only the cursor plane changed: the buffer on screen goes again, the new
+	// plane state rides along. no drawing, no gpu
+	bool cursor_only = !changed && frame_cursor_dirty(&frame->cursor);
+	if (cursor_only && !frame->front) {
+		changed = true; // nothing to send again yet
+		cursor_only = false;
+	}
 	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
 	scanout_hint(&frame->scanout, candidate);
 	bool drew = false;
-	if (changed) {
+	if (changed || cursor_only) {
 		struct wlr_output_state state;
 		wlr_output_state_init(&state);
-		bool scanout = candidate && scanout_try(&frame->scanout, candidate, &target, &state,
-			frame->out_timeline, &frame->out_point);
-		bool ready;
-		if (scanout) {
-			// our buffers didn't see this frame, they catch up when we compose again
-			wlr_damage_ring_add(&frame->ring, &damage);
-			ready = true;
+		enum timing_commit kind = TIMING_CURSOR;
+		bool ready = true;
+		if (cursor_only) {
+			// no damage set: it's the same picture either way
+			wlr_output_state_set_buffer(&state, frame->front);
 		} else {
-			if (frame->scanout.active) {
-				// back from scanout: the screen showed a client buffer, ours are old
-				wlr_damage_ring_add_whole(&frame->ring);
-				pixman_region32_union_rect(&damage, &damage, 0, 0, output->width, output->height);
-			}
-			ready = draw(frame, &target, &damage, &state);
+			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
 		}
-		if (scanout != frame->scanout.active) {
-			wlr_log(WLR_DEBUG, "%s: direct scanout %s", output->name, scanout ? "on" : "off");
-		}
-		frame->scanout.active = scanout;
 
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
 		} else if (!schedule->pending) {
-			drew = commit(frame, &state, scanout);
+			drew = commit(frame, &state, kind);
 			wlr_output_state_finish(&state);
 			if (drew) {
 				schedule_submitted(schedule, &frame->submitted_ticket, now_ns());
@@ -562,7 +598,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 			// behind the pending flip, it goes in the moment that one lands
 			frame->queued = state;
 			frame->has_queued = true;
-			frame->queued_scanout = scanout;
+			frame->queued_kind = kind;
 			schedule_queued(schedule, &frame->queued_ticket);
 			timing_successor_prepared(&frame->timing);
 			drew = true;
@@ -576,11 +612,13 @@ static void render(struct flame_frame *frame, int64_t now) {
 	swap_lists(frame);
 
 	int64_t end = now_ns();
-	if (drew) {
+	// a cursor commit costs nothing, it would only drag the estimate down
+	bool composed = drew && !cursor_only;
+	if (composed) {
 		schedule_observe_cpu(schedule, end - now);
 	}
 	struct timespec start_ts = ns_timespec(now), end_ts = ns_timespec(end);
-	timing_frame(&frame->timing, &start_ts, &end_ts, drew);
+	timing_frame(&frame->timing, &start_ts, &end_ts, composed);
 }
 
 static void send_callbacks(struct flame_frame *frame, int64_t now) {
@@ -590,7 +628,8 @@ static void send_callbacks(struct flame_frame *frame, int64_t now) {
 		frame->callback_cycle++;
 	}
 	// prev is the last frame built, the one that just went out
-	feedback_frame_done(&frame->prev, frame->callback_cycle, now);
+	feedback_frame_done(&frame->prev, frame_cursor_surface(&frame->cursor),
+		frame->callback_cycle, now);
 	schedule_callbacks_sent(&frame->schedule, now);
 	if (frame->hooks.callbacks_sent) {
 		frame->hooks.callbacks_sent(frame->hooks.data, &when, new_cycle);

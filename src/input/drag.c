@@ -4,7 +4,6 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
-#include <wlr/types/wlr_xcursor_manager.h>
 
 #include "config/config.h"
 #include "core/server.h"
@@ -36,8 +35,7 @@ static struct wlr_cursor *pointer(struct flame_drag *drag) {
 }
 
 static void set_cursor_image(struct flame_drag *drag, const char *name) {
-	struct flame_cursor *cursor = &drag->server->input.cursor;
-	wlr_cursor_set_xcursor(cursor->wlr, cursor->xcursor, name);
+	cursor_set_name(&drag->server->input.cursor, name);
 }
 
 static void restore_pointer(struct flame_drag *drag) {

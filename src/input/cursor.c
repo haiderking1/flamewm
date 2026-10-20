@@ -7,7 +7,6 @@
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_seat.h>
-#include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/util/log.h>
 
 #include "config/config.h"
@@ -63,6 +62,7 @@ static void follow_mouse(struct flame_server *server, struct flame_view *view,
 static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool moved) {
 	struct flame_server *server = cursor->server;
 	struct wlr_seat *seat = server->input.seat;
+	render_pointer_move(&server->render, cursor->wlr->x, cursor->wlr->y);
 
 	if (drag_active(&server->input.drag)) {
 		if (moved) {
@@ -151,7 +151,7 @@ static void handle_request_set_cursor(struct wl_listener *listener, void *data) 
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, request_set_cursor);
 	struct wlr_seat_pointer_request_set_cursor_event *event = data;
 	if (from_focused_client(cursor, event->seat_client)) {
-		wlr_cursor_set_surface(cursor->wlr, event->surface,
+		cursor_image_set_surface(&cursor->image, event->surface,
 			event->hotspot_x, event->hotspot_y);
 	}
 }
@@ -161,8 +161,7 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data) {
 	struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
 	if (event->device_type == WLR_CURSOR_SHAPE_MANAGER_V1_DEVICE_TYPE_POINTER
 			&& from_focused_client(cursor, event->seat_client)) {
-		wlr_cursor_set_xcursor(cursor->wlr, cursor->xcursor,
-			wlr_cursor_shape_v1_name(event->shape));
+		cursor_set_name(cursor, wlr_cursor_shape_v1_name(event->shape));
 	}
 }
 
@@ -171,7 +170,7 @@ static void handle_pointer_focus_change(struct wl_listener *listener, void *data
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, pointer_focus_change);
 	struct wlr_seat_pointer_focus_change_event *event = data;
 	if (!event->new_surface) {
-		wlr_cursor_set_xcursor(cursor->wlr, cursor->xcursor, "default");
+		cursor_set_name(cursor, "default");
 	}
 }
 
@@ -181,14 +180,19 @@ bool cursor_init(struct flame_cursor *cursor, struct flame_server *server) {
 
 	cursor->server = server;
 	cursor->wlr = wlr_cursor_create();
-	cursor->xcursor = wlr_xcursor_manager_create(config->cursor_theme, config->cursor_size);
 	cursor->shape_manager = wlr_cursor_shape_manager_v1_create(server->display, 1);
-	if (!cursor->wlr || !cursor->xcursor || !cursor->shape_manager) {
+	if (!cursor->wlr || !cursor->shape_manager) {
 		wlr_log(WLR_ERROR, "failed to set up the cursor");
 		return false;
 	}
+	cursor->image_ready = cursor_image_init(&cursor->image, server->loop,
+		config->cursor_theme, config->cursor_size);
+	if (!cursor->image_ready) {
+		return false;
+	}
 	wlr_cursor_attach_output_layout(cursor->wlr, server->outputs.layout);
-	wlr_cursor_set_xcursor(cursor->wlr, cursor->xcursor, "default");
+	render_pointer_set_image(&server->render, &cursor->image);
+	render_pointer_move(&server->render, cursor->wlr->x, cursor->wlr->y);
 
 	// so clients draw their own cursors at the same size
 	char size[16];
@@ -223,7 +227,11 @@ void cursor_finish(struct flame_cursor *cursor) {
 	listener_disconnect(&cursor->request_set_shape);
 	listener_disconnect(&cursor->pointer_focus_change);
 
-	wlr_xcursor_manager_destroy(cursor->xcursor);
+	if (cursor->image_ready) {
+		render_pointer_set_image(&cursor->server->render, NULL);
+		cursor_image_finish(&cursor->image);
+		cursor->image_ready = false;
+	}
 	wlr_cursor_destroy(cursor->wlr);
 }
 
@@ -233,4 +241,8 @@ void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *
 
 void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
+}
+
+void cursor_set_name(struct flame_cursor *cursor, const char *name) {
+	cursor_image_set_name(&cursor->image, name);
 }

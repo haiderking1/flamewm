@@ -12,11 +12,13 @@ struct wlr_buffer;
 struct wlr_surface;
 struct wlr_texture;
 
-// one thing a frame draws, flattened out of the scene: a solid rect or one
-// client surface (subsurfaces are elements of their own). bottom to top
+// one thing a frame draws, flattened out of the scene: a solid rect, one
+// client surface (subsurfaces are elements of their own) or a texture of
+// ours (the pointer). bottom to top
 enum flame_element_type {
 	FLAME_ELEMENT_RECT,
 	FLAME_ELEMENT_SURFACE,
+	FLAME_ELEMENT_TEXTURE,
 };
 
 struct flame_element {
@@ -34,6 +36,8 @@ struct flame_element {
 	struct wlr_fbox src;
 	enum wl_output_transform transform;
 	struct wlr_buffer *buffer; // to tell a new buffer from the same one
+	// textures: what's on it. ours get recreated, maybe at the same address
+	const void *image;
 
 	// layout coords: what isn't covered by anything opaque above it, and
 	// what of it is opaque itself. filled by elements_occlude
@@ -53,6 +57,13 @@ void elements_clear(struct flame_element_list *list);
 // everything enabled in the scene that lands on area, bottom to top
 bool elements_collect(struct flame_element_list *list, struct flame_scene *scene,
 	struct wlr_box area);
+// a surface and its subsurfaces with the surface at x, y, on top of the list
+bool elements_push_surface(struct flame_element_list *list, struct wlr_surface *surface,
+	int x, int y, struct wlr_box area);
+// a translucent texture drawn into box, on top of the list
+bool elements_push_texture(struct flame_element_list *list, const void *id,
+	struct wlr_texture *texture, const void *image, struct wlr_box box, struct wlr_box area);
+
 // fills visible and opaque, top down
 void elements_occlude(struct flame_element_list *list);
 
