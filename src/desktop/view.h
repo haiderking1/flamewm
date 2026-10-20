@@ -35,6 +35,9 @@ struct flame_view_impl {
 	void (*set_resizing)(struct flame_view *view, bool resizing);
 	void (*close)(struct flame_view *view);
 	struct wlr_surface *(*surface)(struct flame_view *view);
+	// what bars show. NULL when the client never said
+	const char *(*app_id)(struct flame_view *view);
+	const char *(*title)(struct flame_view *view);
 };
 
 enum flame_border_side {
@@ -95,6 +98,8 @@ void view_set_focused(struct flame_view *view, bool focused);
 void view_set_resizing(struct flame_view *view, bool resizing);
 void view_close(struct flame_view *view);
 struct wlr_surface *view_surface(struct flame_view *view);
+const char *view_app_id(struct flame_view *view);
+const char *view_title(struct flame_view *view);
 
 // walks up the scene graph from any node to the view owning it
 struct flame_view *view_from_node(struct wlr_scene_node *node);

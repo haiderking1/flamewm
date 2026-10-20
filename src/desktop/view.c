@@ -137,6 +137,14 @@ struct wlr_surface *view_surface(struct flame_view *view) {
 	return view->impl->surface(view);
 }
 
+const char *view_app_id(struct flame_view *view) {
+	return view->impl->app_id(view);
+}
+
+const char *view_title(struct flame_view *view) {
+	return view->impl->title(view);
+}
+
 struct flame_view *view_from_node(struct wlr_scene_node *node) {
 	// only view trees get node.data, wlroots never touches it
 	while (node) {

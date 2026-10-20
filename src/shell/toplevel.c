@@ -148,6 +148,14 @@ static struct wlr_surface *impl_surface(struct flame_view *view) {
 	return from_view(view)->xdg->base->surface;
 }
 
+static const char *impl_app_id(struct flame_view *view) {
+	return from_view(view)->xdg->app_id;
+}
+
+static const char *impl_title(struct flame_view *view) {
+	return from_view(view)->xdg->title;
+}
+
 static const struct flame_view_impl toplevel_impl = {
 	.configure = impl_configure,
 	.acked = impl_acked,
@@ -158,6 +166,8 @@ static const struct flame_view_impl toplevel_impl = {
 	.set_resizing = impl_set_resizing,
 	.close = impl_close,
 	.surface = impl_surface,
+	.app_id = impl_app_id,
+	.title = impl_title,
 };
 
 static void handle_map(struct wl_listener *listener, void *data) {
@@ -265,6 +275,17 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data) 
 	wlr_xdg_surface_schedule_configure(xdg->base);
 }
 
+// bars show the focused window's title, and browsers change it all the time
+static void handle_set_title(struct wl_listener *listener, void *data) {
+	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, set_title);
+	desktop_notify(toplevel->view.desktop);
+}
+
+static void handle_set_app_id(struct wl_listener *listener, void *data) {
+	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, set_app_id);
+	desktop_notify(toplevel->view.desktop);
+}
+
 static void handle_destroy(struct wl_listener *listener, void *data) {
 	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, destroy);
 
@@ -274,6 +295,8 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&toplevel->destroy);
 	listener_disconnect(&toplevel->request_maximize);
 	listener_disconnect(&toplevel->request_fullscreen);
+	listener_disconnect(&toplevel->set_title);
+	listener_disconnect(&toplevel->set_app_id);
 
 	view_finish(&toplevel->view);
 	free(toplevel);
@@ -302,4 +325,7 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 		handle_request_maximize);
 	listener_connect(&toplevel->request_fullscreen,
 		&xdg_toplevel->events.request_fullscreen, handle_request_fullscreen);
+	listener_connect(&toplevel->set_title, &xdg_toplevel->events.set_title, handle_set_title);
+	listener_connect(&toplevel->set_app_id, &xdg_toplevel->events.set_app_id,
+		handle_set_app_id);
 }

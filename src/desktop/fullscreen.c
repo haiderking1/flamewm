@@ -49,6 +49,7 @@ bool fullscreen_request(struct flame_desktop *desktop, struct flame_view *view,
 	if (workspace == desktop->active) {
 		desktop_arrange(desktop);
 	}
+	desktop_notify(desktop);
 	return true;
 }
 
