@@ -10,6 +10,7 @@
 #include <wlr/util/log.h>
 
 #include "core/server.h"
+#include "render/timing.h"
 
 bool render_init(struct flame_render *render, struct flame_server *server) {
 	render->renderer = wlr_renderer_autocreate(server->backend.wlr);
@@ -57,6 +58,11 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 	} else {
 		wlr_log(WLR_INFO, "explicit sync not available (renderer timeline=%d backend timeline=%d)",
 			render->renderer->features.timeline, server->backend.wlr->features.timeline);
+	}
+
+	render->frame_timing = timing_enabled_by_env();
+	if (render->frame_timing) {
+		wlr_log(WLR_INFO, "frame timing probes on, reports every 2s");
 	}
 
 	for (int i = 0; i < FLAME_LAYER_COUNT; i++) {

@@ -35,6 +35,8 @@ struct flame_render {
 	struct flame_scene scene;
 	struct flame_scene_surfaces surfaces;
 	struct flame_tree *layers[FLAME_LAYER_COUNT];
+
+	bool frame_timing; // FLAME_FRAME_TIMING=1, frame.c logs probes
 };
 
 bool render_init(struct flame_render *render, struct flame_server *server);

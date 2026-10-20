@@ -16,6 +16,23 @@ make clangd     # compile_flags.txt so clangd stops yelling
 
 `flamewm -s foot` runs a command once it's up, `-d` turns on debug logs.
 
+### frame timing
+
+`FLAME_FRAME_TIMING=1 ./flamewm.run` logs a `flame: frame-timing` line per
+output every two seconds, only observing, nothing about rendering changes:
+
+- `flips` / `flip_hz`: pageflips that reached the screen, not app fps
+- `composited` / `failed`: frames drawn and handed to KMS, or refused
+- `draws` / `draw_ms`: building + drawing + committing a changed frame (cpu)
+- `empty` / `empty_ms`: frames where nothing changed, nothing drawn
+- `gpu_batch_max_ms`: our gpu work per frame, the longest finished
+  measurement since the last frame (results arrive late, nothing waits)
+- `flip_ms`: spacing between kernel flip timestamps, 6.06ms is one 165hz frame
+- `seq_steps`: vblanks between flips, 1 is every refresh, more means skipped
+- `dispatch_ms`: kernel flip timestamp to flame handling it
+
+`*_ms` are min/mean/max, `n/a` means no samples. `grep 'frame-timing' /tmp/flamewm.log`
+
 ## layout
 
 one directory, one job. nothing in here should turn into a god file.

@@ -1,6 +1,10 @@
 #!/bin/sh
 # rebuild if anything changed, then run with debug logs in /tmp/flamewm.log
 # extra args go straight to flamewm, e.g. ./flamewm.run -s foot
+# frame timing is on here: grep 'frame-timing' /tmp/flamewm.log.
+# FLAME_FRAME_TIMING=0 ./flamewm.run turns it off
+
+export FLAME_FRAME_TIMING="${FLAME_FRAME_TIMING:-1}"
 
 cd "$(dirname "$0")" || exit 1
 make -s || exit 1
