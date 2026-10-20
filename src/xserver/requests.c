@@ -580,7 +580,7 @@ static void get_keyboard_mapping(struct xs_client *client, const struct xin *in)
 	xs_reply_begin(client, &out, (uint8_t)width);
 	xout_zero(&out, 24);
 	for (int i = 0; i < count; i++) {
-		uint32_t syms[32];
+		uint32_t syms[XS_XKB_CORE_MAX];
 		xs_xkb_core_syms(xserver, (uint8_t)(first + i), syms, width);
 		for (int j = 0; j < width; j++) {
 			xout32(&out, syms[j]);
@@ -722,17 +722,24 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 			xs_window_destroy(xserver, window);
 		}
 		break;
-	case 5: // DestroySubwindows
+	case 5: // DestroySubwindows: flame's own (on the root) stay
 		if ((window = get_window(client, in, 4, 5))) {
-			while (!wl_list_empty(&window->children)) {
-				struct xs_window *child = wl_container_of(window->children.prev, child, link);
-				xs_window_destroy(xserver, child);
+			struct xs_window *child, *tmp;
+			wl_list_for_each_reverse_safe(child, tmp, &window->children, link) {
+				if (child->owner) {
+					xs_window_destroy(xserver, child);
+				}
 			}
 		}
 		break;
 	case 7: // ReparentWindow
 		if ((window = get_window(client, in, 4, 7))) {
 			struct xs_window *parent = get_window(client, in, 8, 7);
+			if (!window->owner) {
+				// flame's own windows stay where flame put them
+				xs_error(client, XS_ERROR_ACCESS, window->id, 7, 0);
+				return;
+			}
 			if (parent && window->parent) {
 				// no loops: the new parent can't be inside the window
 				for (struct xs_window *up = parent; up; up = up->parent) {

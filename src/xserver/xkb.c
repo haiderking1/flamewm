@@ -149,7 +149,8 @@ static bool same_type(const struct type *a, const struct type *b) {
 static uint8_t type_of(struct xs_xkb *xkb, xkb_keycode_t keycode, xkb_layout_index_t layout) {
 	struct type type = {.levels = 1};
 	xkb_level_index_t levels = xkb_keymap_num_levels_for_key(xkb->keymap, keycode, layout);
-	type.levels = (uint8_t)(levels < 1 ? 1 : levels > 255 ? 255 : levels);
+	// 4 groups of 63 levels still count in a byte
+	type.levels = (uint8_t)(levels < 1 ? 1 : levels > 63 ? 63 : levels);
 	for (xkb_level_index_t level = 0; level < type.levels; level++) {
 		xkb_mod_mask_t masks[MAX_ENTRIES];
 		size_t n = xkb_keymap_key_get_mods_for_level(xkb->keymap, keycode, layout, level,
@@ -264,6 +265,7 @@ static struct xs_xkb *xkb_from(struct flame_xserver *xserver, struct xkb_keymap 
 		if (key->groups) {
 			key->syms = calloc((size_t)key->groups * key->width, sizeof(*key->syms));
 			if (!key->syms) {
+				xkb->text = NULL; // the caller still has it
 				xkb_free(xkb);
 				return NULL;
 			}
@@ -527,8 +529,9 @@ int xs_xkb_core_width(struct flame_xserver *xserver) {
 		width = xkb->keys[k].width > width ? xkb->keys[k].width : width;
 	}
 	// like Xorg: group 1's first two levels, group 2's, then the rest of
-	// group 1's and group 2's
-	return width > 2 ? 2 + 2 + (width - 2) * 2 : 4;
+	// group 1's and group 2's. no more than a core client can be handed
+	int core = width > 2 ? 2 + 2 + (width - 2) * 2 : 4;
+	return core < XS_XKB_CORE_MAX ? core : XS_XKB_CORE_MAX;
 }
 
 void xs_xkb_core_syms(struct flame_xserver *xserver, uint8_t keycode, uint32_t *out,

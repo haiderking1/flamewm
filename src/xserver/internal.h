@@ -294,6 +294,7 @@ void xs_xkb_finish(struct flame_xserver *xserver);
 void xs_xkb_request(struct xs_client *client, const struct xin *request);
 // the core keyboard mapping, from the same keymap: keysyms per keycode, and
 // a keycode's keysyms (width of them)
+#define XS_XKB_CORE_MAX 32 // keysyms per keycode, at most
 int xs_xkb_core_width(struct flame_xserver *xserver);
 void xs_xkb_core_syms(struct flame_xserver *xserver, uint8_t keycode, uint32_t *out,
 	int width);

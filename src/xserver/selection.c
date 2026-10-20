@@ -111,6 +111,16 @@ static void set_owner(struct flame_xserver *xserver, struct xs_selection *select
 	// flame knows when it took one itself
 	bool flames = owner && !client;
 	bool is_x = selection->client != NULL;
+	// the old owner's gone with its window or connection: whatever flame was
+	// fetching from it isn't coming. one that only lost it may still answer
+	if (was_x && why != SET_SELECTION_OWNER) {
+		struct xs_transfer *transfer;
+		wl_list_for_each(transfer, &xserver->transfers, link) {
+			if (transfer->selection == selection->atom && transfer->timeout) {
+				wl_event_source_timer_update(transfer->timeout, 1);
+			}
+		}
+	}
 	if ((is_x || (was_x && !flames)) && xserver->hooks.selection_owner) {
 		xserver->hooks.selection_owner(xserver->hooks.data, selection->atom, is_x);
 	}
@@ -265,8 +275,7 @@ static void transfer_end(struct xs_transfer *transfer, uint32_t type, const uint
 static int handle_timeout(void *data) {
 	struct xs_transfer *transfer = data;
 	wlr_log(WLR_DEBUG, "xserver: selection owner never answered");
-	transfer->timeout = NULL;
-	transfer_end(transfer, 0, NULL, 0);
+	transfer_end(transfer, 0, NULL, 0); // its timer goes with it, safe from in here
 	return 0;
 }
 

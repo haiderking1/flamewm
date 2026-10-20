@@ -773,16 +773,23 @@ bool xs_render_id_in_use(struct flame_xserver *xserver, uint32_t id) {
 
 size_t xs_render_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max) {
 	size_t len = 0;
+	// out NULL: just how many there are
 	struct picture *picture;
 	wl_list_for_each(picture, &xserver->pictures, link) {
-		if ((picture->id & ~0x1fffffu) == base && len < max) {
-			out[len++] = picture->id;
+		if ((picture->id & ~0x1fffffu) == base && (!out || len < max)) {
+			if (out) {
+				out[len] = picture->id;
+			}
+			len++;
 		}
 	}
 	struct glyphset_id *gs;
 	wl_list_for_each(gs, &xserver->glyphset_ids, link) {
-		if ((gs->id & ~0x1fffffu) == base && len < max) {
-			out[len++] = gs->id;
+		if ((gs->id & ~0x1fffffu) == base && (!out || len < max)) {
+			if (out) {
+				out[len] = gs->id;
+			}
+			len++;
 		}
 	}
 	return len;

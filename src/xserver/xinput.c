@@ -614,6 +614,30 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 2:
 		list_input_devices(client);
 		break;
+	case 3: { // OpenDevice: the slaves, like Xorg (masters are XI2's)
+		uint8_t id = xin8(in, 4);
+		if (id != MASTER_POINTER + 2 && id != MASTER_POINTER + 3) {
+			xs_error(client, BAD_DEVICE, id, XS_XI_OPCODE, minor);
+			break;
+		}
+		// class, and where its events start: XI1's DeviceKeyPress is 1,
+		// DeviceButtonPress 3, DeviceValuator 0, DeviceFocusIn 6
+		static const uint8_t pointer[][2] = {{1, 3}, {2, 0}, {6, 8}};
+		static const uint8_t keyboard[][2] = {{0, 1}, {5, 6}, {6, 8}};
+		const uint8_t (*classes)[2] = id == MASTER_POINTER + 2 ? pointer : keyboard;
+		xs_reply_begin(client, &out, 3); // XI1 replies carry their request
+		xout8(&out, 3);
+		xout_zero(&out, 23);
+		for (int i = 0; i < 3; i++) {
+			xout8(&out, classes[i][0]);
+			xout8(&out, (uint8_t)(XS_XI_FIRST_EVENT + classes[i][1]));
+		}
+		xout_zero(&out, 2);
+		xs_reply_send(client, &out);
+		break;
+	}
+	case 4: // CloseDevice
+		break;
 	case 40:
 		query_pointer(client, in);
 		break;
