@@ -334,7 +334,9 @@ static void bridge_apply(struct flame_xbridge_window *window) {
 
 	switch (role) {
 	case FLAME_XBRIDGE_HIDDEN:
+		view->unmap_quietly = true;
 		desktop_unmap_view(desktop, view);
+		view->unmap_quietly = false;
 		break;
 	case FLAME_XBRIDGE_WINDOW:
 		if (!view->workspace) {
@@ -343,7 +345,9 @@ static void bridge_apply(struct flame_xbridge_window *window) {
 		break;
 	case FLAME_XBRIDGE_POPUP:
 		// a menu sits exactly where the app put it, no tile, no border, above all
+		view->unmap_quietly = true;
 		desktop_unmap_view(desktop, view);
+		view->unmap_quietly = false;
 		content_move(toplevel, desktop->server->render.layers[FLAME_LAYER_OVERLAY],
 			verdict->box);
 		toplevel->content_in = FLAME_CONTENT_POPUP;
@@ -354,7 +358,9 @@ static void bridge_apply(struct flame_xbridge_window *window) {
 		break;
 	case FLAME_XBRIDGE_EMBED:
 		// over its host like on X: moves, hides and stacks with it
+		view->unmap_quietly = true;
 		desktop_unmap_view(desktop, view);
+		view->unmap_quietly = false;
 		if (host) {
 			content_move(toplevel, host->view.content, verdict->box);
 			if (toplevel->content_in != FLAME_CONTENT_EMBED) {

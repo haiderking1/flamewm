@@ -140,6 +140,10 @@ static char *dup_field(lua_State *L, int table, const char *key) {
 	return value;
 }
 
+static float clamp01(float v) {
+	return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 static bool parse_anim_type(const char *text, enum flame_anim_type *out) {
 	static const char *const names[] = {"none", "slide", "zoom", "fade"};
 	for (int i = 0; text && i < 4; i++) {
@@ -196,9 +200,9 @@ static int set_animations(lua_State *L, struct flame_anim_config *anim, int tabl
 		} else if (!strcmp(key, "fade_out")) {
 			anim->fade_out = lua_toboolean(L, value);
 		} else if (!strcmp(key, "fade_in_from")) {
-			anim->fade_in_from = (float)luaL_checknumber(L, value);
+			anim->fade_in_from = clamp01((float)luaL_checknumber(L, value));
 		} else if (!strcmp(key, "fade_out_from")) {
-			anim->fade_out_from = (float)luaL_checknumber(L, value);
+			anim->fade_out_from = clamp01((float)luaL_checknumber(L, value));
 		} else if (!strcmp(key, "zoom_from")) {
 			anim->zoom_from = (float)luaL_checknumber(L, value);
 		} else if (!strcmp(key, "zoom_to")) {
@@ -206,9 +210,9 @@ static int set_animations(lua_State *L, struct flame_anim_config *anim, int tabl
 		} else if (!strcmp(key, "workspace_vertical")) {
 			anim->workspace_vertical = lua_toboolean(L, value);
 		} else if (!strcmp(key, "focused_opacity")) {
-			anim->focused_opacity = (float)luaL_checknumber(L, value);
+			anim->focused_opacity = clamp01((float)luaL_checknumber(L, value));
 		} else if (!strcmp(key, "unfocused_opacity")) {
-			anim->unfocused_opacity = (float)luaL_checknumber(L, value);
+			anim->unfocused_opacity = clamp01((float)luaL_checknumber(L, value));
 		} else if (!strcmp(key, "duration") || !strcmp(key, "curve")) {
 			bool duration = !strcmp(key, "duration");
 			luaL_checktype(L, value, LUA_TTABLE);
@@ -654,55 +658,73 @@ void config_window_rules(const struct flame_config *config, const char *app_id,
 	if (!L) {
 		return;
 	}
-	lua_getglobal(L, "flame");
-	lua_getfield(L, -1, "_rules");
-	lua_pushstring(L, app_id ? app_id : "");
-	lua_pushstring(L, title ? title : "");
-	if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
-		wlr_log(WLR_ERROR, "config: a window rule broke: %s", lua_tostring(L, -1));
-		lua_pop(L, 2);
+	int top = lua_gettop(L);
+	// init.lua may have done anything to these: nothing unprotected touches
+	// a value that isn't what it should be
+	if (lua_getglobal(L, "flame") != LUA_TTABLE
+			|| lua_rawget(L, (lua_pushstring(L, "_rules"), -2)) != LUA_TFUNCTION) {
+		lua_settop(L, top);
 		return;
 	}
-	lua_getfield(L, -1, "floating");
+	lua_pushstring(L, app_id ? app_id : "");
+	lua_pushstring(L, title ? title : "");
+	if (lua_pcall(L, 2, 1, 0) != LUA_OK || !lua_istable(L, -1)) {
+		if (!lua_istable(L, -1)) {
+			wlr_log(WLR_ERROR, "config: a window rule broke: %s",
+				lua_isstring(L, -1) ? lua_tostring(L, -1) : "flame._rules gave no table");
+		}
+		lua_settop(L, top);
+		return;
+	}
+	lua_pushstring(L, "floating");
+	lua_rawget(L, -2);
 	if (!lua_isnil(L, -1)) {
 		out->floating_set = true;
 		out->floating = lua_toboolean(L, -1);
 	}
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "fullscreen");
+	lua_pushstring(L, "fullscreen");
+	lua_rawget(L, -2);
 	out->fullscreen = lua_toboolean(L, -1);
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "workspace");
+	lua_pushstring(L, "workspace");
+	lua_rawget(L, -2);
 	if (lua_isinteger(L, -1)) {
 		lua_Integer n = lua_tointeger(L, -1);
 		out->workspace = n >= 1 && n <= FLAME_WORKSPACE_COUNT ? (int)n : 0;
 	}
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "animation");
+	lua_pushstring(L, "animation");
+	lua_rawget(L, -2);
 	out->no_animation = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
 	lua_pop(L, 1);
 	enum flame_anim_type type;
-	lua_getfield(L, -1, "open");
+	lua_pushstring(L, "open");
+	lua_rawget(L, -2);
 	if (lua_isstring(L, -1) && parse_anim_type(lua_tostring(L, -1), &type)) {
 		out->open = (int)type;
 	}
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "close");
+	lua_pushstring(L, "close");
+	lua_rawget(L, -2);
 	if (lua_isstring(L, -1) && parse_anim_type(lua_tostring(L, -1), &type)) {
 		out->close = (int)type;
 	}
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "fade_in");
+	lua_pushstring(L, "fade_in");
+	lua_rawget(L, -2);
 	out->no_fade_in = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "fade_out");
+	lua_pushstring(L, "fade_out");
+	lua_rawget(L, -2);
 	out->no_fade_out = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
 	lua_pop(L, 1);
-	lua_getfield(L, -1, "opacity");
+	lua_pushstring(L, "opacity");
+	lua_rawget(L, -2);
 	if (lua_isnumber(L, -1)) {
-		out->opacity = (float)lua_tonumber(L, -1);
+		out->opacity = clamp01((float)lua_tonumber(L, -1));
 	}
-	lua_pop(L, 3);
+	lua_settop(L, top);
 }
 
 void config_run_lua_bind(struct flame_server *server, int ref) {

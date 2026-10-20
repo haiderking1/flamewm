@@ -81,6 +81,7 @@ void desktop_arrange(struct flame_desktop *desktop) {
 	}
 	// floats land in the same frame as the tiles around them
 	wl_list_for_each(view, &workspace->floats, link) {
+		view->float_box = floating_on_screen(desktop, view->float_box);
 		bool fullscreen = view == owner && view->fullscreen_wanted;
 		transaction_add(txn, view, fullscreen ? output->box : view->float_box, fullscreen);
 	}
@@ -202,8 +203,12 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	view->floating = false;
 	view->has_float_box = false;
 	// its last picture plays the close, from where it is now
-	window_anim_snapshot_if_missing(view);
-	window_anim_closed(view);
+	if (!view->unmap_quietly && !desktop->server->terminating) {
+		window_anim_snapshot_if_missing(view);
+		window_anim_closed(view);
+	} else {
+		window_anim_discard(view);
+	}
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);

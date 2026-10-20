@@ -31,6 +31,16 @@ static struct wlr_box centered(struct flame_desktop *desktop, int width, int hei
 	return box;
 }
 
+struct wlr_box floating_on_screen(struct flame_desktop *desktop, struct wlr_box box) {
+	// at least a grabbable corner stays on the output
+	struct wlr_box area = usable_area(desktop);
+	box = fit(desktop, box);
+	box.x = CLAMP(box.x, area.x - box.width + MIN_FLOAT_SIZE,
+		area.x + area.width - MIN_FLOAT_SIZE);
+	box.y = CLAMP(box.y, area.y, area.y + area.height - MIN_FLOAT_SIZE);
+	return box;
+}
+
 struct wlr_box floating_initial_box(struct flame_desktop *desktop, struct flame_view *view) {
 	if (view->has_float_box) {
 		return fit(desktop, view->float_box);

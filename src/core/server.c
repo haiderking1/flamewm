@@ -145,6 +145,7 @@ void server_finish(struct flame_server *server) {
 		wl_event_source_remove(server->reload_idle);
 		server->reload_idle = NULL;
 	}
+	server->terminating = true;
 	wl_display_destroy_clients(server->display);
 	anims_finish(&server->anims);
 	// stop listening to the desktop before it goes

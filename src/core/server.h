@@ -30,6 +30,7 @@ struct flame_server {
 	const struct flame_config *config;
 	const char *config_path; // -c, NULL for the usual place
 	struct wl_event_source *reload_idle;
+	bool terminating; // tearing down: nothing animates its way out
 
 	struct flame_signals signals;
 	struct flame_anims anims;
