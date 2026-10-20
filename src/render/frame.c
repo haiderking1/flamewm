@@ -104,9 +104,20 @@ static void drop_queued(struct flame_frame *frame) {
 	}
 }
 
+// someone else put a buffer on the output: its flip is pending like one of
+// ours, committing over it would only get refused as busy
+static void adopt_foreign_commit(struct flame_frame *frame) {
+	if (frame->schedule.active && !frame->schedule.pending) {
+		schedule_submitted(&frame->schedule, &frame->foreign_ticket, now_ns());
+	}
+}
+
 static void handle_output_commit(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, output_commit);
 	const struct wlr_output_event_commit *event = data;
+	if (!frame->committing && (event->state->committed & WLR_OUTPUT_STATE_BUFFER)) {
+		adopt_foreign_commit(frame);
+	}
 	// a different size or orientation leaves nothing in the old buffers usable
 	if (event->state->committed & (WLR_OUTPUT_STATE_MODE | WLR_OUTPUT_STATE_SCALE
 			| WLR_OUTPUT_STATE_TRANSFORM | WLR_OUTPUT_STATE_ENABLED)) {
@@ -125,7 +136,9 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 
 static bool commit(struct flame_frame *frame, struct wlr_output_state *state,
 		enum timing_commit kind) {
+	frame->committing = true;
 	bool ok = wlr_output_commit_state(frame->output, state);
+	frame->committing = false;
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
 	} else {
@@ -244,6 +257,11 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 			frame_finish(frame);
 			return false;
 		}
+	}
+
+	// enabled means a buffer went in with the modeset, its flip is still on the way
+	if (output->enabled) {
+		adopt_foreign_commit(frame);
 	}
 
 	listener_connect(&frame->scene_changed, &render->scene.events.changed,
@@ -657,6 +675,10 @@ static void process_once(struct flame_frame *frame) {
 	if (!output->enabled || wlr_box_empty(frame->area)) {
 		timer_arm(&frame->wake, 0);
 		return; // comes back through the commit that enables it
+	}
+	if (schedule_stalled(schedule, now) && schedule->pending == &frame->foreign_ticket) {
+		// that flip never reported back, nothing of ours is waiting on it
+		schedule_presented(schedule, 0, now);
 	}
 	if (schedule_stalled(schedule, now) && !frame->stall_reported) {
 		wlr_log(WLR_ERROR, "%s: a pageflip has been pending for over %llds",

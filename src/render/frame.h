@@ -55,8 +55,11 @@ struct flame_frame {
 	// frame callback cycles, see schedule_cycle
 	uint64_t callback_cycle;
 
-	// tickets for the schedule, only their addresses matter
-	int submitted_ticket, queued_ticket;
+	// tickets for the schedule, only their addresses matter. foreign: a
+	// commit that wasn't ours (the modeset turning the output on) has a flip
+	// in flight too, the first frame waits for it
+	int submitted_ticket, queued_ticket, foreign_ticket;
+	bool committing; // inside our own wlr_output_commit_state
 	// a successor, rendered while the pending one is still waiting to flip
 	struct wlr_output_state queued;
 	bool has_queued;
