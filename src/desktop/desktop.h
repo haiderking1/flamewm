@@ -28,6 +28,11 @@ void desktop_finish(struct flame_desktop *desktop);
 
 // lay out the visible workspace again, call after anything moves
 void desktop_arrange(struct flame_desktop *desktop);
+// same, but everything lands right now and nobody waits on clients. for a
+// mouse resize: the edges follow the cursor and clients catch up when they can
+void desktop_arrange_live(struct flame_desktop *desktop);
+// the live arranging is over, windows it resized get their final size for real
+void desktop_end_live(struct flame_desktop *desktop);
 // a transaction just put things in place
 void desktop_layout_applied(struct flame_desktop *desktop);
 

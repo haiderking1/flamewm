@@ -60,6 +60,47 @@ void desktop_arrange(struct flame_desktop *desktop) {
 	transaction_commit(txn);
 }
 
+void desktop_arrange_live(struct flame_desktop *desktop) {
+	struct flame_server *server = desktop->server;
+	struct flame_transaction *txn = &desktop->transaction;
+
+	// land whatever's in flight. applying can start one more to catch up on a
+	// deferred arrange, that one lands on the second go
+	while (transaction_active(txn)) {
+		transaction_flush(txn);
+	}
+
+	struct flame_output *output = outputs_primary(&server->outputs);
+	if (!output) {
+		return;
+	}
+	struct flame_workspace *workspace = desktop->active;
+	tree_layout(workspace->layout, output->usable, server->config->gap);
+
+	struct flame_view *view;
+	wl_list_for_each(view, &workspace->views, link) {
+		if (!view->shown || view->fullscreen_shown
+				|| wlr_box_equal(&view->node->box, &view->geometry)) {
+			continue;
+		}
+		// every window on a moving split is in the resize, not just the
+		// grabbed one. same configure as the new size
+		view_set_resizing(view, true);
+		// shown with whatever it last drew, cropped to the new box
+		view_configure(view, view->node->box, false);
+		view_place(view, view->node->box, false);
+	}
+}
+
+void desktop_end_live(struct flame_desktop *desktop) {
+	// live arranging only ever touches the visible workspace, and anything
+	// that switches or moves windows away ends it first
+	struct flame_view *view;
+	wl_list_for_each(view, &desktop->active->views, link) {
+		view_set_resizing(view, false);
+	}
+}
+
 void desktop_layout_applied(struct flame_desktop *desktop) {
 	fullscreen_refresh_backdrops(desktop);
 	// things moved under the pointer

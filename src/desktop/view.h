@@ -27,6 +27,8 @@ struct flame_view_impl {
 	// size of what the client actually drew, its window geometry
 	void (*content_size)(struct flame_view *view, int *width, int *height);
 	void (*set_activated)(struct flame_view *view, bool activated);
+	// the user is dragging its size around, sizes will change every frame
+	void (*set_resizing)(struct flame_view *view, bool resizing);
 	void (*close)(struct flame_view *view);
 	struct wlr_surface *(*surface)(struct flame_view *view);
 };
@@ -62,6 +64,10 @@ struct flame_view {
 	// on screen as fullscreen right now, flips only when a transaction lands
 	bool fullscreen_shown;
 
+	// told it's in an interactive resize. terminals hold back the size from
+	// their shell meanwhile, so it doesn't redraw its prompt every frame
+	bool resizing;
+
 	struct flame_view_txn txn;
 };
 
@@ -82,6 +88,7 @@ void view_reparent(struct flame_view *view);
 void view_content_changed(struct flame_view *view);
 
 void view_set_focused(struct flame_view *view, bool focused);
+void view_set_resizing(struct flame_view *view, bool resizing);
 void view_close(struct flame_view *view);
 struct wlr_surface *view_surface(struct flame_view *view);
 

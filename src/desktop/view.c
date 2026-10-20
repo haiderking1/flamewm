@@ -122,6 +122,13 @@ void view_set_focused(struct flame_view *view, bool focused) {
 	view->impl->set_activated(view, focused);
 }
 
+void view_set_resizing(struct flame_view *view, bool resizing) {
+	if (view->resizing != resizing) {
+		view->resizing = resizing;
+		view->impl->set_resizing(view, resizing);
+	}
+}
+
 void view_close(struct flame_view *view) {
 	view->impl->close(view);
 }
