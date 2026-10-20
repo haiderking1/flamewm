@@ -694,6 +694,7 @@ static const struct extension {
 	{"DRI3", XS_DRI3_OPCODE, 0, 0},
 	{"Present", XS_PRESENT_OPCODE, 0, 0},
 	{"MIT-SHM", XS_SHM_OPCODE, XS_SHM_FIRST_EVENT, XS_SHM_FIRST_ERROR},
+	{"RENDER", XS_RENDER_OPCODE, 0, XS_RENDER_FIRST_ERROR},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -1029,6 +1030,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_SHM_OPCODE:
 		xs_shm_request(client, in);
+		break;
+	case XS_RENDER_OPCODE:
+		xs_render_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs

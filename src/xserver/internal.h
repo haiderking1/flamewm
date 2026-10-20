@@ -67,6 +67,9 @@ enum {
 #define XS_SHM_OPCODE 136
 #define XS_SHM_FIRST_EVENT 70
 #define XS_SHM_FIRST_ERROR 145
+// pixman's compositing for toolkits: pictures, gradients, trapezoids, glyphs
+#define XS_RENDER_OPCODE 137
+#define XS_RENDER_FIRST_ERROR 146
 
 // ---- talking back (xserver.c) ----
 
@@ -171,6 +174,20 @@ void xs_draw_window_hidden(struct flame_xserver *xserver, struct xs_window *wind
 void xs_draw_window_moved(struct flame_xserver *xserver, struct xs_window *window, int old_x,
 	int old_y, int old_w, int old_h);
 void xs_draw_window_freed(struct xs_window *window);
+// a viewable window's pixels: its top-level's backing, where the window is in
+// it, what of it shows (backing coords, clip must be initialized). false:
+// nothing to draw on
+bool xs_window_pixels(struct xs_window *window, bool inferiors, pixman_image_t **backing,
+	int *dx, int *dy, pixman_region32_t *clip);
+// pixels of top's backing changed (backing coords): flame hears about it
+void xs_damage(struct flame_xserver *xserver, struct xs_window *top,
+	const pixman_region32_t *region);
+
+// ---- RENDER (render.c) ----
+
+void xs_render_request(struct xs_client *client, const struct xin *request);
+void xs_render_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+void xs_render_finish(struct flame_xserver *xserver);
 
 // ---- MIT-SHM (shm.c) ----
 

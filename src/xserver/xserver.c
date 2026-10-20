@@ -257,7 +257,7 @@ static void setup_accept(struct xs_client *client) {
 	xout16(&out, (uint16_t)strlen(VENDOR));
 	xout16(&out, 0xffff); // maximum request length, in units
 	xout8(&out, 1); // screens
-	xout8(&out, 3); // pixmap formats
+	xout8(&out, 5); // pixmap formats
 	xout8(&out, 0); // image byte order: lsb first
 	xout8(&out, 0); // bitmap bit order
 	xout8(&out, 32); // scanline unit
@@ -267,8 +267,9 @@ static void setup_accept(struct xs_client *client) {
 	xout32(&out, 0);
 	xout_bytes(&out, VENDOR, strlen(VENDOR));
 	xout_pad(&out);
-	static const uint8_t formats[3][2] = {{1, 1}, {24, 32}, {32, 32}};
-	for (int i = 0; i < 3; i++) {
+	// depth 8: RENDER's alpha masks. 4: libXrender won't use RENDER without
+	static const uint8_t formats[5][2] = {{1, 1}, {4, 8}, {8, 8}, {24, 32}, {32, 32}};
+	for (int i = 0; i < 5; i++) {
 		xout8(&out, formats[i][0]);
 		xout8(&out, formats[i][1]);
 		xout8(&out, 32);
@@ -291,8 +292,9 @@ static void setup_accept(struct xs_client *client) {
 	xout8(&out, 0); // backing stores: never
 	xout8(&out, 0); // save unders
 	xout8(&out, 24); // root depth
-	xout8(&out, 3); // allowed depths
-	// depth 24, depth 32 (argb windows), depth 1 (bitmaps, no visuals)
+	xout8(&out, 5); // allowed depths
+	// depth 24, depth 32 (argb windows), depth 1 (bitmaps), 4 and 8 (alpha
+	// masks) without visuals
 	xout8(&out, 24);
 	xout8(&out, 0);
 	xout16(&out, 1);
@@ -304,6 +306,14 @@ static void setup_accept(struct xs_client *client) {
 	xout32(&out, 0);
 	put_visual(&out, XS_VISUAL_32);
 	xout8(&out, 1);
+	xout8(&out, 0);
+	xout16(&out, 0);
+	xout32(&out, 0);
+	xout8(&out, 8);
+	xout8(&out, 0);
+	xout16(&out, 0);
+	xout32(&out, 0);
+	xout8(&out, 4);
 	xout8(&out, 0);
 	xout16(&out, 0);
 	xout32(&out, 0);
@@ -595,6 +605,8 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->selections);
 	wl_list_init(&xserver->gcs);
 	wl_list_init(&xserver->shm_segments);
+	wl_list_init(&xserver->pictures);
+	wl_list_init(&xserver->glyphset_ids);
 	if (!xs_atoms_init(&xserver->atoms)) {
 		return false;
 	}
@@ -734,6 +746,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 		wl_event_source_remove(xserver->damage_idle);
 		xserver->damage_idle = NULL;
 	}
+	xs_render_finish(xserver);
 	xs_atoms_finish(&xserver->atoms);
 }
 

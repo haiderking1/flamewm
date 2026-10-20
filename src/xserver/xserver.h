@@ -277,6 +277,9 @@ struct flame_xserver {
 	struct wl_list selections; // xs_selection.link
 	struct wl_list gcs; // xs_gc.link
 	struct wl_list shm_segments; // xs_shm_segment.link
+	// RENDER, see render.c: pictures, glyph set ids, and pixman's glyph cache
+	struct wl_list pictures, glyphset_ids;
+	pixman_glyph_cache_t *glyph_cache;
 	struct wl_event_source *damage_idle;
 	struct xs_window *root;
 	struct xs_atoms atoms;

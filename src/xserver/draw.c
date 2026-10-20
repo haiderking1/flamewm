@@ -52,6 +52,7 @@ static pixman_format_code_t depth_format(int depth) {
 	switch (depth) {
 	case 1:
 		return PIXMAN_a1;
+	case 4: // a byte a pixel, like Xorg: libXrender insists on the depth existing
 	case 8:
 		return PIXMAN_a8;
 	case 24:
@@ -64,7 +65,7 @@ static pixman_format_code_t depth_format(int depth) {
 }
 
 static int depth_bpp(int depth) {
-	return depth == 1 ? 1 : depth == 8 ? 8 : 32;
+	return depth == 1 ? 1 : depth <= 8 ? 8 : 32;
 }
 
 size_t xs_image_stride(int depth, int width) {
@@ -364,6 +365,27 @@ static bool target_for(struct xs_client *client, uint32_t id, const struct xs_gc
 		xs_error(client, XS_ERROR_DRAWABLE, id, major, minor);
 	}
 	return false;
+}
+
+// for RENDER: a viewable window's pixels, where it is in them and what of
+// it shows (backing coords)
+bool xs_window_pixels(struct xs_window *window, bool inferiors, pixman_image_t **backing,
+		int *dx, int *dy, pixman_region32_t *clip) {
+	struct target t;
+	if (!target_window(window, inferiors, &t)) {
+		return false;
+	}
+	*backing = t.image;
+	*dx = t.dx;
+	*dy = t.dy;
+	pixman_region32_copy(clip, &t.clip);
+	target_finish(&t);
+	return true;
+}
+
+void xs_damage(struct flame_xserver *xserver, struct xs_window *top,
+		const pixman_region32_t *region) {
+	damage(xserver, top, region);
 }
 
 // ---- shapes into regions ----
