@@ -1,6 +1,7 @@
 #ifndef FLAME_XSHELL_XSHELL_H
 #define FLAME_XSHELL_XSHELL_H
 
+#include <pixman.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <wayland-server-core.h>
@@ -61,6 +62,11 @@ struct flame_xwindow {
 	struct xpresent *shown; // its picture right now
 	struct wl_list queue; // xpresent.link, waiting for their msc, soonest first
 	struct wl_list retiring; // xpresent.link, replaced, not done yet
+	// drawn with the cpu: its backing as a texture, updated where it changed,
+	// and the key telling frames it's a new picture. Present wins over it
+	struct xcore *core;
+	struct wlr_texture *core_texture;
+	uintptr_t core_serial;
 	// how long the app takes from hearing a frame made it (CompleteNotify) to
 	// its next present: quick to grow, slow to shrink. its completes are held
 	// back to just in time for the render that can show the next one
@@ -100,6 +106,11 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 	uint32_t time);
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 	uint32_t time);
+// apps drew into a top-level's backing with the cpu (core requests,
+// MIT-SHM): what changed goes up to its texture
+void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
+	const pixman_region32_t *region);
+
 // to the focused X window when flame's focus is on one
 bool xshell_key(struct flame_xshell *xshell, uint32_t keycode, bool pressed, uint32_t time);
 

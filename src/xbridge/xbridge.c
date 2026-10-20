@@ -545,6 +545,11 @@ static size_t hook_modifiers(void *data, uint32_t format, uint64_t *out, size_t 
 	return xshell_modifiers(&xbridge->server->xshell, format, out, max);
 }
 
+static void hook_damage(void *data, struct xs_window *top, const pixman_region32_t *region) {
+	struct flame_xbridge *xbridge = data;
+	xshell_damaged(&xbridge->server->xshell, top, region);
+}
+
 static int hook_keysyms(void *data, uint8_t keycode, uint32_t *out, int max) {
 	struct flame_xbridge *xbridge = data;
 	return xshell_keysyms(&xbridge->server->xshell, keycode, out, max);
@@ -594,6 +599,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.pixmap_destroyed = hook_pixmap_destroyed,
 		.syncobj_destroyed = hook_syncobj_destroyed,
 		.keysyms = hook_keysyms,
+		.damage = hook_damage,
 		.data = xbridge,
 	};
 	if (!xserver_init(&xbridge->xserver, server->loop, hooks, 0, 0)) {
