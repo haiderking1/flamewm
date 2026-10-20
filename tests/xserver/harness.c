@@ -9,6 +9,8 @@
 //   repeat CODE       the held key repeats
 //   focus WINDOW      flame moves keyboard focus
 //   monitors N        N outputs side by side, 1920x1080 each, 165Hz
+//   layouts L         a keymap with these layouts ("us,ara")
+//   mods D L K G      modifiers depressed, latched, locked, and the layout
 // usage: harness test-client [args], exits with the client's status
 #include <signal.h>
 #include <time.h>
@@ -25,7 +27,7 @@
 struct harness {
 	struct flame_xserver xserver;
 	struct wl_event_loop *loop;
-	struct xkb_keymap *keymap;
+	struct xkb_context *context;
 	int commands, replies; // the pipe ends, ours
 	struct wl_event_source *command_source;
 	char line[256];
@@ -35,17 +37,6 @@ struct harness {
 	int status;
 	bool done;
 };
-
-static int keysyms(void *data, uint8_t keycode, uint32_t *out, int max) {
-	struct harness *h = data;
-	const xkb_keysym_t *syms;
-	int count = 0;
-	for (xkb_level_index_t level = 0; level < 2 && count < max; level++) {
-		int n = xkb_keymap_key_get_syms_by_level(h->keymap, keycode, 0, level, &syms);
-		out[count++] = n > 0 ? syms[0] : 0;
-	}
-	return count;
-}
 
 static void pointer(void *data, double *x, double *y) {
 	struct harness *h = data;
@@ -102,6 +93,19 @@ static void command(struct harness *h, char *line) {
 			monitors[i].primary = i == 0;
 		}
 		xserver_set_monitors(x, monitors, (size_t)(a < 8 ? a : 8));
+	} else if (!strcmp(word, "layouts")) {
+		char layouts[64] = "";
+		sscanf(line, "layouts %63s", layouts);
+		struct xkb_rule_names names = {.layout = layouts};
+		struct xkb_keymap *keymap = xkb_keymap_new_from_names(h->context, &names,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
+		xserver_set_keymap(x, keymap);
+		xkb_keymap_unref(keymap);
+	} else if (!strcmp(word, "mods")) {
+		unsigned d = 0, l = 0, k = 0, g = 0;
+		sscanf(line, "mods %u %u %u %u", &d, &l, &k, &g);
+		h->state = (uint16_t)((h->state & 0x1f00) | ((d | l | k) & 0xff) | (g & 3) << 13);
+		xserver_keyboard_state(x, d, l, k, g);
 	} else {
 		fprintf(stderr, "harness: what's '%s'\n", line);
 	}
@@ -146,11 +150,10 @@ int main(int argc, char **argv) {
 	}
 	wlr_log_init(getenv("HARNESS_DEBUG") ? WLR_DEBUG : WLR_ERROR, NULL);
 	struct harness h = {0};
-	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	h.keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	h.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	h.loop = wl_event_loop_create();
-	struct xs_hooks hooks = {.keysyms = keysyms, .pointer = pointer, .data = &h};
-	if (!h.keymap || !xserver_init(&h.xserver, h.loop, hooks, 1920, 1080)
+	struct xs_hooks hooks = {.pointer = pointer, .data = &h};
+	if (!h.context || !xserver_init(&h.xserver, h.loop, hooks, 1920, 1080)
 			|| !xserver_start(&h.xserver)) {
 		fprintf(stderr, "harness: no X server\n");
 		return 2;
@@ -196,8 +199,7 @@ int main(int argc, char **argv) {
 	close(h.replies);
 	xserver_finish(&h.xserver);
 	wl_event_loop_destroy(h.loop);
-	xkb_keymap_unref(h.keymap);
-	xkb_context_unref(context);
+	xkb_context_unref(h.context);
 	if (WIFSIGNALED(h.status)) {
 		fprintf(stderr, "harness: client died of signal %d\n", WTERMSIG(h.status));
 		return 1;

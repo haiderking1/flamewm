@@ -648,35 +648,49 @@ static void query_colors(struct xs_client *client, const struct xin *in) {
 }
 
 // flame's xkb keymap as X's core one: two levels per key, plain and shifted
+// flame's keymap, the core way: a row of keysyms per keycode, both layouts
 static void get_keyboard_mapping(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint8_t first = xin8(in, 4), count = xin8(in, 5);
+	if (first < 8 || first + count - 1 > 255) {
+		xs_error(client, XS_ERROR_VALUE, first, 101, 0);
+		return;
+	}
+	int width = xs_xkb_core_width(xserver);
 	struct xout out;
-	xs_reply_begin(client, &out, 2); // keysyms per keycode
+	xs_reply_begin(client, &out, (uint8_t)width);
 	xout_zero(&out, 24);
 	for (int i = 0; i < count; i++) {
-		uint32_t syms[2] = {0, 0};
-		if (xserver->hooks.keysyms) {
-			xserver->hooks.keysyms(xserver->hooks.data, (uint8_t)(first + i), syms, 2);
+		uint32_t syms[32];
+		xs_xkb_core_syms(xserver, (uint8_t)(first + i), syms, width);
+		for (int j = 0; j < width; j++) {
+			xout32(&out, syms[j]);
 		}
-		xout32(&out, syms[0]);
-		xout32(&out, syms[1]);
 	}
 	xs_reply_send(client, &out);
 }
 
-// which keys are the modifiers, evdev keycodes + 8 on a pc keyboard: shift,
-// lock, control, mod1 (alt), mod2 (num lock), mod3, mod4 (super), mod5
+// which keys are the modifiers, from what the keymap's keys do
 static void get_modifier_mapping(struct xs_client *client) {
-	static const uint8_t keys[8][2] = {
-		{50, 62}, {66, 0}, {37, 105}, {64, 108}, {77, 0}, {0, 0}, {133, 134}, {92, 0},
-	};
+	struct flame_xserver *xserver = client->xserver;
+	uint8_t max;
+	uint8_t min = xs_xkb_range(xserver, &max);
+	uint8_t keys[8][8] = {{0}};
+	int counts[8] = {0}, per = 1;
+	for (int k = min; k <= max; k++) {
+		uint8_t mods = xs_xkb_modmap(xserver, (uint8_t)k);
+		for (int m = 0; m < 8; m++) {
+			if ((mods & (1u << m)) && counts[m] < 8) {
+				keys[m][counts[m]++] = (uint8_t)k;
+				per = counts[m] > per ? counts[m] : per;
+			}
+		}
+	}
 	struct xout out;
-	xs_reply_begin(client, &out, 2); // keycodes per modifier
+	xs_reply_begin(client, &out, (uint8_t)per); // keycodes per modifier
 	xout_zero(&out, 24);
-	for (int i = 0; i < 8; i++) {
-		xout8(&out, keys[i][0]);
-		xout8(&out, keys[i][1]);
+	for (int m = 0; m < 8; m++) {
+		xout_bytes(&out, keys[m], (size_t)per);
 	}
 	xs_reply_send(client, &out);
 }
@@ -697,6 +711,7 @@ static const struct extension {
 	{"RENDER", XS_RENDER_OPCODE, 0, XS_RENDER_FIRST_ERROR},
 	{"RANDR", XS_RANDR_OPCODE, XS_RANDR_FIRST_EVENT, XS_RANDR_FIRST_ERROR},
 	{"XInputExtension", XS_XI_OPCODE, XS_XI_FIRST_EVENT, XS_XI_FIRST_ERROR},
+	{"XKEYBOARD", XS_XKB_OPCODE, XS_XKB_FIRST_EVENT, XS_XKB_FIRST_ERROR},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -1041,6 +1056,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_XI_OPCODE:
 		xs_xi_request(client, in);
+		break;
+	case XS_XKB_OPCODE:
+		xs_xkb_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs

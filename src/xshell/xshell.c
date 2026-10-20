@@ -1196,9 +1196,10 @@ void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *x) {
 
 static uint16_t x_state(struct flame_xshell *xshell) {
 	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(xshell->server->input.seat);
-	// wlroots keeps modifiers in X's own bit order
+	// wlroots keeps modifiers in X's own bit order, the layout goes in 13-14
 	uint16_t state = keyboard ? (uint16_t)wlr_keyboard_get_modifiers(keyboard) : 0;
-	return state | xshell->buttons;
+	uint16_t group = keyboard ? (uint16_t)((keyboard->modifiers.group & 3) << 13) : 0;
+	return state | group | xshell->buttons;
 }
 
 static struct flame_xwindow *window_at(struct flame_xshell *xshell, double lx, double ly) {
@@ -1318,28 +1319,25 @@ static void repeat_update(struct flame_xshell *xshell, uint8_t keycode, bool pre
 	}
 }
 
-bool xshell_key(struct flame_xshell *xshell, uint32_t keycode, bool pressed, uint32_t time) {
+bool xshell_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard, uint32_t keycode,
+		bool pressed, uint32_t time) {
 	if (!is_xview(xshell->server->desktop.focused)) {
 		return false;
 	}
+	xshell_keyboard(xshell, keyboard);
 	xserver_key(xshell->xserver, (uint8_t)(keycode + 8), pressed, x_state(xshell), time);
 	repeat_update(xshell, (uint8_t)(keycode + 8), pressed);
 	return true;
 }
 
-int xshell_keysyms(struct flame_xshell *xshell, uint8_t keycode, uint32_t *out, int max) {
-	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(xshell->server->input.seat);
-	if (!keyboard || !keyboard->keymap) {
-		return 0;
+void xshell_keyboard(struct flame_xshell *xshell, struct wlr_keyboard *keyboard) {
+	struct flame_xserver *xserver = xshell->xserver;
+	if (keyboard->keymap) {
+		xserver_set_keymap(xserver, keyboard->keymap);
 	}
-	int count = 0;
-	for (int level = 0; level < max; level++) {
-		const xkb_keysym_t *syms;
-		int n = xkb_keymap_key_get_syms_by_level(keyboard->keymap, keycode, 0, level, &syms);
-		out[level] = n > 0 ? syms[0] : 0;
-		count += n > 0;
-	}
-	return count;
+	xserver_set_repeat(xserver, keyboard->repeat_info.rate, keyboard->repeat_info.delay);
+	xserver_keyboard_state(xserver, keyboard->modifiers.depressed, keyboard->modifiers.latched,
+		keyboard->modifiers.locked, keyboard->modifiers.group);
 }
 
 // ---- the gpu ----

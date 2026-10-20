@@ -79,6 +79,10 @@ enum {
 #define XS_XI_OPCODE 139
 #define XS_XI_FIRST_EVENT 73
 #define XS_XI_FIRST_ERROR 155
+// the keyboard as XKB tells it, see xkb.c. one event code, one error
+#define XS_XKB_OPCODE 140
+#define XS_XKB_FIRST_EVENT 90
+#define XS_XKB_FIRST_ERROR 160
 
 // ---- talking back (xserver.c) ----
 
@@ -107,8 +111,11 @@ void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, u
 
 // input events: like xs_event_deliver, but a client that selected the XI2
 // event evtype on window gets that instead and is skipped here
+// repeat_release: an autorepeat's release, clients that asked for detectable
+// autorepeat don't get it. clients that never set up XKB don't see the
+// layout in the state
 void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
-	uint32_t mask, int evtype, const struct xs_event *event);
+	uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release);
 // anyone xs_event_deliver_input would send it to
 bool xs_event_wanted_input(struct xs_window *window, uint32_t mask, int evtype);
 
@@ -264,6 +271,22 @@ void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *wi
 // and raw deltas
 void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,
 	double dy, double raw_dx, double raw_dy, uint32_t time);
+
+// ---- XKB (xkb.c) ----
+
+// a default keymap until flame gives its own. false: no memory, no keymap
+bool xs_xkb_init(struct flame_xserver *xserver);
+void xs_xkb_finish(struct flame_xserver *xserver);
+void xs_xkb_request(struct xs_client *client, const struct xin *request);
+// the core keyboard mapping, from the same keymap: keysyms per keycode, and
+// a keycode's keysyms (width of them)
+int xs_xkb_core_width(struct flame_xserver *xserver);
+void xs_xkb_core_syms(struct flame_xserver *xserver, uint8_t keycode, uint32_t *out,
+	int width);
+// the real modifiers a key sets or locks
+uint8_t xs_xkb_modmap(struct flame_xserver *xserver, uint8_t keycode);
+// the keycodes there are, min returned
+uint8_t xs_xkb_range(struct flame_xserver *xserver, uint8_t *max);
 
 // ---- MIT-SHM (shm.c) ----
 

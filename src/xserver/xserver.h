@@ -21,6 +21,8 @@
 
 struct flame_xserver;
 struct xs_client;
+struct xs_xkb;
+struct xkb_keymap;
 
 // server side resources, clients get their own ranges above
 #define XS_ROOT 0x100
@@ -231,6 +233,18 @@ struct xs_client {
 	int out_fds_len;
 	bool dead;
 	const char *why; // why it was dropped, for the log
+	// XKB: it set the extension up (its events carry the layout), it wants
+	// autorepeat without the releases, the XKB events it selected and
+	// StateNotify's details
+	bool xkb, detectable_repeat;
+	uint16_t xkb_events, xkb_state_details;
+};
+
+// the keyboard's state as XKB has it, real modifiers
+struct xs_kbd_state {
+	uint8_t base, latched, locked;
+	uint8_t group, locked_group; // effective and locked layout
+	int16_t base_group, latched_group;
 };
 
 // what flame wants to know and decide, see xbridge/
@@ -261,9 +275,6 @@ struct xs_hooks {
 		uint32_t serial, uint64_t target_msc, uint64_t divisor, uint64_t remainder);
 	void (*pixmap_destroyed)(void *data, struct xs_pixmap *pixmap);
 	void (*syncobj_destroyed)(void *data, struct xs_syncobj *syncobj);
-	// the keyboard: keysyms for keycode (evdev + 8), by level. returns how
-	// many, at most max
-	int (*keysyms)(void *data, uint8_t keycode, uint32_t *out, int max);
 	// apps drew into a top-level's backing with the cpu, region in backing
 	// coords. at most once per loop iteration and top-level
 	void (*damage)(void *data, struct xs_window *top, const pixman_region32_t *region);
@@ -305,6 +316,11 @@ struct flame_xserver {
 	struct wl_list xi_selects;
 	double scroll[2], scroll_notches[2];
 	bool scroll_primed;
+	// XKB, see xkb.c: flame's keymap worked out for X, the keyboard's state,
+	// its repeat rate (per second) and delay (ms)
+	struct xs_xkb *xkb;
+	struct xs_kbd_state kbd;
+	int repeat_rate, repeat_delay;
 	struct xs_window *root;
 	struct xs_atoms atoms;
 	uint32_t focus;
@@ -365,6 +381,14 @@ void xserver_pointer_raw_motion(struct flame_xserver *xserver, double dx, double
 // to the X focus window. keycode is evdev + 8
 void xserver_key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
 	uint32_t time);
+// the keymap X apps see, flame's. switching to a copy of the same keymap
+// (another keyboard) tells nobody, a different one tells everyone
+void xserver_set_keymap(struct flame_xserver *xserver, struct xkb_keymap *keymap);
+// the keyboard's modifiers (real ones) and layout changed, XKB clients hear
+void xserver_keyboard_state(struct flame_xserver *xserver, uint32_t depressed,
+	uint32_t latched, uint32_t locked, uint32_t group);
+// rate per second, delay in ms, what XKB tells apps
+void xserver_set_repeat(struct flame_xserver *xserver, int rate, int delay);
 // a held key repeats, flame keeps time
 void xserver_key_repeat(struct flame_xserver *xserver, uint8_t keycode, uint16_t state,
 	uint32_t time);

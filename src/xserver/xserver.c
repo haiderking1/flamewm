@@ -192,12 +192,26 @@ void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, u
 }
 
 void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
-		uint32_t mask, int evtype, const struct xs_event *event) {
+		uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release) {
+	// key, button, motion and crossing events carry the state at 28
+	uint8_t type = event->bytes[0] & 0x7f;
+	bool stateful = type >= 2 && type <= 8;
 	struct xs_interest *interest;
 	wl_list_for_each(interest, &window->interests, link) {
-		if ((interest->mask & mask)
-				&& !xs_xi_client_selected(interest->client, window, evtype)) {
-			xs_event_send(interest->client, event);
+		struct xs_client *client = interest->client;
+		if (!(interest->mask & mask) || xs_xi_client_selected(client, window, evtype)
+				|| (repeat_release && client->detectable_repeat)) {
+			continue;
+		}
+		if (stateful && !client->xkb) {
+			struct xs_event copy = *event;
+			uint16_t state;
+			memcpy(&state, copy.bytes + 28, 2);
+			state &= (uint16_t)~0x6000;
+			memcpy(copy.bytes + 28, &state, 2);
+			xs_event_send(client, &copy);
+		} else {
+			xs_event_send(client, event);
 		}
 	}
 }
@@ -645,6 +659,11 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	xserver->root->height = (uint16_t)(height > 0 ? height : 1080);
 	xserver->root->mapped = true;
 	xserver->focus = XS_FOCUS_POINTER_ROOT;
+	if (!xs_xkb_init(xserver)) {
+		xs_window_destroy(xserver, xserver->root);
+		xs_atoms_finish(&xserver->atoms);
+		return false;
+	}
 	return true;
 }
 
@@ -775,6 +794,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	xs_render_finish(xserver);
 	xs_randr_client_gone(xserver, NULL);
 	xs_xi_client_gone(xserver, NULL);
+	xs_xkb_finish(xserver);
 	free(xserver->monitors);
 	xserver->monitors = NULL;
 	xserver->monitors_len = 0;

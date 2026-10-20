@@ -85,7 +85,8 @@ static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_wind
 				struct xs_event event;
 				fill(xserver, &event, type, (uint8_t)input->detail, w, source, input->state,
 					input->time);
-				xs_event_deliver_input(xserver, w, core_mask, input->evtype, &event);
+				xs_event_deliver_input(xserver, w, core_mask, input->evtype, &event,
+					input->core_only);
 			}
 			return w;
 		}
@@ -104,7 +105,8 @@ static void crossing(struct flame_xserver *xserver, uint8_t type, struct xs_wind
 	xs_event_put8(&event, 31, 2 | (xserver->focus == window->id ? 1 : 0));
 	bool enter = type == EVENT_ENTER;
 	int evtype = enter ? XS_XI_ENTER : XS_XI_LEAVE;
-	xs_event_deliver_input(xserver, window, enter ? MASK_ENTER : MASK_LEAVE, evtype, &event);
+	xs_event_deliver_input(xserver, window, enter ? MASK_ENTER : MASK_LEAVE, evtype, &event,
+		false);
 	xs_xi_crossing(xserver, evtype, window, 3, state, time);
 }
 
