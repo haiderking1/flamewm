@@ -435,6 +435,32 @@ static void keymap_changed(struct flame_xserver *xserver, uint8_t old_min, uint8
 	}
 }
 
+void xserver_set_keymap_names(struct flame_xserver *xserver, const char *rules,
+		const char *model, const char *layout, const char *variant, const char *options) {
+	// rules, model, layout, variant, options: each ends in a nul
+	const char *names[] = {rules, model, layout, variant, options};
+	char buf[512];
+	size_t len = 0;
+	for (int i = 0; i < 5; i++) {
+		const char *name = names[i] ? names[i] : "";
+		size_t n = strlen(name);
+		if (len + n + 1 > sizeof(buf)) {
+			return;
+		}
+		memcpy(buf + len, name, n + 1);
+		len += n + 1;
+	}
+	uint8_t error;
+	xs_window_change_property(xserver, xserver->root, 0, atom(xserver, "_XKB_RULES_NAMES"),
+		XS_ATOM_STRING, 8, (uint32_t)len, (const uint8_t *)buf, &error);
+}
+
+// what xkbcommon builds a keymap from without names: the environment
+static const char *env_or(const char *name, const char *fallback) {
+	const char *value = getenv(name);
+	return value && *value ? value : fallback;
+}
+
 bool xs_xkb_init(struct flame_xserver *xserver) {
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	struct xkb_keymap *keymap = context
@@ -447,6 +473,10 @@ bool xs_xkb_init(struct flame_xserver *xserver) {
 	xserver->repeat_rate = 25;
 	xserver_set_keymap(xserver, keymap);
 	xkb_keymap_unref(keymap);
+	// flame builds its keymap the same way, from the same environment
+	xserver_set_keymap_names(xserver, env_or("XKB_DEFAULT_RULES", "evdev"),
+		env_or("XKB_DEFAULT_MODEL", "pc105"), env_or("XKB_DEFAULT_LAYOUT", "us"),
+		env_or("XKB_DEFAULT_VARIANT", ""), env_or("XKB_DEFAULT_OPTIONS", ""));
 	return xserver->xkb != NULL;
 }
 
