@@ -647,6 +647,10 @@ static void query_extension(struct xs_client *client, const struct xin *in) {
 			found = &extensions[i];
 		}
 	}
+	if (!found) {
+		wlr_log(WLR_DEBUG, "xserver: %s asked for %.*s, there's none", client->comm, (int)len,
+			8 + (size_t)len <= in->len ? (const char *)in->data + 8 : "");
+	}
 	struct xout out;
 	xs_reply_begin(client, &out, 0);
 	xout8(&out, found != NULL); // present

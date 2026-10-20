@@ -232,12 +232,31 @@ bool xs_event_wanted_input(struct xs_window *window, uint32_t mask, int evtype) 
 static void handle_changed_idle(void *data) {
 	struct flame_xserver *xserver = data;
 	xserver->changed_idle = NULL;
-	if (xserver->hooks.windows_changed) {
-		xserver->hooks.windows_changed(xserver->hooks.data);
+	if (!xserver->hooks.windows_changed) {
+		return;
+	}
+	xserver->notifying = true;
+	xserver->hooks.windows_changed(xserver->hooks.data);
+	xserver->notifying = false;
+	// what flame did about it changed things again: that's heard next time
+	// round the loop. an idle added from an idle runs in the same dispatch,
+	// a back and forth there would never let the loop sleep
+	if (xserver->changed_again) {
+		xserver->changed_again = false;
+		wl_event_source_timer_update(xserver->changed_timer, 1);
 	}
 }
 
+static int handle_changed_timer(void *data) {
+	handle_changed_idle(data);
+	return 0;
+}
+
 void xs_changed(struct flame_xserver *xserver) {
+	if (xserver->notifying) {
+		xserver->changed_again = true;
+		return;
+	}
 	if (!xserver->changed_idle) {
 		xserver->changed_idle =
 			wl_event_loop_add_idle(xserver->loop, handle_changed_idle, xserver);
@@ -647,6 +666,10 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->pictures);
 	wl_list_init(&xserver->glyphset_ids);
 	wl_list_init(&xserver->randr_selects);
+	xserver->changed_timer = wl_event_loop_add_timer(loop, handle_changed_timer, xserver);
+	if (!xserver->changed_timer) {
+		return false;
+	}
 	wl_list_init(&xserver->xi_selects);
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
@@ -796,6 +819,10 @@ void xserver_finish(struct flame_xserver *xserver) {
 	if (xserver->changed_idle) {
 		wl_event_source_remove(xserver->changed_idle);
 		xserver->changed_idle = NULL;
+	}
+	if (xserver->changed_timer) {
+		wl_event_source_remove(xserver->changed_timer);
+		xserver->changed_timer = NULL;
 	}
 	if (xserver->damage_idle) {
 		wl_event_source_remove(xserver->damage_idle);

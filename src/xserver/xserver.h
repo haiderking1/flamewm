@@ -311,6 +311,10 @@ struct flame_xserver {
 	int fds[2];
 	struct wl_event_source *sources[2];
 	struct wl_event_source *changed_idle;
+	// flame acting on a change changed things again: told on the next loop
+	// iteration, never in the same one
+	struct wl_event_source *changed_timer;
+	bool notifying, changed_again;
 
 	struct wl_list clients; // xs_client.link
 	struct wl_list windows; // xs_window.all_link
