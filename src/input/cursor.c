@@ -88,9 +88,12 @@ static void dnd_pointer(struct flame_cursor *cursor, uint32_t time_msec) {
 	struct wlr_surface *surface = NULL;
 	desktop_view_at(&server->desktop, cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
 	if (!surface) {
+		// maybe an X window is what it's over, XDND then
 		wlr_seat_pointer_notify_clear_focus(seat);
+		xselection_dnd_over_x(&server->xselection, cursor->wlr->x, cursor->wlr->y, time_msec);
 		return;
 	}
+	xselection_dnd_left_x(&server->xselection);
 	wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
 	wlr_seat_pointer_notify_motion(seat, time_msec, sx, sy);
 }
@@ -105,6 +108,7 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 
 	if (moved) {
 		xbridge_pointer_input(&server->xbridge, false);
+		xselection_pointer_moved(&server->xselection);
 	}
 	if (drag_active(&server->input.drag)) {
 		if (moved) {
@@ -175,7 +179,12 @@ static void button_event(struct flame_cursor *cursor,
 		return;
 	}
 	if (dnd_active(&server->input.dnd)) {
-		// the drag grab drops or cancels on the release
+		// dropped on an X window flame takes care of it, else the drag grab
+		// drops or cancels on the release
+		if (!pressed && xselection_dnd_drop_x(&server->xselection, event->button,
+				event->time_msec)) {
+			return;
+		}
 		wlr_seat_pointer_notify_button(server->input.seat, event->time_msec,
 			event->button, event->state);
 		return;

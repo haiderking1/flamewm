@@ -561,6 +561,12 @@ static void hook_selection_request(void *data, struct xs_selection_request *requ
 	xselection_request(&xbridge->server->xselection, request);
 }
 
+static void hook_client_message(void *data, uint32_t window, uint32_t type,
+		const uint32_t message[5]) {
+	struct flame_xbridge *xbridge = data;
+	xselection_client_message(&xbridge->server->xselection, window, type, message);
+}
+
 static void hook_focus_changed(void *data, uint32_t focus) {
 	focus_moved(data, focus);
 }
@@ -630,6 +636,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.focus_changed = hook_focus_changed,
 		.selection_owner = hook_selection_owner,
 		.selection_request = hook_selection_request,
+		.client_message = hook_client_message,
 		.pointer = hook_pointer,
 		.open_device = hook_open_device,
 		.modifiers = hook_modifiers,

@@ -1214,6 +1214,11 @@ static struct flame_xwindow *window_at(struct flame_xshell *xshell, double lx, d
 	return buffer->impl == &buffer_impl ? buffer->data : NULL;
 }
 
+uint32_t xshell_window_at(struct flame_xshell *xshell, double lx, double ly) {
+	struct flame_xwindow *window = window_at(xshell, lx, ly);
+	return window ? window->id : 0;
+}
+
 bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, uint32_t time,
 		struct flame_view **view) {
 	struct flame_xserver *xserver = xshell->xserver;
