@@ -34,6 +34,10 @@ void cursor_finish(struct flame_cursor *cursor);
 void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *device);
 // redo pointer focus after windows moved under a still cursor
 void cursor_refresh(struct flame_cursor *cursor);
+// input that didn't come from a device, for tests (flamectl pointer with
+// FLAME_TEST_INPUT=1): to a layout point, a button (linux code)
+void cursor_test_move(struct flame_cursor *cursor, double x, double y);
+void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool pressed);
 // a theme cursor by name, "default", "grabbing", "nw-resize"...
 void cursor_set_name(struct flame_cursor *cursor, const char *name);
 

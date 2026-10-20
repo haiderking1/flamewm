@@ -77,6 +77,24 @@ static bool held_motion(struct flame_cursor *cursor, uint32_t time_msec) {
 	return true;
 }
 
+// a drag and drop: the surface under the pointer is what the drag is over,
+// wlroots' drag grab tells it. nothing keeps the pointer where the button
+// went down, that's the point
+static void dnd_pointer(struct flame_cursor *cursor, uint32_t time_msec) {
+	struct flame_server *server = cursor->server;
+	struct wlr_seat *seat = server->input.seat;
+	dnd_motion(&server->input.dnd);
+	double sx, sy;
+	struct wlr_surface *surface = NULL;
+	desktop_view_at(&server->desktop, cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
+	if (!surface) {
+		wlr_seat_pointer_notify_clear_focus(seat);
+		return;
+	}
+	wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+	wlr_seat_pointer_notify_motion(seat, time_msec, sx, sy);
+}
+
 // moved: the mouse itself moved. a refresh (things moved under a still
 // cursor) updates who gets pointer events but never moves keyboard focus,
 // or a window opening next to the cursor would lose it right away
@@ -92,6 +110,10 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 		if (moved) {
 			drag_motion(&server->input.drag);
 		}
+		return;
+	}
+	if (dnd_active(&server->input.dnd)) {
+		dnd_pointer(cursor, time_msec);
 		return;
 	}
 	if (held_motion(cursor, time_msec)) {
@@ -143,14 +165,19 @@ static void handle_motion_absolute(struct wl_listener *listener, void *data) {
 	process_motion(cursor, event->time_msec, true);
 }
 
-static void handle_button(struct wl_listener *listener, void *data) {
-	struct flame_cursor *cursor = wl_container_of(listener, cursor, button);
+static void button_event(struct flame_cursor *cursor,
+		const struct wlr_pointer_button_event *event) {
 	struct flame_server *server = cursor->server;
-	struct wlr_pointer_button_event *event = data;
 
 	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
 	xbridge_pointer_input(&server->xbridge, true);
 	if (drag_button(&server->input.drag, event->button, pressed)) {
+		return;
+	}
+	if (dnd_active(&server->input.dnd)) {
+		// the drag grab drops or cancels on the release
+		wlr_seat_pointer_notify_button(server->input.seat, event->time_msec,
+			event->button, event->state);
 		return;
 	}
 	if (xshell_pointer_button(&server->xshell, event->button, pressed, event->time_msec)) {
@@ -193,6 +220,11 @@ static void handle_button(struct wl_listener *listener, void *data) {
 		// the grab is over: whatever is under the pointer now gets it
 		process_motion(cursor, event->time_msec, false);
 	}
+}
+
+static void handle_button(struct wl_listener *listener, void *data) {
+	struct flame_cursor *cursor = wl_container_of(listener, cursor, button);
+	button_event(cursor, data);
 }
 
 static void handle_axis(struct wl_listener *listener, void *data) {
@@ -315,6 +347,20 @@ void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *
 
 void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
+}
+
+void cursor_test_move(struct flame_cursor *cursor, double x, double y) {
+	wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
+	process_motion(cursor, now_msec(), true);
+}
+
+void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool pressed) {
+	struct wlr_pointer_button_event event = {
+		.time_msec = now_msec(),
+		.button = button,
+		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED,
+	};
+	button_event(cursor, &event);
 }
 
 void cursor_set_name(struct flame_cursor *cursor, const char *name) {
