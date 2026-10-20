@@ -24,7 +24,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& desktop_init(&server->desktop, server)
 		&& input_init(&server->input, server)
 		&& xdg_init(&server->xdg, server)
-		&& layers_init(&server->layers, server);
+		&& layers_init(&server->layers, server)
+		&& ipc_init(&server->ipc, server);
 }
 
 bool server_start(struct flame_server *server, const char *startup_cmd) {
@@ -44,6 +45,8 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	// started from a tty this says "tty", and chromium (helium, brave...)
 	// takes anything but "wayland" as go x11, finds no X server and quits
 	setenv("XDG_SESSION_TYPE", "wayland", true);
+	// before anything gets started, they all inherit $FLAMEWM_SOCKET
+	ipc_start(&server->ipc, server->socket);
 
 	wlr_log(WLR_INFO, "flamewm running on WAYLAND_DISPLAY=%s", server->socket);
 	if (startup_cmd) {
@@ -62,6 +65,8 @@ void server_terminate(struct flame_server *server) {
 
 void server_finish(struct flame_server *server) {
 	wl_display_destroy_clients(server->display);
+	// stop listening to the desktop before it goes
+	ipc_finish(&server->ipc);
 	desktop_finish(&server->desktop);
 
 	// unhook from wlroots objects that are about to die

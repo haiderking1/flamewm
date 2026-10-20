@@ -27,6 +27,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | libxkbcommon | `xkbcommon` | keymaps + keysyms for keybinds |
 | pixman | `pixman-1` | region math: checking a client's opaque region before showing a resize |
 
+`flamectl` and the ipc socket are plain libc (unix sockets), nothing extra.
+
 wlroots also pulls in libinput, libdrm, libseat (seatd), libliftoff,
 libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
