@@ -675,6 +675,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
 	xserver->last_input = xserver->monitors_time;
+	xserver->trace = getenv("FLAME_X_TRACE") != NULL;
 	if (!xs_atoms_init(&xserver->atoms)) {
 		return false;
 	}

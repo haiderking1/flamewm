@@ -138,6 +138,46 @@ static void get_fb_configs(struct xs_client *client) {
 	xs_reply_send(client, &out);
 }
 
+#define BAD_DRAWABLE (XS_GLX_FIRST_ERROR + 2)
+
+// what Xorg says about a window or pixmap: its size, screen, config. GL
+// drivers that render in the client ask before drawing into one (nvidia's
+// won't make it current without)
+static void get_drawable_attributes(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	uint32_t id = xin32(in, 4);
+	struct xs_window *window = xserver_window(xserver, id);
+	struct xs_pixmap *pixmap = window ? NULL : xs_pixmap_find(xserver, id);
+	if (!window && !pixmap) {
+		xs_error(client, BAD_DRAWABLE, id, XS_GLX_OPCODE, 29);
+		return;
+	}
+	uint32_t width = window ? window->width : pixmap->width;
+	uint32_t height = window ? window->height : pixmap->height;
+	uint32_t depth = window ? window->depth : pixmap->depth;
+	uint32_t config = depth == 32 ? configs[1].id : configs[0].id;
+	const uint32_t attribs[][2] = {
+		{0x8bb4, 0}, // GLX_Y_INVERTED_EXT
+		{0x801d, width}, // GLX_WIDTH
+		{0x801e, height}, // GLX_HEIGHT
+		{0x800c, 0}, // GLX_SCREEN
+		{0x20d6, 0x20d5}, // GLX_TEXTURE_TARGET_EXT: none
+		{0x801f, 0}, // GLX_EVENT_MASK
+		{0x8013, config}, // GLX_FBCONFIG_ID
+		{0x20f5, 0}, // GLX_STEREO_TREE_EXT
+	};
+	size_t count = sizeof(attribs) / sizeof(attribs[0]);
+	struct xout out;
+	xs_reply_begin(client, &out, 0);
+	xout32(&out, (uint32_t)count);
+	xout_zero(&out, 20);
+	for (size_t i = 0; i < count; i++) {
+		xout32(&out, attribs[i][0]);
+		xout32(&out, attribs[i][1]);
+	}
+	xs_reply_send(client, &out);
+}
+
 void xs_glx_request(struct xs_client *client, const struct xin *in) {
 	struct xout out;
 	uint8_t minor = xin8(in, 1);
@@ -162,9 +202,11 @@ void xs_glx_request(struct xs_client *client, const struct xin *in) {
 	case 14:
 		get_visual_configs(client);
 		break;
+	case 29:
+		get_drawable_attributes(client, in);
+		break;
 	case 17: // VendorPrivateWithReply: nothing private here
 	case 25: // QueryContext: no attributes
-	case 29: // GetDrawableAttributes: none known
 		xs_reply_begin(client, &out, 0);
 		xout32(&out, 0);
 		xs_reply_send(client, &out);
