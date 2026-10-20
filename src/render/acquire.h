@@ -9,8 +9,9 @@ struct wlr_compositor;
 // whose dmabuf is still being rendered waits, the window keeps its last frame
 // on screen meanwhile, instead of us sampling it half drawn or our whole frame
 // stalling on one slow client. the same thing mutter and kwin do, and raven.
-// clients using explicit sync tell us when they're done themselves, they're
-// left alone (wlr_linux_drm_syncobj_v1)
+// explicit sync clients (wlr_linux_drm_syncobj_v1) wait for their acquire
+// point to signal: drawing with it unsignalled makes our frame wait for the
+// client's gpu work, and KMS miss the vblank for everyone
 struct flame_acquire {
 	struct wl_event_loop *loop;
 	struct wl_listener new_surface;
