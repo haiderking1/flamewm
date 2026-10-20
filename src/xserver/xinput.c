@@ -379,6 +379,64 @@ static void get_extension_version(struct xs_client *client) {
 	xs_reply_send(client, &out);
 }
 
+// XI1's list, chromium and older apps ask it: the same four devices
+static void list_input_devices(struct xs_client *client) {
+	struct flame_xserver *xserver = client->xserver;
+	static const struct {
+		const char *name, *type;
+		uint8_t use;
+	} devices[] = {
+		{"Virtual core pointer", "MOUSE", 0}, // IsXPointer
+		{"Virtual core keyboard", "KEYBOARD", 1}, // IsXKeyboard
+		{"flame pointer", "MOUSE", 4}, // IsXExtensionPointer
+		{"flame keyboard", "KEYBOARD", 3}, // IsXExtensionKeyboard
+	};
+	struct xout out;
+	xs_reply_begin(client, &out, 2); // ListInputDevices
+	xout8(&out, 4);
+	xout_zero(&out, 23);
+	for (int i = 0; i < 4; i++) {
+		bool pointer = devices[i].use == 0 || devices[i].use == 4;
+		xout32(&out, atom(xserver, devices[i].type));
+		xout8(&out, (uint8_t)(MASTER_POINTER + i));
+		xout8(&out, pointer ? 2 : 1); // classes
+		xout8(&out, devices[i].use);
+		xout8(&out, 0);
+	}
+	for (int i = 0; i < 4; i++) {
+		bool pointer = devices[i].use == 0 || devices[i].use == 4;
+		if (pointer) {
+			xout8(&out, 1); // ButtonClass
+			xout8(&out, 4);
+			xout16(&out, BUTTONS);
+			xout8(&out, 2); // ValuatorClass
+			xout8(&out, 8 + 12 * 2);
+			xout8(&out, 2); // axes
+			xout8(&out, 0); // relative
+			xout32(&out, 0); // motion buffer
+			for (int axis = 0; axis < 2; axis++) {
+				xout32(&out, 1); // resolution
+				xout32(&out, 0);
+				xout32(&out, axis ? xserver->root->height : xserver->root->width);
+			}
+		} else {
+			xout8(&out, 0); // KeyClass
+			xout8(&out, 8);
+			xout8(&out, 8);
+			xout8(&out, 255);
+			xout16(&out, 248);
+			xout16(&out, 0);
+		}
+	}
+	for (int i = 0; i < 4; i++) {
+		size_t len = strlen(devices[i].name);
+		xout8(&out, (uint8_t)len);
+		xout_bytes(&out, devices[i].name, len);
+	}
+	xout_pad(&out);
+	xs_reply_send(client, &out);
+}
+
 static void query_version(struct xs_client *client, const struct xin *in) {
 	uint16_t major = xin16(in, 4), minor = xin16(in, 6);
 	if (major > MAJOR || (major == MAJOR && minor > MINOR)) {
@@ -552,6 +610,9 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	switch (minor) {
 	case GET_EXTENSION_VERSION:
 		get_extension_version(client);
+		break;
+	case 2:
+		list_input_devices(client);
 		break;
 	case 40:
 		query_pointer(client, in);

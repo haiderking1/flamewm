@@ -131,6 +131,19 @@ static void test_devices(xcb_connection_t *c) {
 	CHECK(pointers == 1);
 	CHECK(scroll_classes == 4); // master and slave, vertical and horizontal
 	free(d);
+
+	// XI1's list, what chromium reads
+	xcb_input_list_input_devices_reply_t *l = xcb_input_list_input_devices_reply(c,
+		xcb_input_list_input_devices(c), NULL);
+	CHECK(l && l->devices_len == 4);
+	if (l) {
+		int names = xcb_input_list_input_devices_names_length(l);
+		CHECK(names == 4);
+		xcb_str_iterator_t it = xcb_input_list_input_devices_names_iterator(l);
+		CHECK(xcb_str_name_length(it.data) == 20
+			&& !memcmp(xcb_str_name(it.data), "Virtual core pointer", 20));
+	}
+	free(l);
 }
 
 // an XI2 client and a core client on the same window: each gets its own kind

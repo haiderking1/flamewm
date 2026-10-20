@@ -456,6 +456,10 @@ void xserver_set_keymap(struct flame_xserver *xserver, struct xkb_keymap *keymap
 // the keyboard's modifiers (real ones) and layout changed, XKB clients hear
 void xserver_keyboard_state(struct flame_xserver *xserver, uint32_t depressed,
 	uint32_t latched, uint32_t locked, uint32_t group);
+// the names the keymap was built from, for apps that read them off the root
+// (_XKB_RULES_NAMES: layout switchers, setxkbmap)
+void xserver_set_keymap_names(struct flame_xserver *xserver, const char *rules,
+	const char *model, const char *layout, const char *variant, const char *options);
 // rate per second, delay in ms, what XKB tells apps
 void xserver_set_repeat(struct flame_xserver *xserver, int rate, int delay);
 // a held key repeats, flame keeps time

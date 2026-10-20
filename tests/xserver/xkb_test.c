@@ -159,6 +159,23 @@ int main(void) {
 	}
 	test_core(c);
 
+	// the names on the root, what setxkbmap and layout switchers read
+	xcb_intern_atom_reply_t *a = xcb_intern_atom_reply(c, xcb_intern_atom(c, 1, 16,
+		"_XKB_RULES_NAMES"), NULL);
+	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+	xcb_get_property_reply_t *names = a ? xcb_get_property_reply(c, xcb_get_property(c, 0,
+		screen->root, a->atom, XCB_ATOM_STRING, 0, 256), NULL) : NULL;
+	CHECK(names && xcb_get_property_value_length(names) > 10);
+	if (names) {
+		const char *rules = xcb_get_property_value(names);
+		const char *model = rules + strlen(rules) + 1;
+		const char *layout = model + strlen(model) + 1;
+		CHECK(!strcmp(rules, "evdev") && !strcmp(layout, getenv("XKB_DEFAULT_LAYOUT")
+			? getenv("XKB_DEFAULT_LAYOUT") : "us"));
+	}
+	free(names);
+	free(a);
+
 	// the state follows: shift held, caps locked, through StateNotify
 	xcb_xkb_select_events(c, XCB_XKB_ID_USE_CORE_KBD, XCB_XKB_EVENT_TYPE_STATE_NOTIFY
 		| XCB_XKB_EVENT_TYPE_NEW_KEYBOARD_NOTIFY | XCB_XKB_EVENT_TYPE_MAP_NOTIFY, 0,
