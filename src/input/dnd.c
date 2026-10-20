@@ -52,6 +52,8 @@ static void handle_drag_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&dnd->drag_destroy);
 	icon_gone(dnd);
 	dnd->drag = NULL;
+	// over an X window when it ended: that window hears it's over
+	xselection_dnd_drag_gone(&dnd->server->xselection);
 	// whatever is under the pointer now gets it back, and sets its cursor
 	cursor_set_name(&dnd->server->input.cursor, "default");
 	cursor_refresh(&dnd->server->input.cursor);

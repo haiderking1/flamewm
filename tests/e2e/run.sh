@@ -78,10 +78,12 @@ $BIN/xclip copy big.txt 4 & sleep 0.5
 wl-paste -n > got.txt
 cmp got.txt big.txt && echo same
 wait" "same"
-case_run "clipboard: wayland copies, X pastes" "
-printf 'from wayland ✓' | wl-copy
+case_run "clipboard: wayland copies, X pastes (UTF8_STRING, and STRING in Latin-1)" "
+printf 'from wayland ✓ café' | wl-copy
 sleep 0.3
-$BIN/xclip paste" "from wayland ✓"
+$BIN/xclip paste
+echo
+$BIN/xclip paste STRING | iconv -f latin1 -t utf-8" "from wayland ✓ café" "from wayland ? café"
 case_run "clipboard: wayland copies big, X pastes" "
 wl-copy < big.txt
 sleep 0.3

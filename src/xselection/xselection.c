@@ -85,6 +85,52 @@ static struct xsel_move *move_new(struct flame_xselection *xselection, int fd) {
 	return move;
 }
 
+// STRING is Latin-1, wayland text is UTF-8. Latin-1 to UTF-8 at most
+// doubles it
+static bool append_latin1_as_utf8(struct xsel_move *move, const uint8_t *bytes, size_t len) {
+	char buf[4096];
+	while (len) {
+		size_t n = 0;
+		for (; len && n + 2 <= sizeof(buf); bytes++, len--) {
+			if (*bytes < 0x80) {
+				buf[n++] = (char)*bytes;
+			} else {
+				buf[n++] = (char)(0xc0 | *bytes >> 6);
+				buf[n++] = (char)(0x80 | (*bytes & 0x3f));
+			}
+		}
+		if (!move_append(move, buf, n)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// and back, in place: what Latin-1 can't say is a ?, bytes that aren't
+// UTF-8 stay what they were
+static size_t utf8_to_latin1(char *text, size_t len) {
+	const uint8_t *in = (const uint8_t *)text;
+	size_t out = 0;
+	for (size_t i = 0; i < len;) {
+		uint8_t c = in[i];
+		size_t extra = c >= 0xf0 && c < 0xf8 ? 3 : c >= 0xe0 ? 2 : c >= 0xc2 ? 1 : 0;
+		bool valid = extra && c < 0xf8 && i + extra < len;
+		uint32_t cp = c & (0x3f >> extra);
+		for (size_t k = 1; valid && k <= extra; k++) {
+			valid = (in[i + k] & 0xc0) == 0x80;
+			cp = cp << 6 | (in[i + k] & 0x3f);
+		}
+		if (!valid) {
+			text[out++] = (char)c;
+			i++;
+			continue;
+		}
+		text[out++] = cp <= 0xff ? (char)cp : '?';
+		i += extra + 1;
+	}
+	return out;
+}
+
 // ---- mime types and atoms ----
 
 const char *xsel_mime_of(struct flame_xselection *xselection, uint32_t target) {
@@ -143,7 +189,9 @@ static void handle_x_answer(void *data, uint32_t type, const uint8_t *bytes, siz
 		move->transfer = NULL;
 		move->finished = true;
 	}
-	if ((len && !move_append(move, bytes, len)) || (last && !type)) {
+	bool latin1 = type == move->owner->string;
+	if ((len && !(latin1 ? append_latin1_as_utf8(move, bytes, len)
+				: move_append(move, bytes, len))) || (last && !type)) {
 		move_free(move);
 		return;
 	}
@@ -366,6 +414,9 @@ static int handle_move_readable(int fd, uint32_t mask, void *data) {
 		}
 		// the end, or it broke: whatever came is the answer
 		bool ok = n == 0;
+		if (ok && move->type == xselection->string) {
+			move->len = utf8_to_latin1(move->buf, move->len);
+		}
 		xserver_selection_answer(xselection->xserver, move->request, ok ? move->type : 0, 8,
 			move->buf, move->len);
 		move->request = NULL;

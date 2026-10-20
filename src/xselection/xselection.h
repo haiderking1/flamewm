@@ -61,6 +61,8 @@ bool xselection_dnd_over_x(struct flame_xselection *xselection, double lx, doubl
 	uint32_t time);
 // a wayland drag is over a wayland surface again
 void xselection_dnd_left_x(struct flame_xselection *xselection);
+// the wayland drag ended without a drop on X (cancelled, its client gone)
+void xselection_dnd_drag_gone(struct flame_xselection *xselection);
 // the button let go during a wayland drag: true when it dropped on an X
 // window, the seat heard the release already
 bool xselection_dnd_drop_x(struct flame_xselection *xselection, uint32_t button,
