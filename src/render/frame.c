@@ -1,13 +1,13 @@
 #include "render/frame.h"
 
 #include <wlr/backend.h>
+#include <wlr/backend/session.h>
 #include <wlr/render/drm_syncobj.h>
 #include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
-#include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_presentation_time.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
@@ -20,18 +20,63 @@
 #include "scene/scene.h"
 #include "util/listener.h"
 
+static void process(struct flame_frame *frame);
+
+static int64_t timespec_ns(const struct timespec *ts) {
+	return (int64_t)ts->tv_sec * 1000000000 + ts->tv_nsec;
+}
+
+static struct timespec ns_timespec(int64_t ns) {
+	return (struct timespec){
+		.tv_sec = ns / 1000000000,
+		.tv_nsec = ns % 1000000000,
+	};
+}
+
+static int64_t refresh_period(struct wlr_output *output) {
+	// mHz, 0 when the mode doesn't say (headless)
+	return output->refresh > 0 ? 1000000000000LL / output->refresh : 0;
+}
+
+// ---- asking for frames ----
+
+static void handle_idle(void *data) {
+	struct flame_frame *frame = data;
+	frame->idle = NULL;
+	process(frame);
+}
+
+// everything asking in one dispatch becomes one look at the schedule, at
+// the end of it, after input and clients had their say
+static void queue_process(struct flame_frame *frame) {
+	if (!frame->idle) {
+		frame->idle = wl_event_loop_add_idle(frame->output->event_loop, handle_idle, frame);
+	}
+}
+
+void frame_request(struct flame_frame *frame) {
+	schedule_request_redraw(&frame->schedule);
+	queue_process(frame);
+}
+
+static void handle_wake(void *data) {
+	struct flame_frame *frame = data;
+	timing_wake(&frame->timing, now_ns() - frame->wake.fired);
+	process(frame);
+}
+
 // ---- what wakes us up ----
 
 static void handle_scene_changed(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, scene_changed);
-	wlr_output_schedule_frame(frame->output);
+	frame_request(frame);
 }
 
 static void handle_scene_damage(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, scene_damage);
 	const pixman_region32_t *damage = data;
 	pixman_region32_union(&frame->pending, &frame->pending, damage);
-	// scene_changed follows and schedules the frame
+	// scene_changed follows and asks for the frame
 }
 
 // software cursors moving, wlroots tells us where
@@ -48,12 +93,21 @@ static void handle_output_damage(struct wl_listener *listener, void *data) {
 		width, height);
 	pixman_region32_union(&frame->pending_buffer, &frame->pending_buffer, &damage);
 	pixman_region32_fini(&damage);
-	wlr_output_schedule_frame(output);
+	frame_request(frame);
 }
 
+// wlroots itself wants a real commit (screencopy and friends). flame never
+// asks wlroots for frames, so this is always someone else
 static void handle_output_needs_frame(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, output_needs_frame);
-	wlr_output_schedule_frame(frame->output);
+	frame_request(frame);
+}
+
+static void drop_queued(struct flame_frame *frame) {
+	if (frame->has_queued) {
+		wlr_output_state_finish(&frame->queued);
+		frame->has_queued = false;
+	}
 }
 
 static void handle_output_commit(struct wl_listener *listener, void *data) {
@@ -63,25 +117,102 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 	if (event->state->committed & (WLR_OUTPUT_STATE_MODE | WLR_OUTPUT_STATE_SCALE
 			| WLR_OUTPUT_STATE_TRANSFORM | WLR_OUTPUT_STATE_ENABLED)) {
 		frame->whole = true;
-		wlr_output_schedule_frame(frame->output);
+		schedule_set_period(&frame->schedule, refresh_period(frame->output));
+		frame_request(frame);
 	}
+}
+
+static void handle_output_present(struct wl_listener *listener, void *data) {
+	struct flame_frame *frame = wl_container_of(listener, frame, output_present);
+	const struct wlr_output_event_present *event = data;
+	// a flip without a timestamp anchors on dispatch time instead
+	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
+}
+
+static bool commit(struct flame_frame *frame, struct wlr_output_state *state) {
+	bool ok = wlr_output_commit_state(frame->output, state);
+	if (!ok) {
+		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
+	}
+	timing_committed(&frame->timing, ok);
+	return ok;
+}
+
+// the KMS slot is free again: the pending frame flipped. a successor goes
+// right in. wlroots also sends this when someone else asked for a frame with
+// nothing of ours pending, that's just a request
+static void handle_output_frame(struct wl_listener *listener, void *data) {
+	struct flame_frame *frame = wl_container_of(listener, frame, output_frame);
+	struct schedule *schedule = &frame->schedule;
+	int64_t now = now_ns();
+
+	if (!schedule->pending) {
+		schedule_request_redraw(schedule);
+		process(frame);
+		return;
+	}
+	schedule_presented(schedule, frame->present_ns, now);
+	frame->present_ns = 0;
+	frame->stall_reported = false;
+
+	if (frame->has_queued) {
+		bool ok = commit(frame, &frame->queued);
+		drop_queued(frame);
+		if (ok) {
+			schedule_promoted(schedule, now_ns());
+			timing_successor(&frame->timing, true);
+		} else {
+			schedule_discard_queued(schedule);
+			timing_successor(&frame->timing, false);
+			frame->whole = true;
+		}
+	}
+	process(frame);
+}
+
+// vt switches: nothing reaches KMS while we're away, and a flip that was in
+// flight never reports back. start clean when we're back
+static void handle_session_active(struct wl_listener *listener, void *data) {
+	struct flame_frame *frame = wl_container_of(listener, frame, session_active);
+	struct wlr_session *session = data;
+	if (!session->active) {
+		void *pending, *queued;
+		schedule_pause(&frame->schedule, &pending, &queued);
+		drop_queued(frame);
+		timer_arm(&frame->wake, 0);
+		return;
+	}
+	schedule_resume(&frame->schedule);
+	frame->whole = true;
+	frame->stall_reported = false;
+	queue_process(frame);
 }
 
 // ---- setup ----
 
 bool frame_init(struct flame_frame *frame, struct flame_render *render,
-		struct wlr_output *output) {
+		struct wlr_output *output, struct wlr_session *session, const struct wlr_box *area,
+		struct flame_frame_hooks hooks) {
 	frame->output = output;
 	frame->render = render;
+	frame->area = area;
+	frame->hooks = hooks;
 	frame->whole = true;
 	wlr_damage_ring_init(&frame->ring);
 	pixman_region32_init(&frame->pending);
 	pixman_region32_init(&frame->pending_buffer);
 	elements_init(&frame->prev);
 	elements_init(&frame->cur);
-	timing_init(&frame->timing, output, render->frame_timing);
-	if (render->frame_timing) {
+	schedule_init(&frame->schedule, render->pipeline, refresh_period(output));
+	timing_init(&frame->timing, output, &frame->schedule, render->frame_timing);
+	// the schedule's lead needs the gpu's side too, immediate doesn't look at it
+	if (render->frame_timing || render->pipeline != SCHEDULE_IMMEDIATE) {
 		gpu_time_init(&frame->gpu, render->renderer);
+	}
+	if (!timer_init(&frame->wake, output->event_loop, handle_wake, frame)) {
+		wlr_log(WLR_ERROR, "failed to create a frame timer for %s", output->name);
+		frame_finish(frame);
+		return false;
 	}
 
 	// same condition as clients' explicit sync: both ends have to speak it
@@ -104,6 +235,15 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	listener_connect(&frame->output_needs_frame, &output->events.needs_frame,
 		handle_output_needs_frame);
 	listener_connect(&frame->output_commit, &output->events.commit, handle_output_commit);
+	listener_connect(&frame->output_frame, &output->events.frame, handle_output_frame);
+	listener_connect(&frame->output_present, &output->events.present, handle_output_present);
+	if (session) {
+		listener_connect(&frame->session_active, &session->events.active,
+			handle_session_active);
+	} else {
+		wl_list_init(&frame->session_active.link);
+	}
+	queue_process(frame); // the first frame
 	return true;
 }
 
@@ -114,7 +254,16 @@ void frame_finish(struct flame_frame *frame) {
 		listener_disconnect(&frame->output_damage);
 		listener_disconnect(&frame->output_needs_frame);
 		listener_disconnect(&frame->output_commit);
+		listener_disconnect(&frame->output_frame);
+		listener_disconnect(&frame->output_present);
+		listener_disconnect(&frame->session_active);
 	}
+	if (frame->idle) {
+		wl_event_source_remove(frame->idle);
+		frame->idle = NULL;
+	}
+	timer_finish(&frame->wake);
+	drop_queued(frame);
 	timing_finish(&frame->timing);
 	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {
@@ -242,20 +391,17 @@ static void draw_background(struct wlr_render_pass *pass,
 	pixman_region32_fini(&background);
 }
 
-static bool draw_and_commit(struct flame_frame *frame,
-		const struct flame_render_target *target, const pixman_region32_t *damage) {
+// renders the frame into a buffer and fills state with it, ready to commit
+static bool draw(struct flame_frame *frame, const struct flame_render_target *target,
+		const pixman_region32_t *damage, struct wlr_output_state *state) {
 	struct wlr_output *output = frame->output;
-	struct wlr_output_state state;
-	wlr_output_state_init(&state);
-	bool ok = false;
-
-	if (!wlr_output_configure_primary_swapchain(output, &state, &output->swapchain)) {
+	if (!wlr_output_configure_primary_swapchain(output, state, &output->swapchain)) {
 		wlr_log(WLR_ERROR, "no swapchain for %s", output->name);
-		goto out;
+		return false;
 	}
 	struct wlr_buffer *buffer = wlr_swapchain_acquire(output->swapchain);
 	if (!buffer) {
-		goto out;
+		return false;
 	}
 
 	// this frame's damage, grown by what this buffer missed since it was last used
@@ -276,7 +422,7 @@ static bool draw_and_commit(struct flame_frame *frame,
 		gpu_time_end(&frame->gpu);
 		pixman_region32_fini(&repaint);
 		wlr_buffer_unlock(buffer);
-		goto out;
+		return false;
 	}
 
 	draw_background(pass, target, &frame->cur, &repaint, buffer->width, buffer->height);
@@ -292,91 +438,154 @@ static bool draw_and_commit(struct flame_frame *frame,
 		// whatever made it into the buffer can't be trusted
 		wlr_damage_ring_add_whole(&frame->ring);
 		wlr_buffer_unlock(buffer);
-		goto out;
+		return false;
 	}
 
-	wlr_output_state_set_buffer(&state, buffer);
+	wlr_output_state_set_buffer(state, buffer);
 	wlr_buffer_unlock(buffer);
-	wlr_output_state_set_damage(&state, damage);
+	wlr_output_state_set_damage(state, damage);
 	if (frame->in_timeline) {
 		// KMS waits for our drawing, then tells us when it let go
-		wlr_output_state_set_wait_timeline(&state, frame->in_timeline, frame->in_point);
+		wlr_output_state_set_wait_timeline(state, frame->in_timeline, frame->in_point);
 		frame->out_point++;
-		wlr_output_state_set_signal_timeline(&state, frame->out_timeline, frame->out_point);
+		wlr_output_state_set_signal_timeline(state, frame->out_timeline, frame->out_point);
 	}
-
-	ok = wlr_output_commit_state(output, &state);
-	if (!ok) {
-		wlr_log(WLR_DEBUG, "commit on %s failed", output->name);
-	}
-	timing_committed(&frame->timing, ok);
-out:
-	wlr_output_state_finish(&state);
-	return ok;
+	return true;
 }
 
-void frame_render(struct flame_frame *frame, struct wlr_box logical,
-		const struct timespec *now) {
+// what changed since the last frame, buffer coords. the element lists are
+// built here too
+static void build(struct flame_frame *frame, const struct flame_render_target *target,
+		pixman_region32_t *damage) {
 	struct wlr_output *output = frame->output;
-	struct flame_render *render = frame->render;
-	if (!output->enabled || wlr_box_empty(&logical)) {
-		return;
-	}
-	struct timespec start;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
-	// earlier frames' gpu times, whatever finished by now
-	double gpu_ms;
-	if (gpu_time_collect(&frame->gpu, &gpu_ms) > 0) {
-		timing_gpu(&frame->timing, gpu_ms);
-	}
-
-	struct flame_render_target target;
-	target_init(&target, output, logical);
+	struct wlr_box logical = target->logical;
 
 	elements_clear(&frame->cur);
-	if (!elements_collect(&frame->cur, &render->scene, logical)) {
+	if (!elements_collect(&frame->cur, &frame->render->scene, logical)) {
 		frame->whole = true; // half a list, don't trust the next diff either
 	}
 	elements_occlude(&frame->cur);
 
 	// layout coords first: what moved, appeared, vanished, and what clients redrew
-	pixman_region32_t damage;
-	pixman_region32_init(&damage);
-	damage_diff(&frame->prev, &frame->cur, &damage);
-	pixman_region32_union(&damage, &damage, &frame->pending);
+	damage_diff(&frame->prev, &frame->cur, damage);
+	pixman_region32_union(damage, damage, &frame->pending);
 	pixman_region32_clear(&frame->pending);
-	pixman_region32_intersect_rect(&damage, &damage, logical.x, logical.y,
+	pixman_region32_intersect_rect(damage, damage, logical.x, logical.y,
 		logical.width, logical.height);
 
 	// then buffer coords, plus what wlroots told us about (cursors)
-	target_region_to_buffer(&target, &damage, true);
-	pixman_region32_union(&damage, &damage, &frame->pending_buffer);
+	target_region_to_buffer(target, damage, true);
+	pixman_region32_union(damage, damage, &frame->pending_buffer);
 	pixman_region32_clear(&frame->pending_buffer);
 	if (frame->whole) {
 		frame->whole = false;
 		wlr_damage_ring_add_whole(&frame->ring);
-		pixman_region32_union_rect(&damage, &damage, 0, 0, output->width, output->height);
+		pixman_region32_union_rect(damage, damage, 0, 0, output->width, output->height);
 	}
-	pixman_region32_intersect_rect(&damage, &damage, 0, 0, output->width, output->height);
+	pixman_region32_intersect_rect(damage, damage, 0, 0, output->width, output->height);
+}
 
-	// the diff above needed the old frame_seq, from here on this is the frame
-	feedback_drawn(&render->surfaces, output, &frame->cur);
+// the schedule said now: build a frame from the latest scene and send it to
+// KMS, or hold it behind the pending one. nothing changed: no pageflip at all
+static void render(struct flame_frame *frame, int64_t now) {
+	struct wlr_output *output = frame->output;
+	struct schedule *schedule = &frame->schedule;
+	if (frame->hooks.before_render) {
+		frame->hooks.before_render(frame->hooks.data);
+	}
 
-	// wlroots asks for a real commit when something waits on one: frame
-	// callbacks with no new pixels, screencopy. skipping it would mean the
-	// next frame comes from an idle callback right away instead of the next
-	// vblank, and that spins the event loop so hard timers and signals never run
+	struct flame_render_target target;
+	target_init(&target, output, *frame->area);
+	pixman_region32_t damage;
+	pixman_region32_init(&damage);
+	build(frame, &target, &damage);
+	// the diff in build needed the old frame_seq, from here on this is the frame
+	feedback_drawn(&frame->render->surfaces, output, &frame->cur);
+
+	// wlroots wanting a real commit (screencopy) counts as a change
+	bool changed = pixman_region32_not_empty(&damage) || output->needs_frame;
 	bool drew = false;
-	if (pixman_region32_not_empty(&damage) || output->needs_frame) {
-		drew = draw_and_commit(frame, &target, &damage);
+	if (changed) {
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		if (!draw(frame, &target, &damage, &state)) {
+			wlr_output_state_finish(&state);
+			frame->whole = true;
+		} else if (!schedule->pending) {
+			drew = commit(frame, &state);
+			wlr_output_state_finish(&state);
+			if (drew) {
+				schedule_submitted(schedule, &frame->submitted_ticket, now_ns());
+			} else {
+				frame->whole = true;
+			}
+		} else {
+			// behind the pending flip, it goes in the moment that one lands
+			frame->queued = state;
+			frame->has_queued = true;
+			schedule_queued(schedule, &frame->queued_ticket);
+			timing_successor_prepared(&frame->timing);
+			drew = true;
+		}
 	}
 	pixman_region32_fini(&damage);
-
-	feedback_frame_done(&frame->cur, now);
+	if (!drew) {
+		// nothing went anywhere: callbacks on the refresh grid, no pageflip
+		schedule_empty(schedule, now);
+	}
 	swap_lists(frame);
 
-	struct timespec end;
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	timing_frame(&frame->timing, &start, &end, drew);
+	int64_t end = now_ns();
+	if (drew) {
+		schedule_observe_cpu(schedule, end - now);
+	}
+	struct timespec start_ts = ns_timespec(now), end_ts = ns_timespec(end);
+	timing_frame(&frame->timing, &start_ts, &end_ts, drew);
+}
+
+static void send_callbacks(struct flame_frame *frame, int64_t now) {
+	struct timespec when = ns_timespec(now);
+	// prev is the last frame built, the one that just went out
+	feedback_frame_done(&frame->prev, &when);
+	schedule_callbacks_sent(&frame->schedule);
+	if (frame->hooks.callbacks_sent) {
+		frame->hooks.callbacks_sent(frame->hooks.data, &when);
+	}
+}
+
+static void process(struct flame_frame *frame) {
+	struct schedule *schedule = &frame->schedule;
+	struct wlr_output *output = frame->output;
+	int64_t now = now_ns();
+
+	// earlier frames' gpu times, whatever finished by now
+	double gpu_ms;
+	if (gpu_time_collect(&frame->gpu, &gpu_ms) > 0) {
+		schedule_observe_gpu(schedule, (int64_t)(gpu_ms * 1e6));
+		timing_gpu(&frame->timing, gpu_ms);
+	}
+
+	if (!output->enabled || wlr_box_empty(frame->area)) {
+		timer_arm(&frame->wake, 0);
+		return; // comes back through the commit that enables it
+	}
+	if (schedule_stalled(schedule, now) && !frame->stall_reported) {
+		wlr_log(WLR_ERROR, "%s: a pageflip has been pending for over %llds",
+			output->name, SCHEDULE_WATCHDOG_NS / 1000000000);
+		frame->stall_reported = true;
+	}
+	if (schedule_render_due(schedule, now)) {
+		render(frame, now);
+		now = now_ns();
+	}
+	if (schedule_callbacks_due(schedule, now)) {
+		send_callbacks(frame, now);
+	}
+
+	// sleep until the next thing is due, never spin on something due already
+	int64_t deadline = schedule_deadline(schedule, now);
+	if (deadline > 0 && deadline <= now) {
+		deadline = now + schedule->period;
+	}
+	timer_arm(&frame->wake, deadline);
 }

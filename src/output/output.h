@@ -19,7 +19,6 @@ struct flame_output {
 	struct wlr_box box; // layout coords
 	struct wlr_box usable; // box minus what bars reserve, tiles go here
 
-	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
 };
@@ -36,6 +35,7 @@ struct flame_outputs {
 bool outputs_init(struct flame_outputs *outputs, struct flame_server *server);
 void outputs_finish(struct flame_outputs *outputs);
 
+// ask every output for a frame, the schedule decides when
 void outputs_schedule_frame(struct flame_outputs *outputs);
 
 // single output for now, the first one plugged in owns the desktop

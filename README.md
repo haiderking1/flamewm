@@ -12,17 +12,40 @@ make run        # nested inside your current compositor
 make asan       # build-asan/flamewm, address + ub sanitizers
 make release    # build-release/flamewm, -O2 + lto
 make clangd     # compile_flags.txt so clangd stops yelling
+make test       # unit tests for the pure logic (the frame scheduler)
 ```
 
 `flamewm -s foot` runs a command once it's up, `-d` turns on debug logs.
+
+### frame pipeline
+
+flame decides when to draw, not wlroots: one frame waiting for KMS at a time,
+plus at most one prepared behind it (raven's scheduler). when nothing
+changed nothing gets drawn or flipped, clients still get their frame
+callbacks on the refresh grid.
+
+`FLAME_FRAME_PIPELINE` picks the policy:
+
+- `adaptive` (default): draws as soon as the screen can take a frame. when
+  frames get expensive (3/4 of a refresh) it starts preparing the next one
+  right before the pending flip lands, and stops again below 1/2
+- `immediate`: only ever draws once the pending frame flipped
+- `deadline`: always prepares ahead, for comparing
+
+anything else stops startup, a typo shouldn't quietly test the wrong thing.
 
 ### frame timing
 
 `FLAME_FRAME_TIMING=1 ./flamewm.run` logs a `flame: frame-timing` line per
 output every two seconds, only observing, nothing about rendering changes:
 
+- `pipeline` / `overlap` / `lead_ms`: the policy, whether it's preparing
+  frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
 - `composited` / `failed`: frames drawn and handed to KMS, or refused
+- `successors` / `promoted` / `discarded`: frames prepared behind a pending
+  flip, sent when it landed, or refused right then
+- `timer_late_ms` / `timer_early`: how far off the frame timer fires
 - `draws` / `draw_ms`: building + drawing + committing a changed frame (cpu)
 - `empty` / `empty_ms`: frames where nothing changed, nothing drawn
 - `gpu_batch_max_ms`: our gpu work per frame, the longest finished

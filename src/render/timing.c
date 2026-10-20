@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 
+#include "render/schedule.h"
 #include "util/listener.h"
 
 #define REPORT_MS 2000
@@ -97,6 +98,9 @@ static void handle_present(struct wl_listener *listener, void *data) {
 
 static void reset_span(struct flame_frame_timing *timing) {
 	timing->flips = timing->composited = timing->failed = 0;
+	timing->prepared = timing->promoted = timing->discarded = 0;
+	memset(&timing->timer_late, 0, sizeof(timing->timer_late));
+	timing->timer_early = 0;
 	memset(&timing->draw, 0, sizeof(timing->draw));
 	memset(&timing->empty, 0, sizeof(timing->empty));
 	memset(&timing->gpu, 0, sizeof(timing->gpu));
@@ -114,15 +118,22 @@ static int handle_report(void *data) {
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	double span = ms_between(&timing->span_start, &now) / 1e3;
 
-	char draw[64], empty[64], gpu[64], flip[64], dispatch[64];
+	char draw[64], empty[64], gpu[64], flip[64], dispatch[64], late[64];
+	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
+		"pipeline=%s overlap=%s lead_ms=%.3f "
 		"flips=%u flip_hz=%.1f composited=%u failed=%u "
+		"successors=%u promoted=%u discarded=%u timer_late_ms=%s timer_early=%u "
 		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s flip_ms=%s "
 		"seq_steps=1:%u,2:%u,3+:%u dispatch_ms=%s clock=%s "
 		"metadata_missing=%u clock_discontinuities=%u seq_repeat=%u seq_reset=%u seq_last=%u",
 		timing->output->name, timing->output->refresh / 1000.0, span,
+		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
+		schedule_lead(schedule) / 1e6,
 		timing->flips, span > 0 ? timing->flips / span : 0.0,
 		timing->composited, timing->failed,
+		timing->prepared, timing->promoted, timing->discarded,
+		stat_str(&timing->timer_late, late, sizeof(late)), timing->timer_early,
 		timing->draw.count, stat_str(&timing->draw, draw, sizeof(draw)),
 		timing->empty.count, stat_str(&timing->empty, empty, sizeof(empty)),
 		stat_str(&timing->gpu, gpu, sizeof(gpu)), stat_str(&timing->flip, flip, sizeof(flip)),
@@ -139,9 +150,11 @@ static int handle_report(void *data) {
 
 // ---- hooks ----
 
-void timing_init(struct flame_frame_timing *timing, struct wlr_output *output, bool enabled) {
+void timing_init(struct flame_frame_timing *timing, struct wlr_output *output,
+		const struct schedule *schedule, bool enabled) {
 	memset(timing, 0, sizeof(*timing));
 	timing->output = output;
+	timing->schedule = schedule;
 	wl_list_init(&timing->present.link);
 	if (!enabled) {
 		return;
@@ -182,5 +195,28 @@ void timing_committed(struct flame_frame_timing *timing, bool ok) {
 void timing_gpu(struct flame_frame_timing *timing, double max_ms) {
 	if (timing->enabled) {
 		stat_add(&timing->gpu, max_ms);
+	}
+}
+
+void timing_successor_prepared(struct flame_frame_timing *timing) {
+	if (timing->enabled) {
+		timing->prepared++;
+	}
+}
+
+void timing_successor(struct flame_frame_timing *timing, bool ok) {
+	if (timing->enabled) {
+		ok ? timing->promoted++ : timing->discarded++;
+	}
+}
+
+void timing_wake(struct flame_frame_timing *timing, int64_t late_ns) {
+	if (!timing->enabled) {
+		return;
+	}
+	if (late_ns < 0) {
+		timing->timer_early++;
+	} else {
+		stat_add(&timing->timer_late, late_ns / 1e6);
 	}
 }

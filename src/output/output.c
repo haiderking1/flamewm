@@ -1,7 +1,6 @@
 #include "output/output.h"
 
 #include <stdlib.h>
-#include <time.h>
 #include <wlr/backend.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
@@ -11,17 +10,18 @@
 #include "core/server.h"
 #include "util/listener.h"
 
-static void handle_frame(struct wl_listener *listener, void *data) {
-	struct flame_output *output = wl_container_of(listener, output, frame);
-
-	// a mouse resize lands right before the frame that shows it
+// a mouse resize lands right before the frame that shows it
+static void before_render(void *data) {
+	struct flame_output *output = data;
 	drag_frame(&output->server->input.drag);
+}
 
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	frame_render(&output->frames, output->box, &now);
-	if (transaction_frame_done(&output->server->desktop.transaction, &now)) {
-		wlr_output_schedule_frame(output->wlr);
+// windows a transaction waits on may be hidden, they still need callbacks to
+// draw what it's waiting for. this keeps them coming once a refresh
+static void callbacks_sent(void *data, const struct timespec *now) {
+	struct flame_output *output = data;
+	if (transaction_frame_done(&output->server->desktop.transaction, now)) {
+		frame_request(&output->frames);
 	}
 }
 
@@ -35,7 +35,6 @@ static void handle_request_state(struct wl_listener *listener, void *data) {
 static void handle_destroy(struct wl_listener *listener, void *data) {
 	struct flame_output *output = wl_container_of(listener, output, destroy);
 
-	listener_disconnect(&output->frame);
 	listener_disconnect(&output->request_state);
 	listener_disconnect(&output->destroy);
 
@@ -86,7 +85,13 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	output->wlr = wlr_output;
 	output->background = scene_rect_create(server->render.layers[FLAME_LAYER_BACKGROUND],
 		0, 0, server->config->background_color);
-	if (!output->background || !frame_init(&output->frames, &server->render, wlr_output)) {
+	struct flame_frame_hooks hooks = {
+		.data = output,
+		.before_render = before_render,
+		.callbacks_sent = callbacks_sent,
+	};
+	if (!output->background || !frame_init(&output->frames, &server->render, wlr_output,
+			server->backend.session, &output->box, hooks)) {
 		wlr_log(WLR_ERROR, "failed to set up rendering on %s", wlr_output->name);
 		if (output->background) {
 			scene_node_destroy(&output->background->node);
@@ -96,7 +101,6 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	}
 	wlr_output->data = output;
 
-	listener_connect(&output->frame, &wlr_output->events.frame, handle_frame);
 	listener_connect(&output->request_state, &wlr_output->events.request_state,
 		handle_request_state);
 	listener_connect(&output->destroy, &wlr_output->events.destroy, handle_destroy);
@@ -149,7 +153,7 @@ void outputs_finish(struct flame_outputs *outputs) {
 void outputs_schedule_frame(struct flame_outputs *outputs) {
 	struct flame_output *output;
 	wl_list_for_each(output, &outputs->list, link) {
-		wlr_output_schedule_frame(output->wlr);
+		frame_request(&output->frames);
 	}
 }
 
