@@ -12,6 +12,7 @@
 
 #include "render/elements.h"
 #include "render/gpu_time.h"
+#include "render/scanout.h"
 #include "render/schedule.h"
 #include "render/timing.h"
 #include "util/timer.h"
@@ -50,6 +51,9 @@ struct flame_frame {
 	// a successor, rendered while the pending one is still waiting to flip
 	struct wlr_output_state queued;
 	bool has_queued;
+	bool queued_scanout; // it's a client buffer going straight to KMS
+
+	struct flame_scanout scanout;
 
 	struct wlr_damage_ring ring; // buffer coords, per swapchain buffer
 	pixman_region32_t pending; // layout coords, from client commits

@@ -22,7 +22,8 @@ make test       # unit tests for the pure logic (the frame scheduler)
 flame decides when to draw, not wlroots: one frame waiting for KMS at a time,
 plus at most one prepared behind it (raven's scheduler). when nothing
 changed nothing gets drawn or flipped, clients still get their frame
-callbacks on the refresh grid.
+callbacks on the refresh grid. a lone fullscreen window whose buffer KMS
+can take goes straight to the display (direct scanout), no compositing.
 
 `FLAME_FRAME_PIPELINE` picks the policy:
 
@@ -42,7 +43,8 @@ output every two seconds, only observing, nothing about rendering changes:
 - `pipeline` / `overlap` / `lead_ms`: the policy, whether it's preparing
   frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
-- `composited` / `failed`: frames drawn and handed to KMS, or refused
+- `composited` / `scanout` / `failed`: frames we drew, client buffers sent
+  straight to KMS, and frames KMS refused
 - `successors` / `promoted` / `discarded`: frames prepared behind a pending
   flip, sent when it landed, or refused right then
 - `timer_late_ms` / `timer_early`: how far off the frame timer fires

@@ -97,7 +97,7 @@ static void handle_present(struct wl_listener *listener, void *data) {
 // ---- reports ----
 
 static void reset_span(struct flame_frame_timing *timing) {
-	timing->flips = timing->composited = timing->failed = 0;
+	timing->flips = timing->composited = timing->scanout = timing->failed = 0;
 	timing->prepared = timing->promoted = timing->discarded = 0;
 	memset(&timing->timer_late, 0, sizeof(timing->timer_late));
 	timing->timer_early = 0;
@@ -122,7 +122,7 @@ static int handle_report(void *data) {
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
 		"pipeline=%s overlap=%s lead_ms=%.3f "
-		"flips=%u flip_hz=%.1f composited=%u failed=%u "
+		"flips=%u flip_hz=%.1f composited=%u scanout=%u failed=%u "
 		"successors=%u promoted=%u discarded=%u timer_late_ms=%s timer_early=%u "
 		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s flip_ms=%s "
 		"seq_steps=1:%u,2:%u,3+:%u dispatch_ms=%s clock=%s "
@@ -131,7 +131,7 @@ static int handle_report(void *data) {
 		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
 		schedule_lead(schedule) / 1e6,
 		timing->flips, span > 0 ? timing->flips / span : 0.0,
-		timing->composited, timing->failed,
+		timing->composited, timing->scanout, timing->failed,
 		timing->prepared, timing->promoted, timing->discarded,
 		stat_str(&timing->timer_late, late, sizeof(late)), timing->timer_early,
 		timing->draw.count, stat_str(&timing->draw, draw, sizeof(draw)),
@@ -186,9 +186,16 @@ void timing_frame(struct flame_frame_timing *timing, const struct timespec *star
 	}
 }
 
-void timing_committed(struct flame_frame_timing *timing, bool ok) {
-	if (timing->enabled) {
-		ok ? timing->composited++ : timing->failed++;
+void timing_committed(struct flame_frame_timing *timing, bool ok, bool scanout) {
+	if (!timing->enabled) {
+		return;
+	}
+	if (!ok) {
+		timing->failed++;
+	} else if (scanout) {
+		timing->scanout++;
+	} else {
+		timing->composited++;
 	}
 }
 

@@ -129,12 +129,12 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
 }
 
-static bool commit(struct flame_frame *frame, struct wlr_output_state *state) {
+static bool commit(struct flame_frame *frame, struct wlr_output_state *state, bool scanout) {
 	bool ok = wlr_output_commit_state(frame->output, state);
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
 	}
-	timing_committed(&frame->timing, ok);
+	timing_committed(&frame->timing, ok, scanout);
 	return ok;
 }
 
@@ -156,7 +156,7 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 	frame->stall_reported = false;
 
 	if (frame->has_queued) {
-		bool ok = commit(frame, &frame->queued);
+		bool ok = commit(frame, &frame->queued, frame->queued_scanout);
 		drop_queued(frame);
 		if (ok) {
 			schedule_promoted(schedule, now_ns());
@@ -204,6 +204,7 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	elements_init(&frame->prev);
 	elements_init(&frame->cur);
 	schedule_init(&frame->schedule, render->pipeline, refresh_period(output));
+	scanout_init(&frame->scanout, render, output);
 	timing_init(&frame->timing, output, &frame->schedule, render->frame_timing);
 	// the schedule's lead needs the gpu's side too, immediate doesn't look at it
 	if (render->frame_timing || render->pipeline != SCHEDULE_IMMEDIATE) {
@@ -264,6 +265,7 @@ void frame_finish(struct flame_frame *frame) {
 	}
 	timer_finish(&frame->wake);
 	drop_queued(frame);
+	scanout_finish(&frame->scanout);
 	timing_finish(&frame->timing);
 	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {
@@ -504,15 +506,37 @@ static void render(struct flame_frame *frame, int64_t now) {
 
 	// wlroots wanting a real commit (screencopy) counts as a change
 	bool changed = pixman_region32_not_empty(&damage) || output->needs_frame;
+	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
+	scanout_hint(&frame->scanout, candidate);
 	bool drew = false;
 	if (changed) {
 		struct wlr_output_state state;
 		wlr_output_state_init(&state);
-		if (!draw(frame, &target, &damage, &state)) {
+		bool scanout = candidate && scanout_try(&frame->scanout, candidate, &target, &state,
+			frame->out_timeline, &frame->out_point);
+		bool ready;
+		if (scanout) {
+			// our buffers didn't see this frame, they catch up when we compose again
+			wlr_damage_ring_add(&frame->ring, &damage);
+			ready = true;
+		} else {
+			if (frame->scanout.active) {
+				// back from scanout: the screen showed a client buffer, ours are old
+				wlr_damage_ring_add_whole(&frame->ring);
+				pixman_region32_union_rect(&damage, &damage, 0, 0, output->width, output->height);
+			}
+			ready = draw(frame, &target, &damage, &state);
+		}
+		if (scanout != frame->scanout.active) {
+			wlr_log(WLR_DEBUG, "%s: direct scanout %s", output->name, scanout ? "on" : "off");
+		}
+		frame->scanout.active = scanout;
+
+		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
 		} else if (!schedule->pending) {
-			drew = commit(frame, &state);
+			drew = commit(frame, &state, scanout);
 			wlr_output_state_finish(&state);
 			if (drew) {
 				schedule_submitted(schedule, &frame->submitted_ticket, now_ns());
@@ -523,6 +547,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 			// behind the pending flip, it goes in the moment that one lands
 			frame->queued = state;
 			frame->has_queued = true;
+			frame->queued_scanout = scanout;
 			schedule_queued(schedule, &frame->queued_ticket);
 			timing_successor_prepared(&frame->timing);
 			drew = true;
