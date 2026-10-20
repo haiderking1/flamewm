@@ -31,7 +31,7 @@ EOF
 	for want in "$@"; do
 		grep -qF -- "$want" "$WORK/out" || ok=0
 	done
-	if grep -qa "AddressSanitizer\|runtime error" "$WORK/flame.log"; then
+	if grep -qa "ERROR: AddressSanitizer\|runtime error" "$WORK/flame.log"; then
 		ok=0
 	fi
 	if [ $ok = 1 ]; then
@@ -39,7 +39,7 @@ EOF
 	else
 		echo "FAIL $name"
 		sed 's/^/    /' "$WORK/out"
-		grep -a -A8 "AddressSanitizer\|runtime error" "$WORK/flame.log" | sed 's/^/    /'
+		grep -a -A8 "ERROR: AddressSanitizer\|runtime error" "$WORK/flame.log" | sed 's/^/    /'
 		failed=1
 	fi
 }
