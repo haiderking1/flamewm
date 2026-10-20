@@ -11,6 +11,7 @@
 
 #include "config/config.h"
 #include "core/server.h"
+#include "scene/surface.h"
 #include "util/listener.h"
 
 static uint32_t now_msec(void) {
@@ -56,6 +57,26 @@ static void follow_mouse(struct flame_server *server, struct flame_view *view,
 	focus_view(desktop, view);
 }
 
+// a held button keeps the pointer on the surface it went down on, the
+// implicit grab every X server and compositor has: drag a scrollbar or
+// select text past the window's edge, over another window or an X one, and
+// the motion and the release still go there. false when nothing holds it
+static bool held_motion(struct flame_cursor *cursor, uint32_t time_msec) {
+	struct wlr_seat *seat = cursor->server->input.seat;
+	struct wlr_surface *held = seat->pointer_state.focused_surface;
+	if (!held || seat->pointer_state.button_count == 0) {
+		return false;
+	}
+	// where it is on screen, the last frame had it there
+	struct flame_surface_state *state = scene_surface_state(held);
+	if (!state || !state->drawn_seq) {
+		return false;
+	}
+	wlr_seat_pointer_notify_motion(seat, time_msec,
+		cursor->wlr->x - state->drawn_x, cursor->wlr->y - state->drawn_y);
+	return true;
+}
+
 // moved: the mouse itself moved. a refresh (things moved under a still
 // cursor) updates who gets pointer events but never moves keyboard focus,
 // or a window opening next to the cursor would lose it right away
@@ -68,6 +89,9 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 		if (moved) {
 			drag_motion(&server->input.drag);
 		}
+		return;
+	}
+	if (held_motion(cursor, time_msec)) {
 		return;
 	}
 
@@ -124,6 +148,10 @@ static void handle_button(struct wl_listener *listener, void *data) {
 	}
 	wlr_seat_pointer_notify_button(server->input.seat, event->time_msec,
 		event->button, event->state);
+	if (!pressed && server->input.seat->pointer_state.button_count == 0) {
+		// the grab is over: whatever is under the pointer now gets it
+		process_motion(cursor, event->time_msec, false);
+	}
 }
 
 static void handle_axis(struct wl_listener *listener, void *data) {
