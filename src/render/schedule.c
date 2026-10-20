@@ -34,6 +34,7 @@ static void reset_budget(struct schedule *schedule) {
 	schedule->cpu = START_ESTIMATE_NS;
 	schedule->gpu = START_ESTIMATE_NS;
 	schedule->margin = SCHEDULE_MARGIN_NS;
+	schedule->extra = 0;
 	schedule->overlap = false;
 }
 
@@ -56,9 +57,18 @@ void schedule_request_redraw(struct schedule *schedule) {
 	schedule->redraw = true;
 }
 
-int64_t schedule_lead(const struct schedule *schedule) {
+static int64_t base_lead(const struct schedule *schedule) {
 	int64_t lead = schedule->cpu + schedule->gpu + schedule->margin;
 	return lead < schedule->period ? lead : schedule->period;
+}
+
+int64_t schedule_lead(const struct schedule *schedule) {
+	int64_t lead = base_lead(schedule) + schedule->extra;
+	return lead < schedule->period ? lead : schedule->period;
+}
+
+void schedule_set_extra(struct schedule *schedule, int64_t ns) {
+	schedule->extra = ns > 0 ? ns : 0;
 }
 
 bool schedule_overlapping(const struct schedule *schedule) {
@@ -241,7 +251,8 @@ static void update_overlap(struct schedule *schedule) {
 	if (schedule->policy != SCHEDULE_ADAPTIVE) {
 		return;
 	}
-	int64_t lead = schedule_lead(schedule);
+	// a one-off stall planned for doesn't make the pipeline go deeper
+	int64_t lead = base_lead(schedule);
 	if (!schedule->overlap && lead * 4 >= schedule->period * 3) {
 		schedule->overlap = true;
 	} else if (schedule->overlap && lead * 2 <= schedule->period) {

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <wayland-server-core.h>
+#include <wlr/render/drm_syncobj.h>
 #include <wlr/types/wlr_damage_ring.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/box.h>
@@ -13,6 +14,7 @@
 #include "render/cursor.h"
 #include "render/elements.h"
 #include "render/gpu_time.h"
+#include "render/hiccup.h"
 #include "render/scanout.h"
 #include "render/schedule.h"
 #include "render/timing.h"
@@ -108,7 +110,14 @@ struct flame_frame {
 	} events;
 
 	struct flame_frame_timing timing; // FLAME_FRAME_TIMING probes
-	struct flame_gpu_time gpu; // for the schedule's lead and the probes
+	struct flame_gpu_time gpu; // for the probes, and the lead without done_waiter
+	struct flame_hiccup hiccup; // the driver's draw stalls, see render/hiccup.h
+	// a composited frame's gpu work, handed to KMS -> done. that's what KMS
+	// waits for, queueing behind other apps' gpu work included, so it's the
+	// gpu part of the schedule's lead. one frame watched at a time
+	struct wlr_drm_syncobj_timeline_waiter done_waiter;
+	bool done_waiting;
+	int64_t done_since;
 
 	struct wl_listener scene_changed;
 	struct wl_listener scene_damage;

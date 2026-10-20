@@ -332,6 +332,10 @@ void frame_finish(struct flame_frame *frame) {
 	if (frame->events.destroy.listener_list.next) {
 		wl_signal_emit_mutable(&frame->events.destroy, frame);
 	}
+	if (frame->done_waiting) {
+		wlr_drm_syncobj_timeline_waiter_finish(&frame->done_waiter);
+		frame->done_waiting = false;
+	}
 	if (frame->scene_changed.link.next) {
 		listener_disconnect(&frame->scene_changed);
 		listener_disconnect(&frame->scene_damage);
@@ -626,6 +630,28 @@ static bool prepare(struct flame_frame *frame, const struct flame_render_target 
 	return ready;
 }
 
+static void handle_gpu_done(struct wlr_drm_syncobj_timeline_waiter *waiter) {
+	struct flame_frame *frame = wl_container_of(waiter, frame, done_waiter);
+	int64_t took = now_ns() - frame->done_since;
+	wlr_drm_syncobj_timeline_waiter_finish(&frame->done_waiter);
+	frame->done_waiting = false;
+	schedule_observe_gpu(&frame->schedule, took);
+	timing_gpu_done(&frame->timing, took);
+}
+
+// a frame's drawing just went to the gpu: when does it finish. every drawn
+// frame, sent to KMS now or held as the successor: measuring only the ones
+// sent at once would stop measuring the moment the lead grows enough to
+// render ahead, and the lead would never come down again
+static void watch_gpu_done(struct flame_frame *frame) {
+	if (!frame->in_timeline || frame->done_waiting) {
+		return;
+	}
+	frame->done_since = now_ns();
+	frame->done_waiting = wlr_drm_syncobj_timeline_waiter_init(&frame->done_waiter,
+		frame->in_timeline, frame->in_point, 0, frame->output->event_loop, handle_gpu_done);
+}
+
 // a cursor commit sends the buffer on screen again. when that's a client's
 // (direct scanout), KMS letting go of the previous commit no longer means
 // the client may have it back: this commit holds it too. without that, the
@@ -684,6 +710,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		cursor_only = false;
 	}
 	bool submitted_now = false;
+	bool drew_gl = false; // went through the gpu, not straight to KMS
 	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
 	scanout_hint(&frame->scanout, candidate);
 	bool drew = false;
@@ -698,6 +725,10 @@ static void render(struct flame_frame *frame, int64_t now) {
 			keep_scanout_buffer(frame, candidate, &state);
 		} else {
 			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
+			drew_gl = kind == TIMING_COMPOSITED;
+			if (drew_gl && ready) {
+				watch_gpu_done(frame);
+			}
 		}
 
 		// what buffer nodes will hear about this frame, nothing new for a
@@ -747,9 +778,20 @@ static void render(struct flame_frame *frame, int64_t now) {
 	}
 
 	int64_t end = now_ns();
-	// a cursor commit costs nothing, it would only drag the estimate down
+	// a cursor commit costs nothing, it would only drag the estimate down.
+	// a driver stall on its rhythm stays out too: it's planned for on its
+	// own, in the estimate it would slow every frame after it
 	bool composed = drew && !cursor_only;
-	if (composed) {
+	bool stall = false;
+	if (drew_gl) {
+		int64_t planned = schedule->extra;
+		stall = hiccup_draw(&frame->hiccup, end - now);
+		if (stall) {
+			timing_hiccup(&frame->timing, planned > 0);
+		}
+		schedule_set_extra(schedule, hiccup_next(&frame->hiccup));
+	}
+	if (composed && !stall) {
 		schedule_observe_cpu(schedule, end - now);
 	}
 	struct timespec start_ts = ns_timespec(now), end_ts = ns_timespec(end);
@@ -786,7 +828,9 @@ static void process_once(struct flame_frame *frame) {
 	// earlier frames' gpu times, whatever finished by now
 	double gpu_ms;
 	if (gpu_time_collect(&frame->gpu, &gpu_ms) > 0) {
-		schedule_observe_gpu(schedule, (int64_t)(gpu_ms * 1e6));
+		if (!frame->in_timeline) {
+			schedule_observe_gpu(schedule, (int64_t)(gpu_ms * 1e6));
+		}
 		timing_gpu(&frame->timing, gpu_ms);
 	}
 
