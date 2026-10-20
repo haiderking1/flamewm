@@ -75,6 +75,8 @@ struct xs_window {
 	pixman_image_t *backing;
 	pixman_region32_t damage;
 	bool damaged;
+	// something real was drawn since it mapped: flame shows it from then on
+	bool painted;
 };
 
 enum {

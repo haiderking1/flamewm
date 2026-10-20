@@ -976,7 +976,7 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s", x->id,
 		window->floating ? "floats" : "is a window");
 	// drawn into before flame got to it: what's there already shows
-	if (x->backing) {
+	if (x->backing && x->painted) {
 		pixman_region32_t all;
 		pixman_region32_init_rect(&all, 0, 0, (unsigned)pixman_image_get_width(x->backing),
 			(unsigned)pixman_image_get_height(x->backing));
