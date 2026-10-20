@@ -1,0 +1,35 @@
+#!/bin/sh
+# builds frameprobe.c (once, when it changed) and runs it: missed vblanks and
+# commit -> screen latency from a client's side, on any wayland compositor.
+# usage: frameprobe [seconds] [--load] [-v]   --load runs vkcube next to it,
+# -v prints every miss with its timeline
+set -e
+here=$(dirname "$(readlink -f "$0")")
+build=${XDG_CACHE_HOME:-$HOME/.cache}/flamewm-frameprobe
+proto=/usr/share/wayland-protocols/stable
+mkdir -p "$build"
+if [ ! -x "$build/frameprobe" ] || [ "$here/frameprobe.c" -nt "$build/frameprobe" ]; then
+	for p in xdg-shell/xdg-shell presentation-time/presentation-time; do
+		name=$(basename "$p")
+		wayland-scanner client-header "$proto/$p.xml" "$build/$name-client-protocol.h"
+		wayland-scanner private-code "$proto/$p.xml" "$build/$name-protocol.c"
+	done
+	clang -O2 -Wall -I"$build" -o "$build/frameprobe" "$here/frameprobe.c" \
+		"$build/xdg-shell-protocol.c" "$build/presentation-time-protocol.c" \
+		$(pkg-config --cflags --libs wayland-client)
+fi
+seconds=${1:-10}
+shift 2>/dev/null || true
+load=
+verbose=
+for arg in "$@"; do
+	[ "$arg" = "-v" ] && verbose=-v
+done
+if [ "$1" = "--load" ]; then
+	vkcube --wsi wayland > /dev/null 2>&1 &
+	load=$!
+	sleep 1
+fi
+"$build/frameprobe" "$seconds" $verbose
+[ -n "$load" ] && kill "$load" 2>/dev/null
+exit 0
