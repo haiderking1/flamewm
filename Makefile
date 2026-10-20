@@ -56,6 +56,16 @@ $(BUILD)/gen/%-protocol.h: protocols/%.xml
 	@mkdir -p $(dir $@)
 	$(WAYLAND_SCANNER) server-header $< $@
 
+# pure logic modules get unit tests, sanitizers on
+TESTS := $(BUILD)/tests/schedule_test
+
+$(BUILD)/tests/schedule_test: tests/schedule_test.c src/render/schedule.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
+
+test: $(TESTS)
+	@for t in $(TESTS); do $$t || exit 1; done
+
 # address + ub sanitizers, own build dir so objects never mix
 asan:
 	@$(MAKE) --no-print-directory BUILD=build-asan \
@@ -81,6 +91,6 @@ install: release
 clean:
 	rm -rf build build-asan build-release
 
-.PHONY: all asan release run clangd install clean
+.PHONY: all asan release run clangd install clean test
 
 -include $(OBJS:.o=.d)
