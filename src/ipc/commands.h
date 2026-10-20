@@ -12,6 +12,8 @@ struct flame_ipc_client;
 //   fullscreen             toggle it on the focused window
 //   close                  the focused window
 //   quit
+//   pointer move X Y | pointer button left|middle|right press|release
+//                          fake input, only with FLAME_TEST_INPUT=1 set
 // answers are {"ok":true} or {"ok":false,"error":"..."}, the state is its own
 // {"event":"state",...} line (state.h)
 void ipc_command(struct flame_ipc_client *client, char *line);

@@ -77,9 +77,12 @@ bool input_init(struct flame_input *input, struct flame_server *server) {
 		return false;
 	}
 	drag_init(&input->drag, server);
+	dnd_init(&input->dnd, server);
 
 	listener_connect(&input->new_input, &server->backend.wlr->events.new_input,
 		handle_new_input);
+	// there's always a pointer, with or without a mouse plugged in yet
+	input_update_capabilities(input);
 	listener_connect(&input->request_set_selection,
 		&input->seat->events.request_set_selection, handle_request_set_selection);
 	listener_connect(&input->request_set_primary_selection,
@@ -92,5 +95,6 @@ void input_finish(struct flame_input *input) {
 	listener_disconnect(&input->new_input);
 	listener_disconnect(&input->request_set_selection);
 	listener_disconnect(&input->request_set_primary_selection);
+	dnd_finish(&input->dnd);
 	cursor_finish(&input->cursor);
 }

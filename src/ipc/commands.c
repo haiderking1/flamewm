@@ -1,6 +1,7 @@
 #include "ipc/commands.h"
 
 #include <errno.h>
+#include <linux/input-event-codes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -90,11 +91,43 @@ static bool parse_arg(enum command_arg kind, const char *word, union flame_arg *
 	return true;
 }
 
+// pointer move X Y, pointer button left|middle|right press|release: tests
+// drive flame with these, and only when it was started for that
+static void pointer_command(struct flame_ipc_client *client, char **save) {
+	if (!getenv("FLAME_TEST_INPUT")) {
+		reply_error(client, "start flame with FLAME_TEST_INPUT=1 for this");
+		return;
+	}
+	struct flame_cursor *cursor = &client->ipc->server->input.cursor;
+	const char *what = strtok_r(NULL, " \t\r", save);
+	const char *a = strtok_r(NULL, " \t\r", save);
+	const char *b = strtok_r(NULL, " \t\r", save);
+	if (what && a && b && !strcmp(what, "move")) {
+		reply_ok(client);
+		cursor_test_move(cursor, strtod(a, NULL), strtod(b, NULL));
+		return;
+	}
+	if (what && a && b && !strcmp(what, "button")) {
+		uint32_t button = !strcmp(a, "left") ? BTN_LEFT : !strcmp(a, "right") ? BTN_RIGHT
+			: !strcmp(a, "middle") ? BTN_MIDDLE : 0;
+		if (button) {
+			reply_ok(client);
+			cursor_test_button(cursor, button, !strcmp(b, "press"));
+			return;
+		}
+	}
+	reply_error(client, "pointer move X Y, or pointer button left|middle|right press|release");
+}
+
 void ipc_command(struct flame_ipc_client *client, char *line) {
 	char *save = NULL;
 	const char *name = strtok_r(line, " \t\r", &save);
 	if (!name) {
 		return; // empty line, nothing to answer
+	}
+	if (!strcmp(name, "pointer")) {
+		pointer_command(client, &save);
+		return;
 	}
 	const char *word = strtok_r(NULL, " \t\r", &save);
 	if (word && strtok_r(NULL, " \t\r", &save)) {
