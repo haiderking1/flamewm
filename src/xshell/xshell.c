@@ -817,6 +817,8 @@ static const struct flame_buffer_node_impl buffer_impl = {
 
 // ---- X top-levels as flame views ----
 
+static void x_stack_update(struct flame_xshell *xshell);
+
 static struct flame_xwindow *from_view(struct flame_view *view) {
 	struct flame_xwindow *window = wl_container_of(view, window, view);
 	return window;
@@ -861,6 +863,7 @@ static void xview_set_activated(struct flame_view *view, bool activated) {
 	struct flame_xserver *xserver = window->xshell->xserver;
 	if (activated) {
 		xserver_set_focus(xserver, window->id);
+		x_stack_update(window->xshell);
 	} else if (xserver->focus == window->id) {
 		xserver_set_focus(xserver, XS_FOCUS_NONE);
 	}
@@ -908,6 +911,8 @@ static const char *xview_app_id(struct flame_view *view) {
 static void xview_placed(struct flame_view *view, struct wlr_box content) {
 	struct flame_xwindow *window = from_view(view);
 	struct xs_window *x = x_of(window);
+	window->placed = content;
+	window->parked = false; // placed: it's on the workspace that shows
 	if (x) {
 		xserver_move_window(window->xshell->xserver, x, content.x, content.y,
 			content.width > 0 ? content.width : 1, content.height > 0 ? content.height : 1);
@@ -1161,9 +1166,49 @@ static void floats_update(struct flame_xshell *xshell) {
 	}
 }
 
+#define PARKED (-32000)
+
+// X sees the screen the way flame shows it, for apps that look for windows
+// by X's tree (drag and drop targets, QueryPointer): tiled windows on other
+// workspaces parked out of sight, the focused one on top of the tiled ones,
+// menus and the like above that
+static void x_stack_update(struct flame_xshell *xshell) {
+	struct flame_xserver *xserver = xshell->xserver;
+	struct flame_desktop *desktop = &xshell->server->desktop;
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		struct xs_window *x = window->floating ? NULL : x_of(window);
+		if (!x) {
+			continue;
+		}
+		bool shown = window->view.workspace && window->view.workspace == desktop->active;
+		if (!shown && !window->parked) {
+			window->parked = true;
+			xserver_move_window(xserver, x, PARKED, PARKED, x->width, x->height);
+		} else if (shown && window->parked && window->placed.width > 0) {
+			window->parked = false;
+			xserver_move_window(xserver, x, window->placed.x, window->placed.y, x->width,
+				x->height);
+		}
+	}
+	if (is_xview(desktop->focused)) {
+		struct xs_window *x = x_of(from_view(desktop->focused));
+		if (x) {
+			xserver_raise_window(xserver, x);
+		}
+	}
+	wl_list_for_each_reverse(window, &xshell->windows, link) {
+		struct xs_window *x = window->floating ? x_of(window) : NULL;
+		if (x) {
+			xserver_raise_window(xserver, x);
+		}
+	}
+}
+
 static void handle_desktop_changed(struct wl_listener *listener, void *data) {
 	struct flame_xshell *xshell = wl_container_of(listener, xshell, desktop_changed);
 	floats_update(xshell);
+	x_stack_update(xshell);
 }
 
 void xshell_windows_changed(struct flame_xshell *xshell) {
@@ -1182,6 +1227,7 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 		}
 	}
 	floats_update(xshell);
+	x_stack_update(xshell);
 	desktop_notify(&xshell->server->desktop); // titles
 }
 
