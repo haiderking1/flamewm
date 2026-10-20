@@ -49,6 +49,11 @@ struct flame_element {
 	struct wlr_drm_syncobj_timeline *wait_timeline;
 	uint64_t wait_point;
 
+	// animations: drawn this see through (1 for not at all), and whether it's
+	// scaled or faded at all: then it covers nothing and never goes to scanout
+	float alpha;
+	bool effected;
+
 	// layout coords: what isn't covered by anything opaque above it, and
 	// what of it is opaque itself. filled by elements_occlude
 	pixman_region32_t visible;
@@ -68,6 +73,11 @@ void elements_forget_surface(struct flame_element_list *list, struct wlr_surface
 
 // everything enabled in the scene that lands on area, bottom to top
 bool elements_collect(struct flame_element_list *list, struct flame_scene *scene,
+	struct wlr_box area);
+// the same for one node and what's under it, as if the node's parent sat at
+// 0, 0 (effects above it don't count): a window's snapshot
+struct flame_node;
+bool elements_collect_node(struct flame_element_list *list, struct flame_node *node,
 	struct wlr_box area);
 // a surface and its subsurfaces with the surface at x, y, on top of the list
 bool elements_push_surface(struct flame_element_list *list, struct wlr_surface *surface,

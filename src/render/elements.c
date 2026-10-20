@@ -51,9 +51,31 @@ static struct flame_element *push(struct flame_element_list *list) {
 	}
 	struct flame_element *element = &list->data[list->len++];
 	memset(element, 0, sizeof(*element));
+	element->alpha = 1.0f;
 	pixman_region32_init(&element->visible);
 	pixman_region32_init(&element->opaque);
 	return element;
+}
+
+// where things land: x' = ax * x + bx, y' = ay * y + by, faded to alpha.
+// the identity unless an effect is on the way down
+struct transform {
+	double ax, bx, ay, by;
+	float alpha;
+};
+
+static bool identity(const struct transform *t) {
+	return t->ax == 1 && t->ay == 1 && t->bx == 0 && t->by == 0 && t->alpha >= 1;
+}
+
+static struct wlr_box apply(const struct transform *t, struct wlr_box box) {
+	if (t->ax == 1 && t->ay == 1 && t->bx == 0 && t->by == 0) {
+		return box;
+	}
+	double x0 = t->ax * box.x + t->bx, x1 = t->ax * (box.x + box.width) + t->bx;
+	double y0 = t->ay * box.y + t->by, y1 = t->ay * (box.y + box.height) + t->by;
+	int left = (int)(x0 + 0.5), top = (int)(y0 + 0.5);
+	return (struct wlr_box){left, top, (int)(x1 + 0.5) - left, (int)(y1 + 0.5) - top};
 }
 
 struct collect {
@@ -61,11 +83,20 @@ struct collect {
 	struct wlr_box area;
 	// the surface node being flattened
 	int x, y;
-	const struct wlr_box *clip; // layout coords, NULL for none
+	const struct wlr_box *clip; // layout coords before the transform, NULL for none
+	struct transform t;
+	// a snapshot: surfaces just unmapped still have their last buffer
+	bool unmapped_too;
 	bool failed;
 };
 
-// box cut down to what can show on this output, false when nothing can
+static void mark(struct flame_element *element, const struct collect *collect) {
+	element->alpha = collect->t.alpha;
+	element->effected = !identity(&collect->t);
+}
+
+// box cut down to what can show on this output, false when nothing can.
+// box and clip are already transformed
 static bool clip_box(const struct collect *collect, struct wlr_box box,
 		const struct wlr_box *clip, struct wlr_box *out) {
 	if (!wlr_box_intersection(out, &box, &collect->area)) {
@@ -80,14 +111,17 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	if (!texture || collect->failed) {
 		return;
 	}
-	struct wlr_box box = {
+	struct wlr_box box = apply(&collect->t, (struct wlr_box){
 		.x = collect->x + sx,
 		.y = collect->y + sy,
 		.width = surface->current.width,
 		.height = surface->current.height,
-	};
+	});
+	struct wlr_box node_clip = collect->clip ? apply(&collect->t, *collect->clip)
+		: (struct wlr_box){0};
 	struct wlr_box clip;
-	if (wlr_box_empty(&box) || !clip_box(collect, box, collect->clip, &clip)) {
+	if (wlr_box_empty(&box) || !clip_box(collect, box, collect->clip ? &node_clip : NULL,
+			&clip)) {
 		return;
 	}
 
@@ -105,6 +139,7 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	wlr_surface_get_buffer_source_box(surface, &element->src);
 	element->transform = surface->current.transform;
 	element->buffer = surface->buffer ? &surface->buffer->base : NULL;
+	mark(element, collect);
 }
 
 static void collect_node(struct collect *collect, struct flame_node *node, int x, int y) {
@@ -117,14 +152,32 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 	switch (node->type) {
 	case FLAME_NODE_TREE:;
 		struct flame_tree *tree = scene_tree_from_node(node);
+		struct transform outer = collect->t;
+		if (tree->has_effect) {
+			// p -> origin + (p - origin) * scale + d, then whatever's above
+			const struct flame_effect *e = &tree->effect;
+			double ox = x + e->origin_x, oy = y + e->origin_y;
+			double cx = ox * (1 - e->scale_x) + e->dx, cy = oy * (1 - e->scale_y) + e->dy;
+			collect->t.bx = outer.ax * cx + outer.bx;
+			collect->t.by = outer.ay * cy + outer.by;
+			collect->t.ax = outer.ax * e->scale_x;
+			collect->t.ay = outer.ay * e->scale_y;
+			collect->t.alpha = outer.alpha * e->opacity;
+			if (collect->t.alpha <= 0.0f) {
+				collect->t = outer;
+				break; // all faded out, nothing to draw
+			}
+		}
 		struct flame_node *child;
 		wl_list_for_each(child, &tree->children, link) {
 			collect_node(collect, child, x, y);
 		}
+		collect->t = outer;
 		break;
 	case FLAME_NODE_RECT:;
 		struct flame_rect *rect = wl_container_of(node, rect, node);
-		struct wlr_box box = {x, y, rect->width, rect->height};
+		struct wlr_box box = apply(&collect->t, (struct wlr_box){x, y, rect->width,
+			rect->height});
 		struct wlr_box clip;
 		// premultiplied, so a clear rect is all zero
 		if (rect->color[3] <= 0 || wlr_box_empty(&box)
@@ -141,10 +194,12 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		element->box = box;
 		element->clip = clip;
 		memcpy(element->color, rect->color, sizeof(element->color));
+		mark(element, collect);
 		break;
 	case FLAME_NODE_SURFACE:;
 		struct flame_surface_node *surface_node = wl_container_of(node, surface_node, node);
-		if (!surface_node->surface || !surface_node->surface->mapped) {
+		if (!surface_node->surface
+				|| (!surface_node->surface->mapped && !collect->unmapped_too)) {
 			break;
 		}
 		struct wlr_box node_clip = surface_node->clip;
@@ -159,7 +214,8 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		break;
 	case FLAME_NODE_BUFFER:;
 		struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
-		struct wlr_box buffer_box = {x, y, buffer->width, buffer->height};
+		struct wlr_box buffer_box = apply(&collect->t, (struct wlr_box){x, y, buffer->width,
+			buffer->height});
 		if (!buffer->texture || wlr_box_empty(&buffer_box)) {
 			break;
 		}
@@ -171,6 +227,7 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		if (collect->list->len > 0) {
 			struct flame_element *pushed = &collect->list->data[collect->list->len - 1];
 			if (pushed->id == buffer) {
+				mark(pushed, collect);
 				pushed->opaque_texture = buffer->opaque;
 				pushed->buffer_node = buffer;
 				pushed->wait_timeline = buffer->wait_timeline;
@@ -186,10 +243,36 @@ bool elements_collect(struct flame_element_list *list, struct flame_scene *scene
 	struct collect collect = {
 		.list = list,
 		.area = area,
+		.t = {1, 0, 1, 0, 1},
 	};
 	collect_node(&collect, &scene->root.node, 0, 0);
 	if (collect.failed) {
 		wlr_log(WLR_ERROR, "out of memory building a frame");
+	}
+	return !collect.failed;
+}
+
+bool elements_collect_node(struct flame_element_list *list, struct flame_node *node,
+		struct wlr_box area) {
+	struct collect collect = {
+		.list = list,
+		.area = area,
+		.t = {1, 0, 1, 0, 1},
+		.unmapped_too = true,
+	};
+	// its own effect left out too: the snapshot is how it looks plain
+	bool had = false;
+	struct flame_tree *tree = node->type == FLAME_NODE_TREE ? scene_tree_from_node(node) : NULL;
+	if (tree) {
+		had = tree->has_effect;
+		tree->has_effect = false;
+	}
+	bool enabled = node->enabled;
+	node->enabled = true;
+	collect_node(&collect, node, 0, 0);
+	node->enabled = enabled;
+	if (tree) {
+		tree->has_effect = had;
 	}
 	return !collect.failed;
 }
@@ -201,6 +284,7 @@ bool elements_push_surface(struct flame_element_list *list, struct wlr_surface *
 		.area = area,
 		.x = x,
 		.y = y,
+		.t = {1, 0, 1, 0, 1},
 	};
 	wlr_surface_for_each_surface(surface, collect_surface, &collect);
 	return !collect.failed;
@@ -238,7 +322,10 @@ void elements_occlude(struct flame_element_list *list) {
 			clip.width, clip.height);
 		pixman_region32_subtract(&element->visible, &element->visible, &above);
 
-		if (element->type == FLAME_ELEMENT_RECT) {
+		if (element->effected) {
+			// faded or scaled: see through, and its opaque region doesn't fit
+			// the box anymore
+		} else if (element->type == FLAME_ELEMENT_RECT) {
 			if (element->color[3] >= 1.0f) {
 				pixman_region32_union_rect(&element->opaque, &element->opaque, clip.x,
 					clip.y, clip.width, clip.height);

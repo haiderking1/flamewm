@@ -415,13 +415,15 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	target_box_to_buffer(target, &dst);
 
 	if (element->type == FLAME_ELEMENT_RECT) {
+		// premultiplied: fading scales every channel
+		float alpha = element->alpha;
 		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
 			.box = dst,
 			.color = {
-				.r = element->color[0],
-				.g = element->color[1],
-				.b = element->color[2],
-				.a = element->color[3],
+				.r = element->color[0] * alpha,
+				.g = element->color[1] * alpha,
+				.b = element->color[2] * alpha,
+				.a = element->color[3] * alpha,
 			},
 			.clip = &region,
 		});
@@ -435,7 +437,7 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	pixman_region32_copy(&translucent, &element->opaque);
 	target_region_to_buffer(target, &translucent, false);
 	pixman_region32_subtract(&translucent, &region, &translucent);
-	bool blend = pixman_region32_not_empty(&translucent);
+	bool blend = pixman_region32_not_empty(&translucent) || element->alpha < 1.0f;
 	pixman_region32_fini(&translucent);
 
 	// textures of ours (the pointer) have nothing to wait for, buffer nodes
@@ -454,6 +456,7 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 		.dst_box = dst,
 		.transform = transform,
 		.clip = &region,
+		.alpha = element->alpha < 1.0f ? &element->alpha : NULL,
 		.blend_mode = blend ? WLR_RENDER_BLEND_MODE_PREMULTIPLIED : WLR_RENDER_BLEND_MODE_NONE,
 		.wait_timeline = wait_timeline,
 		.wait_point = wait_point,
