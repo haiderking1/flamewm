@@ -69,3 +69,7 @@ mod is super.
 
 single output, bspwm tiling only, xdg-shell only. no layer-shell (so no waybar yet),
 no xwayland, no floating, no fullscreen.
+
+## license
+
+MIT, see [LICENSE](LICENSE).
