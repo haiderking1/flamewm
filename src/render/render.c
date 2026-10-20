@@ -1,9 +1,11 @@
 #include "render/render.h"
 
+#include <wlr/backend.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
+#include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
@@ -42,6 +44,20 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 		if (dmabuf) {
 			wlr_scene_set_linux_dmabuf_v1(render->scene, dmabuf);
 		}
+	}
+
+	// explicit sync: clients say when the gpu is done with a buffer instead of
+	// us putting it on screen half drawn. nvidia has no implicit sync, so
+	// without this a frame can show up before it's rendered (its background
+	// color flashing through), the scene waits on these timelines for us
+	int drm_fd = wlr_renderer_get_drm_fd(render->renderer);
+	if (render->renderer->features.timeline && server->backend.wlr->features.timeline
+			&& drm_fd >= 0
+			&& wlr_linux_drm_syncobj_manager_v1_create(server->display, 1, drm_fd)) {
+		wlr_log(WLR_INFO, "explicit sync (linux-drm-syncobj-v1) enabled");
+	} else {
+		wlr_log(WLR_INFO, "explicit sync not available (renderer timeline=%d backend timeline=%d)",
+			render->renderer->features.timeline, server->backend.wlr->features.timeline);
 	}
 
 	for (int i = 0; i < FLAME_LAYER_COUNT; i++) {
