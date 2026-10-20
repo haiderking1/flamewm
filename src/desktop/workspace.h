@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <wayland-server-core.h>
 
-#define FLAME_WORKSPACE_COUNT 9
+#define FLAME_WORKSPACE_COUNT 10
 
 struct flame_view;
 struct tree_node;
