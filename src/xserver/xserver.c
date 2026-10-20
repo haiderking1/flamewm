@@ -673,6 +673,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->xi_selects);
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
+	xserver->last_input = xserver->monitors_time;
 	if (!xs_atoms_init(&xserver->atoms)) {
 		return false;
 	}
@@ -877,6 +878,10 @@ void xserver_set_monitors(struct flame_xserver *xserver, const struct xs_monitor
 		xs_window_configure(xserver, root, 4 | 8, 0, 0, width, height, 0, 0, 0);
 	}
 	xs_randr_changed(xserver);
+}
+
+void xserver_activity(struct flame_xserver *xserver) {
+	xserver->last_input = xs_now(xserver);
 }
 
 uint32_t xserver_atom(struct flame_xserver *xserver, const char *name) {

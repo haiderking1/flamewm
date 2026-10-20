@@ -354,6 +354,7 @@ bool xbridge_menu_holds_pointer(struct flame_xbridge *xbridge, struct wlr_surfac
 
 void xbridge_pointer_input(struct flame_xbridge *xbridge, bool button) {
 	xbridge->clicked = button;
+	xserver_activity(&xbridge->xserver);
 }
 
 void xbridge_pointer_pressed(struct flame_xbridge *xbridge, struct wlr_surface *surface) {

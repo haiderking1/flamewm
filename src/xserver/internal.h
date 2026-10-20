@@ -85,6 +85,13 @@ enum {
 #define XS_XKB_FIRST_ERROR 160
 // more ids when a client ran out, see ids.c
 #define XS_XCMISC_OPCODE 141
+// the monitors the old way, idle time, screen power, made up input: see
+// xinerama.c, screensaver.c, xtest.c
+#define XS_XINERAMA_OPCODE 142
+#define XS_SCREENSAVER_OPCODE 143
+#define XS_SCREENSAVER_FIRST_EVENT 91
+#define XS_DPMS_OPCODE 144
+#define XS_XTEST_OPCODE 145
 
 // ---- talking back (xserver.c) ----
 
@@ -217,6 +224,8 @@ void xs_render_finish(struct flame_xserver *xserver);
 // ---- RandR (randr.c) ----
 
 void xs_randr_request(struct xs_client *client, const struct xin *request);
+// flame's outputs, or one standing for the root while there are none
+const struct xs_monitor *xs_monitors(struct flame_xserver *xserver, size_t *len);
 void xs_randr_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 void xs_randr_window_gone(struct flame_xserver *xserver, uint32_t window);
 // the monitors changed: listeners hear
@@ -324,6 +333,13 @@ void xs_xcmisc_request(struct xs_client *client, const struct xin *request);
 // RENDER's pictures and glyph sets
 bool xs_render_id_in_use(struct flame_xserver *xserver, uint32_t id);
 size_t xs_render_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
+
+// ---- the small ones (xinerama.c, screensaver.c, xtest.c) ----
+
+void xs_xinerama_request(struct xs_client *client, const struct xin *request);
+void xs_screensaver_request(struct xs_client *client, const struct xin *request);
+void xs_dpms_request(struct xs_client *client, const struct xin *request);
+void xs_xtest_request(struct xs_client *client, const struct xin *request);
 
 // ---- MIT-SHM (shm.c) ----
 

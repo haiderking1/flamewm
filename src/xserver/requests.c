@@ -632,6 +632,10 @@ static const struct extension {
 	{"XInputExtension", XS_XI_OPCODE, XS_XI_FIRST_EVENT, XS_XI_FIRST_ERROR},
 	{"XKEYBOARD", XS_XKB_OPCODE, XS_XKB_FIRST_EVENT, XS_XKB_FIRST_ERROR},
 	{"XC-MISC", XS_XCMISC_OPCODE, 0, 0},
+	{"XINERAMA", XS_XINERAMA_OPCODE, 0, 0},
+	{"MIT-SCREEN-SAVER", XS_SCREENSAVER_OPCODE, XS_SCREENSAVER_FIRST_EVENT, 0},
+	{"DPMS", XS_DPMS_OPCODE, 0, 0},
+	{"XTEST", XS_XTEST_OPCODE, 0, 0},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -987,6 +991,18 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_XCMISC_OPCODE:
 		xs_xcmisc_request(client, in);
+		break;
+	case XS_XINERAMA_OPCODE:
+		xs_xinerama_request(client, in);
+		break;
+	case XS_SCREENSAVER_OPCODE:
+		xs_screensaver_request(client, in);
+		break;
+	case XS_DPMS_OPCODE:
+		xs_dpms_request(client, in);
+		break;
+	case XS_XTEST_OPCODE:
+		xs_xtest_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs

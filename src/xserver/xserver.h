@@ -360,6 +360,7 @@ struct flame_xserver {
 	uint32_t pointer_window; // the deepest window it's in, 0 for none
 	uint32_t grab; // the window a held button grabbed, 0 for none
 	uint16_t state; // modifiers and buttons, as the last input had them
+	uint32_t last_input; // ms, any input flame got, X windows' or not
 	uint64_t slots[4]; // client id ranges in use
 	uint32_t timestamp; // ms, for events that carry one
 };
@@ -462,6 +463,9 @@ void xserver_set_keymap_names(struct flame_xserver *xserver, const char *rules,
 	const char *model, const char *layout, const char *variant, const char *options);
 // rate per second, delay in ms, what XKB tells apps
 void xserver_set_repeat(struct flame_xserver *xserver, int rate, int delay);
+// someone's at the keyboard or the mouse, whatever they're using: the idle
+// time X apps ask about starts over
+void xserver_activity(struct flame_xserver *xserver);
 // a held key repeats, flame keeps time
 void xserver_key_repeat(struct flame_xserver *xserver, uint8_t keycode, uint16_t state,
 	uint32_t time);

@@ -52,6 +52,7 @@ static void handle_key(struct wl_listener *listener, void *data) {
 	struct wlr_keyboard_key_event *event = data;
 
 	bool handled = false;
+	xserver_activity(&keyboard->input->server->xbridge.xserver);
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		// libinput keycodes are evdev, xkb is offset by 8
 		handled = handle_press(keyboard, event->keycode + 8);
