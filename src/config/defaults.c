@@ -38,6 +38,8 @@ static const struct flame_keybind keybinds[] = {
 	WORKSPACE(XKB_KEY_7, 6),
 	WORKSPACE(XKB_KEY_8, 7),
 	WORKSPACE(XKB_KEY_9, 8),
+	// 0 sits after 9 on the keyboard, so it's the 10th
+	WORKSPACE(XKB_KEY_0, 9),
 };
 
 const struct flame_config flame_default_config = {
