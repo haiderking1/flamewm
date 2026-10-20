@@ -21,10 +21,20 @@ struct flame_desktop {
 	struct flame_workspace *active;
 	struct flame_view *focused;
 	struct flame_transaction transaction;
+
+	// something a bar would show changed: workspaces, windows, focus, titles.
+	// fires at most once per loop iteration, after the dust settles
+	struct wl_event_source *changed_idle;
+	struct {
+		struct wl_signal changed;
+	} events;
 };
 
 bool desktop_init(struct flame_desktop *desktop, struct flame_server *server);
 void desktop_finish(struct flame_desktop *desktop);
+
+// let whoever listens on events.changed know, soon
+void desktop_notify(struct flame_desktop *desktop);
 
 // lay out the visible workspace again, call after anything moves
 void desktop_arrange(struct flame_desktop *desktop);

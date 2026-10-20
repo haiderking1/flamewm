@@ -12,6 +12,7 @@ bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	struct wlr_scene_tree *fullscreen = server->render.layers[FLAME_LAYER_FULLSCREEN];
 
 	desktop->server = server;
+	wl_signal_init(&desktop->events.changed);
 	desktop->staging = wlr_scene_tree_create(tiled);
 	if (!desktop->staging) {
 		wlr_log(WLR_ERROR, "failed to create staging tree");
@@ -29,7 +30,26 @@ bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 }
 
 void desktop_finish(struct flame_desktop *desktop) {
+	if (desktop->changed_idle) {
+		wl_event_source_remove(desktop->changed_idle);
+		desktop->changed_idle = NULL;
+	}
 	transaction_finish(&desktop->transaction);
+}
+
+static void handle_changed_idle(void *data) {
+	struct flame_desktop *desktop = data;
+	desktop->changed_idle = NULL;
+	wl_signal_emit_mutable(&desktop->events.changed, desktop);
+}
+
+void desktop_notify(struct flame_desktop *desktop) {
+	// a close can unmap, refocus and rearrange in one go, listeners only
+	// need to hear about where it ended up
+	if (!desktop->changed_idle) {
+		desktop->changed_idle = wl_event_loop_add_idle(desktop->server->loop,
+			handle_changed_idle, desktop);
+	}
 }
 
 void desktop_arrange(struct flame_desktop *desktop) {
@@ -132,6 +152,7 @@ void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	}
 	// stays hidden until the transaction places it next to its resized siblings
 	desktop_arrange(desktop);
+	desktop_notify(desktop);
 }
 
 void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) {
@@ -157,6 +178,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 		focus_view(desktop, focus_after_close(desktop, closed));
 	}
 	desktop_arrange(desktop);
+	desktop_notify(desktop);
 }
 
 void desktop_swap_views(struct flame_desktop *desktop, struct flame_view *a,
@@ -189,6 +211,7 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 
 	desktop_arrange(desktop);
 	focus_view(desktop, focus_fallback(target));
+	desktop_notify(desktop);
 }
 
 void desktop_move_view_to_workspace(struct flame_desktop *desktop,
@@ -227,6 +250,7 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	}
 	// target gets laid out when it becomes visible
 	desktop_arrange(desktop);
+	desktop_notify(desktop);
 }
 
 struct flame_view *desktop_view_at(struct flame_desktop *desktop, double lx, double ly,
