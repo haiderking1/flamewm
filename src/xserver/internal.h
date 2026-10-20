@@ -92,6 +92,9 @@ enum {
 #define XS_SCREENSAVER_FIRST_EVENT 91
 #define XS_DPMS_OPCODE 144
 #define XS_XTEST_OPCODE 145
+// windows that aren't rectangles, see shape.c
+#define XS_SHAPE_OPCODE 146
+#define XS_SHAPE_FIRST_EVENT 92
 
 // ---- talking back (xserver.c) ----
 
@@ -340,6 +343,14 @@ void xs_xinerama_request(struct xs_client *client, const struct xin *request);
 void xs_screensaver_request(struct xs_client *client, const struct xin *request);
 void xs_dpms_request(struct xs_client *client, const struct xin *request);
 void xs_xtest_request(struct xs_client *client, const struct xin *request);
+
+// ---- SHAPE (shape.c) ----
+
+void xs_shape_request(struct xs_client *client, const struct xin *request);
+// a point, window coords, inside its bounding and input shapes
+bool xs_shape_contains(const struct xs_window *window, int x, int y);
+void xs_shape_window_gone(struct flame_xserver *xserver, struct xs_window *window);
+void xs_shape_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 
 // ---- MIT-SHM (shm.c) ----
 
