@@ -179,6 +179,11 @@ struct xpresent {
 	// gpu work, drawing it now would make our whole frame wait for it
 	struct wlr_drm_syncobj_timeline_waiter acquire_waiter;
 	bool acquiring;
+	// on screen, the complete held back until held_until: when it made it
+	// (done_when) and on which vblank (done_msc) go out unchanged then
+	bool held;
+	int64_t held_until, done_when;
+	uint64_t done_msc;
 };
 
 static void stop_acquiring(struct xpresent *xp) {
@@ -322,6 +327,33 @@ static void complete(struct xpresent *xp, uint8_t mode, int64_t when, uint64_t m
 	maybe_free(xp);
 }
 
+// a held complete goes out: the app hears its frame made it, when and on which
+// vblank, and starts the next one. woke: it was due (the app waits on it and
+// its draw time is measured from now), not sent early because the app went on
+static void deliver(struct xpresent *xp, bool woke) {
+	struct flame_xwindow *window = xp->window;
+	xp->held = false;
+	if (woke) {
+		window->woken = now_ns();
+		window->drawing = true;
+	}
+	complete(xp, MODE_COPY, xp->done_when, xp->done_msc);
+}
+
+// the app presented again without waiting for its complete: no point holding
+// what's left, it goes out now
+static void deliver_held(struct flame_xwindow *window) {
+	struct xpresent *xp, *tmp;
+	if (window->shown && window->shown->held) {
+		deliver(window->shown, false);
+	}
+	wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+		if (xp->held) {
+			deliver(xp, false);
+		}
+	}
+}
+
 // the app can have its buffer back: its release point goes off (explicit
 // sync), its idle fence and IdleNotify (implicit)
 static void released(struct xpresent *xp) {
@@ -413,12 +445,18 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 	struct flame_xwindow *window;
 	wl_list_for_each(window, &xshell->windows, link) {
 		struct xpresent *shown = window->shown;
+		if (shown && shown->held) {
+			next = !next || shown->held_until < next ? shown->held_until : next;
+		}
 		if (shown && !shown->completed && !shown->drawn_id && shown->target - now_msc < MSC_FAR) {
 			int64_t at = msc_time(xshell, shown->target + 1);
 			next = !next || at < next ? at : next;
 		}
 		struct xpresent *xp;
 		wl_list_for_each(xp, &window->retiring, link) {
+			if (xp->held) {
+				next = !next || xp->held_until < next ? xp->held_until : next;
+			}
 			if (xp->skipped && !xp->completed && xp->target - now_msc < MSC_FAR) {
 				int64_t at = msc_time(xshell, xp->target);
 				next = !next || at < next ? at : next;
@@ -450,6 +488,15 @@ static void process_msc(struct flame_xshell *xshell, int64_t now) {
 	uint64_t now_msc = msc_at(xshell, now);
 	struct flame_xwindow *window;
 	wl_list_for_each(window, &xshell->windows, link) {
+		struct xpresent *xp, *tmp;
+		if (window->shown && window->shown->held && window->shown->held_until <= now) {
+			deliver(window->shown, true);
+		}
+		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+			if (xp->held && xp->held_until <= now) {
+				deliver(xp, true);
+			}
+		}
 		while (!wl_list_empty(&window->queue)) {
 			struct xpresent *first = wl_container_of(window->queue.next, first, link);
 			if (first->acquiring || first->target > now_msc + 1) {
@@ -465,7 +512,6 @@ static void process_msc(struct flame_xshell *xshell, int64_t now) {
 		if (shown && !shown->completed && !shown->drawn_id && shown->target < now_msc) {
 			complete(shown, MODE_COPY, msc_time(xshell, now_msc), now_msc);
 		}
-		struct xpresent *xp, *tmp;
 		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
 			if (xp->skipped && !xp->completed && xp->target <= now_msc) {
 				complete(xp, MODE_SKIP, msc_time(xshell, now_msc), now_msc);
@@ -532,6 +578,19 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		// mapped in the same breath, the window shows up first
 		xshell_windows_changed(xshell);
 		window = window_of(xshell, present->window);
+	}
+	if (window) {
+		// woken by its complete: that's its draw time. an app idle for a while
+		// (over 50ms) isn't drawing frame after frame, that's no sample
+		if (window->drawing) {
+			int64_t took = now_ns() - window->woken;
+			if (took < 50000000LL) {
+				window->draw_time = took > window->draw_time
+					? took : window->draw_time + (took - window->draw_time) / 8;
+			}
+			window->drawing = false;
+		}
+		deliver_held(window);
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);
@@ -614,6 +673,19 @@ struct xshell_frame {
 	struct wl_listener destroy;
 };
 
+#define JIT_MARGIN_NS 1000000LL
+
+// when to tell an app its frame made it so its next present lands right
+// before the render that can show it: its draw time and room for that to
+// vary before render_at. 0 for right away: draw time unknown, or no render
+static int64_t app_wake(const struct flame_xwindow *window, int64_t render_at) {
+	if (!render_at || window->draw_time <= 0) {
+		return 0;
+	}
+	int64_t margin = window->draw_time / 2 > JIT_MARGIN_NS ? window->draw_time / 2 : JIT_MARGIN_NS;
+	return render_at - window->draw_time - margin;
+}
+
 static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 		struct flame_frame *frame, const struct flame_frame_presented *event) {
 	if (xp->completed || !xp->drawn_id || xp->frame != frame || xp->drawn_id > event->draw_id) {
@@ -624,7 +696,19 @@ static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 	}
 	// buffer handed over -> on screen, next to the wayland one in frame timing
 	timing_latency(&frame->timing, true, event->when - xp->requested);
-	complete(xp, MODE_COPY, event->when, msc_of_flip(xshell, event->when));
+	xp->done_when = event->when;
+	xp->done_msc = msc_of_flip(xshell, event->when);
+	// FIFO apps start their next frame when they hear this one made it: told
+	// at the flip, that frame waits a whole refresh for flame's next render.
+	// told just in time, it makes that render, like wayland's frame callbacks
+	int64_t now = now_ns();
+	int64_t wake = app_wake(xp->window, schedule_render_at(&frame->schedule, now));
+	if (wake > now) {
+		xp->held = true;
+		xp->held_until = wake;
+		return; // handle_presented arms the timer for it
+	}
+	deliver(xp, true);
 }
 
 static void handle_presented(struct wl_listener *listener, void *data) {
@@ -654,8 +738,15 @@ static void handle_frame_destroy(struct wl_listener *listener, void *data) {
 		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
 			if (xp->frame == xframe->frame) {
 				xp->frame = NULL;
-				complete(xp, MODE_SKIP, now_ns(), msc_at(xframe->xshell, now_ns()));
+				if (xp->held) {
+					deliver(xp, false); // it made it, just not told yet
+				} else {
+					complete(xp, MODE_SKIP, now_ns(), msc_at(xframe->xshell, now_ns()));
+				}
 			}
+		}
+		if (window->shown && window->shown->held && window->shown->frame == xframe->frame) {
+			deliver(window->shown, false);
 		}
 		if (window->shown && window->shown->frame == xframe->frame) {
 			window->shown->frame = NULL;

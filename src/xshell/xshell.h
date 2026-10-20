@@ -61,6 +61,12 @@ struct flame_xwindow {
 	struct xpresent *shown; // its picture right now
 	struct wl_list queue; // xpresent.link, waiting for their msc, soonest first
 	struct wl_list retiring; // xpresent.link, replaced, not done yet
+	// how long the app takes from hearing a frame made it (CompleteNotify) to
+	// its next present: quick to grow, slow to shrink. its completes are held
+	// back to just in time for the render that can show the next one
+	int64_t draw_time;
+	int64_t woken; // when the last complete went out, while drawing
+	bool drawing;
 };
 
 bool xshell_init(struct flame_xshell *xshell, struct flame_server *server,
