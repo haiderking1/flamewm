@@ -71,6 +71,11 @@ mod is super.
 | `super+shift+q` | quit |
 | `ctrl+alt+f1..f12` | switch vt (tty only) |
 
+focus follows the mouse like hyprland's `follow_mouse = 1`: moving onto a
+window focuses it, a window that moves under a still cursor doesn't. holding
+a mouse button, an open launcher or a fullscreen window keep focus where it is.
+`focus_follows_mouse` in `config/defaults.c` turns it off.
+
 ## status
 
 single output, bspwm tiling only. xdg-shell and layer-shell (waybar, rofi,

@@ -1,6 +1,7 @@
 #ifndef FLAME_CONFIG_CONFIG_H
 #define FLAME_CONFIG_CONFIG_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,6 +23,9 @@ struct flame_config {
 	// hold this and left drag a window onto another to swap them, or right
 	// drag to resize it in place
 	uint32_t drag_modifier;
+
+	// the window under the mouse gets the keyboard as soon as you move onto it
+	bool focus_follows_mouse;
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;

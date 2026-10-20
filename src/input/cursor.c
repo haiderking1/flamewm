@@ -20,18 +20,64 @@ static uint32_t now_msec(void) {
 	return (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
 }
 
-static void process_motion(struct flame_cursor *cursor, uint32_t time_msec) {
+// the mouse moved onto something, same rules as hyprland's follow_mouse = 1.
+// view is the window under it, else surface may be a layer (bar, launcher).
+// the background leaves focus where it is
+static void follow_mouse(struct flame_server *server, struct flame_view *view,
+		struct wlr_surface *surface) {
+	struct flame_desktop *desktop = &server->desktop;
+	if (!server->config->focus_follows_mouse) {
+		return;
+	}
+	// selecting text and dragging out of the window keeps typing where it was
+	if (server->input.seat->pointer_state.button_count > 0) {
+		return;
+	}
+	if (!view) {
+		// a layer that wants the keyboard on demand takes it on hover too,
+		// bars that never want it are left alone
+		if (surface) {
+			layers_offer_keyboard(&server->layers, surface);
+		}
+		return;
+	}
+	// an open launcher keeps the keyboard
+	if (view->workspace != desktop->active || layers_keyboard_locked(&server->layers)) {
+		return;
+	}
+	// already typing here. unless a layer took the keyboard on hover, then
+	// coming back onto the window takes it back
+	if (view == desktop->focused && !server->layers.focused) {
+		return;
+	}
+	// nothing behind a fullscreen window gets focus by peeking out
+	if (desktop->active->fullscreen && desktop->active->fullscreen != view) {
+		return;
+	}
+	focus_view(desktop, view);
+}
+
+// moved: the mouse itself moved. a refresh (things moved under a still
+// cursor) updates who gets pointer events but never moves keyboard focus,
+// or a window opening next to the cursor would lose it right away
+static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool moved) {
 	struct flame_server *server = cursor->server;
 	struct wlr_seat *seat = server->input.seat;
 
 	if (drag_active(&server->input.drag)) {
-		drag_motion(&server->input.drag);
+		if (moved) {
+			drag_motion(&server->input.drag);
+		}
 		return;
 	}
 
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
-	desktop_view_at(&server->desktop, cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
+	struct flame_view *view = desktop_view_at(&server->desktop,
+		cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
+	if (moved) {
+		follow_mouse(server, view, surface);
+	}
 
 	if (!surface) {
 		wlr_seat_pointer_clear_focus(seat);
@@ -45,14 +91,14 @@ static void handle_motion(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
 	struct wlr_pointer_motion_event *event = data;
 	wlr_cursor_move(cursor->wlr, &event->pointer->base, event->delta_x, event->delta_y);
-	process_motion(cursor, event->time_msec);
+	process_motion(cursor, event->time_msec, true);
 }
 
 static void handle_motion_absolute(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
 	wlr_cursor_warp_absolute(cursor->wlr, &event->pointer->base, event->x, event->y);
-	process_motion(cursor, event->time_msec);
+	process_motion(cursor, event->time_msec, true);
 }
 
 static void handle_button(struct wl_listener *listener, void *data) {
@@ -73,7 +119,7 @@ static void handle_button(struct wl_listener *listener, void *data) {
 		if (view) {
 			focus_view(&server->desktop, view);
 		} else if (surface) {
-			layers_click(&server->layers, surface);
+			layers_offer_keyboard(&server->layers, surface);
 		}
 	}
 	wlr_seat_pointer_notify_button(server->input.seat, event->time_msec,
@@ -186,5 +232,5 @@ void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *
 }
 
 void cursor_refresh(struct flame_cursor *cursor) {
-	process_motion(cursor, now_msec());
+	process_motion(cursor, now_msec(), false);
 }
