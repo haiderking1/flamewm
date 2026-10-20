@@ -210,6 +210,10 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 
 	desktop_arrange(desktop);
 	focus_view(desktop, focus_fallback(target));
+	// a different set of windows is under the still cursor now. waiting for a
+	// transaction doesn't work, there's none when nothing needs a new size,
+	// and the scroll would keep going to a window on the old workspace
+	cursor_refresh(&desktop->server->input.cursor);
 	desktop_notify(desktop);
 }
 
@@ -249,6 +253,8 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	}
 	// target gets laid out when it becomes visible
 	desktop_arrange(desktop);
+	// the last window leaving needs no transaction, the pointer moves on now
+	cursor_refresh(&desktop->server->input.cursor);
 	desktop_notify(desktop);
 }
 
