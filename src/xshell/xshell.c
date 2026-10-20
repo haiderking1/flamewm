@@ -1168,6 +1168,19 @@ static void floats_update(struct flame_xshell *xshell) {
 
 #define PARKED (-32000)
 
+// a tiled window X has above x
+static bool tiled_above(struct flame_xshell *xshell, struct xs_window *x) {
+	struct xs_window *above;
+	for (struct wl_list *at = x->link.next; at != &x->parent->children; at = at->next) {
+		above = wl_container_of(at, above, link);
+		struct flame_xwindow *window = window_of(xshell, above->id);
+		if (window && !window->floating) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // X sees the screen the way flame shows it, for apps that look for windows
 // by X's tree (drag and drop targets, QueryPointer): tiled windows on other
 // workspaces parked out of sight, the focused one on top of the tiled ones,
@@ -1191,16 +1204,32 @@ static void x_stack_update(struct flame_xshell *xshell) {
 				x->height);
 		}
 	}
+	// only what's out of place moves: this runs on every change, and moving
+	// windows is a change
 	if (is_xview(desktop->focused)) {
 		struct xs_window *x = x_of(from_view(desktop->focused));
-		if (x) {
+		if (x && tiled_above(xshell, x)) {
 			xserver_raise_window(xserver, x);
 		}
 	}
-	wl_list_for_each_reverse(window, &xshell->windows, link) {
-		struct xs_window *x = window->floating ? x_of(window) : NULL;
-		if (x) {
-			xserver_raise_window(xserver, x);
+	// floats above every tiled window, in the order they have among
+	// themselves. bottom to top, each one raised ends up above the last
+	struct xs_window *root = xserver->root;
+	struct xs_window *floats[256];
+	size_t len = 0;
+	struct xs_window *x;
+	wl_list_for_each(x, &root->children, link) {
+		window = window_of(xshell, x->id);
+		if (window && window->floating && len < 256) {
+			floats[len++] = x;
+		}
+	}
+	for (size_t i = 0; i < len; i++) {
+		if (tiled_above(xshell, floats[i])) {
+			for (size_t j = i; j < len; j++) {
+				xserver_raise_window(xserver, floats[j]);
+			}
+			break;
 		}
 	}
 }
