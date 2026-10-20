@@ -79,6 +79,10 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	pixman_region32_init(&frame->pending_buffer);
 	elements_init(&frame->prev);
 	elements_init(&frame->cur);
+	timing_init(&frame->timing, output, render->frame_timing);
+	if (render->frame_timing) {
+		gpu_time_init(&frame->gpu, render->renderer);
+	}
 
 	// same condition as clients' explicit sync: both ends have to speak it
 	int drm_fd = wlr_backend_get_drm_fd(output->backend);
@@ -111,6 +115,8 @@ void frame_finish(struct flame_frame *frame) {
 		listener_disconnect(&frame->output_needs_frame);
 		listener_disconnect(&frame->output_commit);
 	}
+	timing_finish(&frame->timing);
+	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {
 		// nothing waits on it after this, let anything blocked on it go
 		wlr_drm_syncobj_timeline_signal(frame->in_timeline, UINT64_MAX);
@@ -259,12 +265,15 @@ static bool draw_and_commit(struct flame_frame *frame,
 	wlr_damage_ring_rotate_buffer(&frame->ring, buffer, &repaint);
 
 	frame->in_point++;
+	// everything this frame asks of the gpu, cursors included
+	gpu_time_begin(&frame->gpu);
 	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(frame->render->renderer,
 		buffer, &(struct wlr_buffer_pass_options){
 			.signal_timeline = frame->in_timeline,
 			.signal_point = frame->in_point,
 		});
 	if (!pass) {
+		gpu_time_end(&frame->gpu);
 		pixman_region32_fini(&repaint);
 		wlr_buffer_unlock(buffer);
 		goto out;
@@ -277,7 +286,9 @@ static bool draw_and_commit(struct flame_frame *frame,
 	wlr_output_add_software_cursors_to_render_pass(output, pass, &repaint);
 	pixman_region32_fini(&repaint);
 
-	if (!wlr_render_pass_submit(pass)) {
+	bool submitted = wlr_render_pass_submit(pass);
+	gpu_time_end(&frame->gpu);
+	if (!submitted) {
 		// whatever made it into the buffer can't be trusted
 		wlr_damage_ring_add_whole(&frame->ring);
 		wlr_buffer_unlock(buffer);
@@ -298,6 +309,7 @@ static bool draw_and_commit(struct flame_frame *frame,
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", output->name);
 	}
+	timing_committed(&frame->timing, ok);
 out:
 	wlr_output_state_finish(&state);
 	return ok;
@@ -309,6 +321,14 @@ void frame_render(struct flame_frame *frame, struct wlr_box logical,
 	struct flame_render *render = frame->render;
 	if (!output->enabled || wlr_box_empty(&logical)) {
 		return;
+	}
+	struct timespec start;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+	// earlier frames' gpu times, whatever finished by now
+	double gpu_ms;
+	if (gpu_time_collect(&frame->gpu, &gpu_ms) > 0) {
+		timing_gpu(&frame->timing, gpu_ms);
 	}
 
 	struct flame_render_target target;
@@ -347,11 +367,16 @@ void frame_render(struct flame_frame *frame, struct wlr_box logical,
 	// callbacks with no new pixels, screencopy. skipping it would mean the
 	// next frame comes from an idle callback right away instead of the next
 	// vblank, and that spins the event loop so hard timers and signals never run
+	bool drew = false;
 	if (pixman_region32_not_empty(&damage) || output->needs_frame) {
-		draw_and_commit(frame, &target, &damage);
+		drew = draw_and_commit(frame, &target, &damage);
 	}
 	pixman_region32_fini(&damage);
 
 	feedback_frame_done(&frame->cur, now);
 	swap_lists(frame);
+
+	struct timespec end;
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	timing_frame(&frame->timing, &start, &end, drew);
 }

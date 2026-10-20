@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd make pkgconf foot
 ```
 
 ## build
@@ -25,7 +25,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | wlroots 0.20 | `wlroots-0.20` | backend, renderer, scene graph, xdg-shell, seat, cursor. pinned to 0.20 (latest stable, 0.20.2), api breaks between minors |
 | wayland | `wayland-server` | the wayland server lib itself |
 | libxkbcommon | `xkbcommon` | keymaps + keysyms for keybinds |
-| pixman | `pixman-1` | region math: checking a client's opaque region before showing a resize |
+| pixman | `pixman-1` | region math: damage, occlusion, checking a client's opaque region before showing a resize |
+| libEGL (libglvnd) | `egl` | gpu timing: GL_TIME_ELAPSED queries in the renderer's context, GL functions are loaded through it so GLES itself isn't linked |
 
 `flamectl` and the ipc socket are plain libc (unix sockets), nothing extra.
 

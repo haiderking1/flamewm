@@ -10,6 +10,8 @@
 #include <wlr/util/box.h>
 
 #include "render/elements.h"
+#include "render/gpu_time.h"
+#include "render/timing.h"
 
 struct flame_render;
 struct wlr_output;
@@ -31,6 +33,9 @@ struct flame_frame {
 	// explicit sync: our drawing finished / KMS let go of a buffer
 	struct wlr_drm_syncobj_timeline *in_timeline, *out_timeline;
 	uint64_t in_point, out_point;
+
+	struct flame_frame_timing timing; // FLAME_FRAME_TIMING probes
+	struct flame_gpu_time gpu; // only measures while timing is on
 
 	struct wl_listener scene_changed;
 	struct wl_listener scene_damage;
