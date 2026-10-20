@@ -121,6 +121,7 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
+	drag_tree_changed(&desktop->server->input.drag);
 	if (!workspace_add_view(workspace, view)) {
 		return;
 	}
@@ -140,6 +141,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	}
 
 	drag_forget(&desktop->server->input.drag, view);
+	drag_tree_changed(&desktop->server->input.drag);
 	// a remap starts from whatever the client asks for next, not a stale claim
 	view->fullscreen_wanted = false;
 	workspace_remove_view(workspace, view);
@@ -161,6 +163,7 @@ void desktop_swap_views(struct flame_desktop *desktop, struct flame_view *a,
 	if (a == b || a->workspace != desktop->active || b->workspace != desktop->active) {
 		return;
 	}
+	drag_tree_changed(&desktop->server->input.drag);
 	workspace_swap_views(desktop->active, a, b);
 	desktop_arrange(desktop);
 }
@@ -199,6 +202,7 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	}
 
 	drag_forget(&desktop->server->input.drag, view);
+	drag_tree_changed(&desktop->server->input.drag);
 	transaction_flush(&desktop->transaction);
 
 	bool was_focused = desktop->focused == view;

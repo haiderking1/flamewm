@@ -15,6 +15,8 @@
 static void handle_frame(struct wl_listener *listener, void *data) {
 	struct flame_output *output = wl_container_of(listener, output, frame);
 
+	// a mouse resize lands right before the frame that shows it
+	drag_frame(&output->server->input.drag);
 	wlr_scene_output_commit(output->scene_output, NULL);
 
 	struct timespec now;

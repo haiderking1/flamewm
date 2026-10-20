@@ -67,6 +67,7 @@ mod is super.
 | `super+1..9` | go to workspace |
 | `super+shift+1..9` | send window to workspace |
 | `super` + left drag | drop a window on another to swap them |
+| `super` + right drag | resize in place, the edges nearest to where you grab follow the cursor |
 | `super+shift+q` | quit |
 | `ctrl+alt+f1..f12` | switch vt (tty only) |
 
