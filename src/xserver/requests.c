@@ -402,7 +402,7 @@ static void send_event(struct xs_client *client, const struct xin *in) {
 		if (window->owner) {
 			xs_event_send(window->owner, &event);
 		} else if (window->parent) {
-			xs_selection_window_event(xserver, window, &event);
+			xs_flame_window_event(xserver, window, &event);
 		}
 		return;
 	}
