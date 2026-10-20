@@ -406,6 +406,8 @@ void xserver_flame_window_destroy(struct flame_xserver *xserver, struct xs_windo
 void xserver_flame_window_show(struct flame_xserver *xserver, struct xs_window *window,
 	int x, int y, int width, int height);
 void xserver_flame_window_hide(struct flame_xserver *xserver, struct xs_window *window);
+// on top of its siblings, like a window manager raising it
+void xserver_raise_window(struct flame_xserver *xserver, struct xs_window *window);
 // on any window, as a client would set it. units in format sized units
 bool xserver_set_property(struct flame_xserver *xserver, struct xs_window *window,
 	uint32_t name, uint32_t type, uint8_t format, const void *data, uint32_t units);

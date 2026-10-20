@@ -35,6 +35,12 @@ void xserver_flame_window_show(struct flame_xserver *xserver, struct xs_window *
 	}
 }
 
+void xserver_raise_window(struct flame_xserver *xserver, struct xs_window *window) {
+	if (window->parent && window->link.next != &window->parent->children) {
+		xs_window_configure(xserver, window, 64, 0, 0, 0, 0, 0, 0, 0 /* Above */);
+	}
+}
+
 void xserver_flame_window_hide(struct flame_xserver *xserver, struct xs_window *window) {
 	if (window->mapped) {
 		xs_window_unmap(xserver, window);
