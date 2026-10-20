@@ -658,8 +658,10 @@ static int listen_on(const struct sockaddr_un *addr, socklen_t len) {
 
 bool xserver_start(struct flame_xserver *xserver) {
 	mkdir("/tmp/.X11-unix", 01777);
-	// :0 and the low numbers are for real X sessions
-	for (int display = 32; display < 128; display++) {
+	// the first free one, like xwayland: the lock files say who has which.
+	// apps take :10 and up for ssh forwarding (mpv won't share memory with
+	// those), so the low ones it is
+	for (int display = 0; display < 128; display++) {
 		snprintf(xserver->lock_path, sizeof(xserver->lock_path), "/tmp/.X%d-lock", display);
 		if (!take_lock(xserver->lock_path)) {
 			continue;
