@@ -17,6 +17,7 @@ enum {
 	XS_ERROR_DRAWABLE = 9,
 	XS_ERROR_ACCESS = 10,
 	XS_ERROR_ALLOC = 11,
+	XS_ERROR_GC = 13,
 	XS_ERROR_ID_CHOICE = 14,
 	XS_ERROR_NAME = 15,
 	XS_ERROR_LENGTH = 16,
@@ -62,6 +63,10 @@ enum {
 #define XS_SYNC_FIRST_ERROR 142
 #define XS_DRI3_OPCODE 134
 #define XS_PRESENT_OPCODE 135
+// apps drawing with the cpu share their images through it, see shm.c
+#define XS_SHM_OPCODE 136
+#define XS_SHM_FIRST_EVENT 70
+#define XS_SHM_FIRST_ERROR 145
 
 // ---- talking back (xserver.c) ----
 
@@ -135,6 +140,44 @@ void xs_focus_lost(struct flame_xserver *xserver, struct xs_window *window);
 
 // everything a client made goes when it does
 void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *client);
+
+// ---- drawing with the cpu (draw.c) ----
+
+// GCs, pixmaps and the core drawing requests. false: not one of those
+bool xs_draw_request(struct xs_client *client, uint8_t opcode, const struct xin *request);
+// bytes a row of width pixels takes at depth, rows padded to 32 bits
+size_t xs_image_stride(int depth, int width);
+// a pixman image for depth (1, 8, 24, 32), zeroed, or over bits with stride
+pixman_image_t *xs_image_create(int depth, int width, int height, void *bits, size_t stride);
+struct xs_pixmap *xs_pixmap_find(struct flame_xserver *xserver, uint32_t id);
+// the top-level a window is in, NULL for the root
+struct xs_window *xs_window_top(struct xs_window *window);
+bool xs_draw_create_pixmap(struct xs_client *client, uint32_t id, int depth, int width,
+	int height, void *bits, size_t stride, struct xs_shm_segment *shm, uint8_t major,
+	uint16_t minor);
+// see PutImage: format 0 XYBitmap, 1 XYPixmap, 2 ZPixmap
+void xs_draw_put_image(struct xs_client *client, uint32_t drawable, uint32_t gc,
+	uint8_t format, uint8_t depth, int width, int height, int left_pad, int src_x,
+	int src_y, int w, int h, int dst_x, int dst_y, const uint8_t *data, size_t stride,
+	size_t len, uint8_t major, uint16_t minor);
+// ZPixmap rows of a drawable's pixels. false: the error went out
+bool xs_draw_get_image(struct xs_client *client, uint32_t drawable, int x, int y, int w, int h,
+	uint8_t *out, size_t stride, uint8_t *depth, uint32_t *visual, uint8_t major,
+	uint16_t minor);
+void xs_gc_destroy(struct xs_gc *gc);
+// the window tree changed what shows: backings, backgrounds and Expose
+void xs_draw_window_shown(struct flame_xserver *xserver, struct xs_window *window);
+void xs_draw_window_hidden(struct flame_xserver *xserver, struct xs_window *window);
+void xs_draw_window_moved(struct flame_xserver *xserver, struct xs_window *window, int old_x,
+	int old_y, int old_w, int old_h);
+void xs_draw_window_freed(struct xs_window *window);
+
+// ---- MIT-SHM (shm.c) ----
+
+void xs_shm_request(struct xs_client *client, const struct xin *request);
+// a pixmap or the id let go of a segment, the last one unmaps it
+void xs_shm_unref(struct xs_shm_segment *segment);
+void xs_shm_detach_all(struct flame_xserver *xserver, struct xs_client *client);
 
 // ---- requests (requests.c) ----
 

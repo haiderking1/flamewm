@@ -41,6 +41,15 @@ static void apply_attributes(struct xs_client *client, struct xs_window *window,
 		uint32_t value = xin32(in, at);
 		at += 4;
 		switch (bit) {
+		case 0: // background pixmap: None, ParentRelative or a tile
+			window->background = value == 0 ? XS_BACKGROUND_NONE
+				: value == 1 ? XS_BACKGROUND_PARENT : XS_BACKGROUND_PIXMAP;
+			window->background_pixmap = value > 1 ? value : 0;
+			break;
+		case 1:
+			window->background = XS_BACKGROUND_PIXEL;
+			window->background_pixel = value;
+			break;
 		case 9:
 			window->override_redirect = value & 1;
 			break;
@@ -54,7 +63,7 @@ static void apply_attributes(struct xs_client *client, struct xs_window *window,
 			window->colormap = value;
 			break;
 		default:
-			break; // backgrounds, gravity, cursors: nothing to draw
+			break; // borders, gravity, backing store, cursors
 		}
 	}
 }
@@ -638,22 +647,6 @@ static void query_colors(struct xs_client *client, const struct xin *in) {
 	xs_reply_send(client, &out);
 }
 
-static void get_image(struct xs_client *client, const struct xin *in) {
-	// nothing is ever drawn here, it's all black
-	uint16_t width = xin16(in, 12), height = xin16(in, 14);
-	size_t size = (size_t)width * height * 4;
-	if (size > (16u << 20)) {
-		xs_error(client, XS_ERROR_VALUE, 0, 73, 0);
-		return;
-	}
-	struct xout out;
-	xs_reply_begin(client, &out, 24);
-	xout32(&out, XS_VISUAL_24);
-	xout_zero(&out, 20);
-	xout_zero(&out, size);
-	xs_reply_send(client, &out);
-}
-
 // flame's xkb keymap as X's core one: two levels per key, plain and shifted
 static void get_keyboard_mapping(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
@@ -700,6 +693,7 @@ static const struct extension {
 	{"SYNC", XS_SYNC_OPCODE, XS_SYNC_FIRST_EVENT, XS_SYNC_FIRST_ERROR},
 	{"DRI3", XS_DRI3_OPCODE, 0, 0},
 	{"Present", XS_PRESENT_OPCODE, 0, 0},
+	{"MIT-SHM", XS_SHM_OPCODE, XS_SHM_FIRST_EVENT, XS_SHM_FIRST_ERROR},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -751,6 +745,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	struct flame_xserver *xserver = client->xserver;
 	struct xs_window *window;
 	struct xout out;
+	if (xs_draw_request(client, opcode, in)) {
+		return; // GCs, pixmaps and drawing, see draw.c
+	}
 	switch (opcode) {
 	case 1:
 		create_window(client, in);
@@ -914,20 +911,6 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		xout_zero(&out, 52);
 		xs_reply_send(client, &out);
 		break;
-	case 53: { // CreatePixmap
-		struct xs_pixmap *pixmap = calloc(1, sizeof(*pixmap));
-		if (!pixmap) {
-			xs_error(client, XS_ERROR_ALLOC, 0, 53, 0);
-			break;
-		}
-		pixmap->id = xin32(in, 4);
-		pixmap->owner = client;
-		pixmap->depth = xin8(in, 1);
-		pixmap->width = xin16(in, 12);
-		pixmap->height = xin16(in, 14);
-		wl_list_insert(&xserver->pixmaps, &pixmap->link);
-		break;
-	}
 	case 54: { // FreePixmap
 		uint32_t id = xin32(in, 4);
 		struct xs_pixmap *pixmap, *tmp;
@@ -938,9 +921,6 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		}
 		break;
 	}
-	case 73:
-		get_image(client, in);
-		break;
 	case 83: // ListInstalledColormaps
 		xs_reply_begin(client, &out, 0);
 		xout16(&out, 1);
@@ -1047,12 +1027,13 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case XS_PRESENT_OPCODE:
 		xs_present_request(client, in);
 		break;
-	// accepted, nothing to do: grabs letting go, fonts, cursors, GCs,
-	// drawing, colormaps, keyboard and pointer settings, server grabs
+	case XS_SHM_OPCODE:
+		xs_shm_request(client, in);
+		break;
+	// accepted, nothing to do: grabs letting go, fonts and text (no core
+	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs
 	case 6: case 13: case 27: case 28: case 29: case 30: case 32: case 33: case 34:
-	case 35: case 36: case 37: case 41: case 45: case 46: case 51: case 55: case 56:
-	case 57: case 58: case 59: case 60: case 61: case 62: case 63: case 64: case 65:
-	case 66: case 67: case 68: case 69: case 70: case 71: case 72: case 74: case 75:
+	case 35: case 36: case 37: case 41: case 45: case 46: case 51: case 74: case 75:
 	case 76: case 77: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
 	case 90: case 93: case 94: case 95: case 96: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:

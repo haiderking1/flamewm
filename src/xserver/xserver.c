@@ -593,6 +593,8 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->regions);
 	wl_list_init(&xserver->present_selects);
 	wl_list_init(&xserver->selections);
+	wl_list_init(&xserver->gcs);
+	wl_list_init(&xserver->shm_segments);
 	if (!xs_atoms_init(&xserver->atoms)) {
 		return false;
 	}
@@ -725,6 +727,10 @@ void xserver_finish(struct flame_xserver *xserver) {
 	if (xserver->changed_idle) {
 		wl_event_source_remove(xserver->changed_idle);
 		xserver->changed_idle = NULL;
+	}
+	if (xserver->damage_idle) {
+		wl_event_source_remove(xserver->damage_idle);
+		xserver->damage_idle = NULL;
 	}
 	xs_atoms_finish(&xserver->atoms);
 }

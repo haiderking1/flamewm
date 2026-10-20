@@ -1,6 +1,7 @@
 #ifndef FLAME_XSERVER_XSERVER_H
 #define FLAME_XSERVER_XSERVER_H
 
+#include <pixman.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -64,10 +65,27 @@ struct xs_window {
 	struct wl_list properties; // xs_property.link
 	struct wl_list interests; // xs_interest.link
 	void *data; // xbridge's
+
+	// what ClearArea and exposures paint: XS_BACKGROUND_*
+	uint8_t background;
+	uint32_t background_pixel, background_pixmap;
+	// top-levels apps draw into with the cpu (core requests, MIT-SHM): the
+	// pixels of its whole tree, each window at its offset. NULL while
+	// unmapped. damage: backing coords, changed since flame last looked
+	pixman_image_t *backing;
+	pixman_region32_t damage;
+	bool damaged;
 };
 
-// a pixmap. drawn into nowhere, unless it's a gpu buffer the client shared
-// (DRI3): then Present shows it in a window
+enum {
+	XS_BACKGROUND_NONE,
+	XS_BACKGROUND_PIXEL,
+	XS_BACKGROUND_PIXMAP, // tiled
+	XS_BACKGROUND_PARENT, // ParentRelative
+};
+
+// a pixmap: cpu pixels drawing requests go into, or a gpu buffer the
+// client shared (DRI3) that Present shows in a window
 struct xs_pixmap {
 	struct wl_list link; // flame_xserver.pixmaps
 	uint32_t id;
@@ -81,6 +99,42 @@ struct xs_pixmap {
 	uint64_t modifier;
 	uint32_t format; // drm fourcc
 	void *data; // flame's, its texture of it
+	// cpu pixmaps: its pixels, maybe in a shared memory segment it keeps alive
+	pixman_image_t *image;
+	struct xs_shm_segment *shm;
+};
+
+// a graphics context: how drawing requests draw
+struct xs_gc {
+	struct wl_list link; // flame_xserver.gcs
+	uint32_t id;
+	struct xs_client *owner;
+	uint8_t depth; // of the drawable it was made for
+	uint8_t function; // GXcopy and friends
+	uint32_t plane_mask, foreground, background;
+	uint16_t line_width;
+	uint8_t line_style, cap_style, join_style, fill_style, fill_rule, arc_mode;
+	uint32_t tile, stipple; // pixmap ids, 0 for none
+	int16_t ts_x, ts_y; // tile and stipple origin
+	uint32_t font;
+	uint8_t subwindow_mode; // 0 ClipByChildren, 1 IncludeInferiors
+	bool graphics_exposures;
+	int16_t clip_x, clip_y; // clip origin
+	// clip: none (everything), rectangles or a bitmap's set pixels, in
+	// drawable coords before the clip origin
+	bool clipped;
+	pixman_region32_t clip;
+};
+
+// a MIT-SHM segment the client shares (SysV or an fd), mapped here
+struct xs_shm_segment {
+	struct wl_list link; // flame_xserver.shm_segments, unlinked when detached
+	uint32_t id;
+	struct xs_client *owner;
+	uint8_t *data;
+	size_t size;
+	bool read_only, sysv;
+	int refs; // its id, and every pixmap made in it
 };
 
 // SYNC fences. from DRI3 they're an xshmfence the client shares, triggered
@@ -198,6 +252,9 @@ struct xs_hooks {
 	// the keyboard: keysyms for keycode (evdev + 8), by level. returns how
 	// many, at most max
 	int (*keysyms)(void *data, uint8_t keycode, uint32_t *out, int max);
+	// apps drew into a top-level's backing with the cpu, region in backing
+	// coords. at most once per loop iteration and top-level
+	void (*damage)(void *data, struct xs_window *top, const pixman_region32_t *region);
 	void *data;
 };
 
@@ -218,6 +275,9 @@ struct flame_xserver {
 	struct wl_list regions; // xs_region.link
 	struct wl_list present_selects; // xs_present_select.link
 	struct wl_list selections; // xs_selection.link
+	struct wl_list gcs; // xs_gc.link
+	struct wl_list shm_segments; // xs_shm_segment.link
+	struct wl_event_source *damage_idle;
 	struct xs_window *root;
 	struct xs_atoms atoms;
 	uint32_t focus;
