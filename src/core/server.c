@@ -23,7 +23,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& globals_init(server)
 		&& desktop_init(&server->desktop, server)
 		&& input_init(&server->input, server)
-		&& xdg_init(&server->xdg, server);
+		&& xdg_init(&server->xdg, server)
+		&& layers_init(&server->layers, server);
 }
 
 bool server_start(struct flame_server *server, const char *startup_cmd) {
@@ -62,6 +63,7 @@ void server_finish(struct flame_server *server) {
 
 	// unhook from wlroots objects that are about to die
 	xdg_finish(&server->xdg);
+	layers_finish(&server->layers);
 	input_finish(&server->input);
 	outputs_finish(&server->outputs);
 

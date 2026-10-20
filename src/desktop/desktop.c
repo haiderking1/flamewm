@@ -47,7 +47,7 @@ void desktop_arrange(struct flame_desktop *desktop) {
 	}
 
 	struct flame_workspace *workspace = desktop->active;
-	tree_layout(workspace->layout, output->box, server->config->gap);
+	tree_layout(workspace->layout, output->usable, server->config->gap);
 
 	struct flame_view *view;
 	wl_list_for_each(view, &workspace->views, link) {
@@ -64,7 +64,7 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 	}
 	struct flame_workspace *workspace = desktop->active;
 	*box = tree_prospective(workspace->layout, workspace_insert_target(workspace),
-		output->box, server->config->gap);
+		output->usable, server->config->gap);
 	return true;
 }
 

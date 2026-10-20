@@ -13,12 +13,17 @@ PKGS := wlroots-0.20 wayland-server xkbcommon
 
 # clean shouldn't need any deps installed
 ifeq ($(filter clean,$(MAKECMDGOALS)),)
-ifneq ($(shell pkg-config --exists $(PKGS) && echo ok),ok)
-$(error missing deps: $(shell pkg-config --print-errors --exists $(PKGS) 2>&1 | head -1). see deps.md)
+ifneq ($(shell pkg-config --exists $(PKGS) wayland-scanner && echo ok),ok)
+$(error missing deps: $(shell pkg-config --print-errors --exists $(PKGS) wayland-scanner 2>&1 | head -1). see deps.md)
 endif
 PKG_CFLAGS := $(shell pkg-config --cflags $(PKGS))
 PKG_LIBS   := $(shell pkg-config --libs $(PKGS))
+WAYLAND_SCANNER := $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 endif
+
+# protocol xml wlroots implements but doesn't ship headers for
+PROTOCOLS     := $(wildcard protocols/*.xml)
+PROTO_HEADERS := $(PROTOCOLS:protocols/%.xml=$(BUILD)/gen/%-protocol.h)
 
 OPT  ?= -O2 -g
 WARN := -Wall -Wextra -Wno-unused-parameter -Wshadow -Wmissing-prototypes \
@@ -26,7 +31,7 @@ WARN := -Wall -Wextra -Wno-unused-parameter -Wshadow -Wmissing-prototypes \
 DEFS := -DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L -DFLAME_VERSION=\"$(VERSION)\"
 
 # CFLAGS/LDFLAGS from the command line get appended, never replace ours
-FLAME_CFLAGS = -std=c17 $(OPT) $(WARN) $(DEFS) -Isrc $(PKG_CFLAGS) -MMD -MP $(CFLAGS)
+FLAME_CFLAGS = -std=c17 $(OPT) $(WARN) $(DEFS) -Isrc -I$(BUILD)/gen $(PKG_CFLAGS) -MMD -MP $(CFLAGS)
 FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 
 SRCS := $(shell find src -name '*.c' | sort)
@@ -37,9 +42,13 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
 
-$(BUILD)/obj/%.o: src/%.c
+$(BUILD)/obj/%.o: src/%.c | $(PROTO_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(FLAME_CFLAGS) -c -o $@ $<
+
+$(BUILD)/gen/%-protocol.h: protocols/%.xml
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) server-header $< $@
 
 # address + ub sanitizers, own build dir so objects never mix
 asan:
@@ -55,7 +64,7 @@ run: $(TARGET)
 	$(TARGET) $(ARGS)
 
 # clangd picks this up, no bear needed
-clangd:
+clangd: $(PROTO_HEADERS)
 	@printf '%s\n' -xc $(filter-out -MMD -MP,$(FLAME_CFLAGS)) > compile_flags.txt
 	@echo "wrote compile_flags.txt"
 

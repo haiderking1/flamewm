@@ -16,6 +16,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | make | - | build |
 | pkgconf | - | finds libs and cflags |
 | wayland-protocols | `wayland-protocols` | wlroots headers include its `*-enum.h` files (xdg-shell, cursor-shape...) |
+| wayland-scanner (comes with `wayland`) | `wayland-scanner` | generates headers from `protocols/*.xml`, layer-shell needs it |
 
 ## link
 
@@ -39,6 +40,4 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
 | dep | for |
 | --- | --- |
-| wayland-scanner (comes with `wayland`) | generating headers for protocols wlroots doesn't ship, like layer-shell xml |
-| xorg-xwayland | X11 apps |
 | lua 5.4 / luajit | runtime config |

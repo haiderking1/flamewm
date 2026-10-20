@@ -15,7 +15,15 @@ static void handle_new_toplevel(struct wl_listener *listener, void *data) {
 
 static void handle_new_popup(struct wl_listener *listener, void *data) {
 	struct flame_xdg *xdg = wl_container_of(listener, xdg, new_popup);
-	popup_create(xdg->server, data);
+	struct wlr_xdg_popup *popup = data;
+
+	// layer surface popups get their parent later, layers/ picks those up
+	struct wlr_xdg_surface *parent = popup->parent
+		? wlr_xdg_surface_try_from_wlr_surface(popup->parent)
+		: NULL;
+	if (parent && parent->data) {
+		popup_create(xdg->server, popup, parent->data);
+	}
 }
 
 bool xdg_init(struct flame_xdg *xdg, struct flame_server *server) {

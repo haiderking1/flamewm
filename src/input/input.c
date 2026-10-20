@@ -42,6 +42,20 @@ static void handle_request_set_primary_selection(struct wl_listener *listener, v
 	wlr_seat_set_primary_selection(input->seat, event->source, event->serial);
 }
 
+void input_keyboard_enter(struct flame_input *input, struct wlr_surface *surface) {
+	if (!surface) {
+		wlr_seat_keyboard_notify_clear_focus(input->seat);
+		return;
+	}
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(input->seat);
+	if (keyboard) {
+		wlr_seat_keyboard_notify_enter(input->seat, surface, keyboard->keycodes,
+			keyboard->num_keycodes, &keyboard->modifiers);
+	} else {
+		wlr_seat_keyboard_notify_enter(input->seat, surface, NULL, 0, NULL);
+	}
+}
+
 void input_update_capabilities(struct flame_input *input) {
 	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&input->keyboards)) {

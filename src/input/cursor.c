@@ -72,6 +72,8 @@ static void handle_button(struct wl_listener *listener, void *data) {
 			cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
 		if (view) {
 			focus_view(&server->desktop, view);
+		} else if (surface) {
+			layers_click(&server->layers, surface);
 		}
 	}
 	wlr_seat_pointer_notify_button(server->input.seat, event->time_msec,
