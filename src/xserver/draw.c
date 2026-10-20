@@ -238,6 +238,10 @@ static void handle_damage_idle(void *data) {
 		}
 		window->damaged = false;
 		if (window->backing && xserver->hooks.damage) {
+			// a window bigger than its backing drew past it
+			pixman_region32_intersect_rect(&window->damage, &window->damage, 0, 0,
+				(unsigned)pixman_image_get_width(window->backing),
+				(unsigned)pixman_image_get_height(window->backing));
 			xserver->hooks.damage(xserver->hooks.data, window, &window->damage);
 		}
 		pixman_region32_clear(&window->damage);
@@ -733,12 +737,16 @@ static void expose_tree(struct flame_xserver *xserver, struct xs_window *window)
 	}
 }
 
-// a top-level's backing at its size, what it showed kept where it fits
+// a top-level's backing at its size, what it showed kept where it fits. no
+// screen is wider than MAX_BACKING, a window that is draws clipped there
+// instead of taking gigabytes
+#define MAX_BACKING 8192
 static void backing_fit(struct xs_window *top) {
 	if (top->class != 1) {
 		return;
 	}
-	int w = top->width, h = top->height;
+	int w = top->width < MAX_BACKING ? top->width : MAX_BACKING;
+	int h = top->height < MAX_BACKING ? top->height : MAX_BACKING;
 	if (top->backing && pixman_image_get_width(top->backing) == w
 			&& pixman_image_get_height(top->backing) == h) {
 		return;
@@ -1498,6 +1506,8 @@ static void clear_area(struct xs_client *client, const struct xin *in) {
 
 // ---- pixmaps ----
 
+#define MAX_PIXMAP_BYTES (256u << 20)
+
 bool xs_draw_create_pixmap(struct xs_client *client, uint32_t id, int depth, int width,
 		int height, void *bits, size_t stride, struct xs_shm_segment *shm, uint8_t major,
 		uint16_t minor) {
@@ -1508,6 +1518,12 @@ bool xs_draw_create_pixmap(struct xs_client *client, uint32_t id, int depth, int
 	}
 	if (!depth_format(depth) || width <= 0 || height <= 0) {
 		xs_error(client, XS_ERROR_VALUE, (uint32_t)depth, major, minor);
+		return false;
+	}
+	// nobody needs a picture this big, and a client asking shouldn't get
+	// to take flame's memory: Xorg says BadAlloc too
+	if (!bits && xs_image_stride(depth, width) * (size_t)height > MAX_PIXMAP_BYTES) {
+		xs_error(client, XS_ERROR_ALLOC, id, major, minor);
 		return false;
 	}
 	struct xs_pixmap *pixmap = calloc(1, sizeof(*pixmap));

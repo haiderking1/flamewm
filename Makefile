@@ -71,7 +71,8 @@ $(BUILD)/tests/hiccup_test: tests/hiccup_test.c src/render/hiccup.c
 # the clients are plain xcb (test-only deps, see deps.md)
 XSERVER_SRCS := $(wildcard src/xserver/*.c) src/util/strbuf.c
 XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xcb-xfixes xkbcommon-x11 xkbcommon
-XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test
+XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test \
+	$(BUILD)/tests/fuzz_test
 
 $(BUILD)/tests/harness: tests/xserver/harness.c $(XSERVER_SRCS)
 	@mkdir -p $(dir $@)
@@ -82,6 +83,11 @@ $(BUILD)/tests/%_test: tests/xserver/%_test.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g $(WARN) -D_POSIX_C_SOURCE=200809L -fsanitize=address,undefined \
 		-o $@ $< $(shell pkg-config --cflags --libs $(XTEST_PKGS))
+
+# records real apps' requests for the fuzzer: FUZZ_CORPUS=DIR replays them
+$(BUILD)/tests/xrecord: tests/xserver/xrecord.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) -D_GNU_SOURCE -o $@ $<
 
 test: $(TESTS) $(BUILD)/tests/harness $(XTESTS)
 	@for t in $(TESTS); do $$t || exit 1; done
