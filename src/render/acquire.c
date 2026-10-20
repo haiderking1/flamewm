@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <wlr/render/dmabuf.h>
+#include <wlr/render/drm_syncobj.h>
+#include <xf86drm.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
@@ -29,12 +31,15 @@ struct wait_plane {
 	struct wl_event_source *source;
 };
 
-// one held commit, waiting on its busy planes
+// one held commit, waiting on its busy planes or its acquire point
 struct wait {
 	struct wlr_surface *surface;
 	uint32_t seq;
 	struct wait_plane planes[WLR_DMABUF_MAX_PLANES];
 	int remaining;
+	// explicit sync: the client's timeline (a ref) and the wait on it
+	struct wlr_drm_syncobj_timeline *timeline;
+	struct wlr_drm_syncobj_timeline_waiter waiter;
 	struct wl_listener surface_destroy;
 };
 
@@ -53,8 +58,90 @@ static void wait_free(struct wait *wait) {
 	for (int i = 0; i < WLR_DMABUF_MAX_PLANES; i++) {
 		plane_finish(&wait->planes[i]);
 	}
+	if (wait->timeline) {
+		wlr_drm_syncobj_timeline_waiter_finish(&wait->waiter);
+		wlr_drm_syncobj_timeline_unref(wait->timeline);
+	}
 	listener_disconnect(&wait->surface_destroy);
 	free(wait);
+}
+
+static void handle_wait_surface_destroy(struct wl_listener *listener, void *data);
+static void handle_acquired(struct wlr_drm_syncobj_timeline_waiter *waiter);
+
+// every writer is done: the commit lands now, like it just came in
+static void wait_done(struct wait *wait) {
+	struct wlr_surface *surface = wait->surface;
+	uint32_t seq = wait->seq;
+	wait_free(wait);
+	wlr_surface_unlock_cached(surface, seq);
+}
+
+static struct wait *wait_create(struct wlr_surface *surface) {
+	struct wait *wait = calloc(1, sizeof(*wait));
+	if (!wait) {
+		return NULL;
+	}
+	for (int k = 0; k < WLR_DMABUF_MAX_PLANES; k++) {
+		wait->planes[k].fd = -1;
+	}
+	wait->surface = surface;
+	wl_list_init(&wait->surface_destroy.link);
+	return wait;
+}
+
+static void wait_hold(struct wait *wait) {
+	wait->seq = wlr_surface_lock_pending(wait->surface);
+	listener_connect(&wait->surface_destroy, &wait->surface->events.destroy,
+		handle_wait_surface_destroy);
+}
+
+// the explicit sync state this commit carries. wlroots only hands out the
+// current one, but every sync'ed state sits at the same index in the
+// surface's pending and current arrays: find it in one, read the other
+static const struct wlr_linux_drm_syncobj_surface_v1_state *pending_sync(
+		struct wlr_surface *surface) {
+	const struct wlr_linux_drm_syncobj_surface_v1_state *current =
+		wlr_linux_drm_syncobj_v1_get_surface_state(surface);
+	if (!current) {
+		return NULL;
+	}
+	void **currents = surface->current.synced.data;
+	void **pendings = surface->pending.synced.data;
+	size_t len = surface->current.synced.size / sizeof(void *);
+	if (surface->pending.synced.size / sizeof(void *) < len) {
+		len = surface->pending.synced.size / sizeof(void *);
+	}
+	for (size_t i = 0; i < len; i++) {
+		if (currents[i] == current) {
+			return pendings[i];
+		}
+	}
+	return NULL;
+}
+
+// explicit sync: held until the acquire point signals. not submitted yet
+// counts as not done, wlroots holds those too
+static void hold_explicit(struct flame_acquire *acquire, struct wlr_surface *surface,
+		const struct wlr_linux_drm_syncobj_surface_v1_state *sync) {
+	bool done = false;
+	if (!wlr_drm_syncobj_timeline_check(sync->acquire_timeline, sync->acquire_point,
+			DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT, &done) || done) {
+		return; // can't tell, or done already: no wait
+	}
+	struct wait *wait = wait_create(surface);
+	if (!wait) {
+		return;
+	}
+	wait->timeline = wlr_drm_syncobj_timeline_ref(sync->acquire_timeline);
+	if (!wlr_drm_syncobj_timeline_waiter_init(&wait->waiter, wait->timeline,
+			sync->acquire_point, 0, acquire->loop, handle_acquired)) {
+		wlr_drm_syncobj_timeline_unref(wait->timeline);
+		wait->timeline = NULL;
+		wait_free(wait);
+		return;
+	}
+	wait_hold(wait);
 }
 
 static int handle_plane_ready(int fd, uint32_t mask, void *data) {
@@ -64,12 +151,13 @@ static int handle_plane_ready(int fd, uint32_t mask, void *data) {
 	if (--wait->remaining > 0) {
 		return 0;
 	}
-	// every writer is done: the commit lands now, like it just came in
-	struct wlr_surface *surface = wait->surface;
-	uint32_t seq = wait->seq;
-	wait_free(wait);
-	wlr_surface_unlock_cached(surface, seq);
+	wait_done(wait);
 	return 0;
+}
+
+static void handle_acquired(struct wlr_drm_syncobj_timeline_waiter *waiter) {
+	struct wait *wait = wl_container_of(waiter, wait, waiter);
+	wait_done(wait);
 }
 
 static void handle_wait_surface_destroy(struct wl_listener *listener, void *data) {
@@ -89,8 +177,14 @@ static void handle_client_commit(struct wl_listener *listener, void *data) {
 	struct acquire_surface *tracked = wl_container_of(listener, tracked, client_commit);
 	struct wlr_surface *surface = tracked->surface;
 	const struct wlr_surface_state *pending = &surface->pending;
-	if (!(pending->committed & WLR_SURFACE_STATE_BUFFER) || !pending->buffer
-			|| wlr_linux_drm_syncobj_v1_get_surface_state(surface)) {
+	if (!(pending->committed & WLR_SURFACE_STATE_BUFFER) || !pending->buffer) {
+		return;
+	}
+	if (wlr_linux_drm_syncobj_v1_get_surface_state(surface)) {
+		const struct wlr_linux_drm_syncobj_surface_v1_state *sync = pending_sync(surface);
+		if (sync && sync->acquire_timeline) {
+			hold_explicit(tracked->acquire, surface, sync);
+		}
 		return;
 	}
 	struct wlr_dmabuf_attributes dmabuf;
@@ -108,15 +202,10 @@ static void handle_client_commit(struct wl_listener *listener, void *data) {
 			continue;
 		}
 		if (!wait) {
-			wait = calloc(1, sizeof(*wait));
+			wait = wait_create(surface);
 			if (!wait) {
 				return; // out of memory: show it as it is
 			}
-			for (int k = 0; k < WLR_DMABUF_MAX_PLANES; k++) {
-				wait->planes[k].fd = -1;
-			}
-			wait->surface = surface;
-			wl_list_init(&wait->surface_destroy.link);
 		}
 		// the buffer's fds go away with it, the wait needs its own
 		struct wait_plane *plane = &wait->planes[i];
@@ -139,9 +228,7 @@ static void handle_client_commit(struct wl_listener *listener, void *data) {
 		wait_free(wait);
 		return;
 	}
-	wait->seq = wlr_surface_lock_pending(surface);
-	listener_connect(&wait->surface_destroy, &surface->events.destroy,
-		handle_wait_surface_destroy);
+	wait_hold(wait);
 }
 
 static void handle_surface_destroy(struct wl_listener *listener, void *data) {
