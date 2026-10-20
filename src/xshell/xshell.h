@@ -29,6 +29,7 @@ struct flame_xshell {
 	struct wl_list windows; // flame_xwindow.link
 	struct wl_list frames; // xshell_frame.link, one per output
 	struct wl_listener new_output;
+	struct wl_listener desktop_changed; // workspaces switched: floats follow
 	// the X window the pointer is over, flame's idea of it. 0 for none
 	uint32_t pointer_window;
 	uint16_t buttons; // held, in X's state bits
