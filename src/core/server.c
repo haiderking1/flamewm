@@ -41,6 +41,9 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 
 	setenv("WAYLAND_DISPLAY", server->socket, true);
 	setenv("XDG_CURRENT_DESKTOP", "flamewm", true);
+	// started from a tty this says "tty", and chromium (helium, brave...)
+	// takes anything but "wayland" as go x11, finds no X server and quits
+	setenv("XDG_SESSION_TYPE", "wayland", true);
 
 	wlr_log(WLR_INFO, "flamewm running on WAYLAND_DISPLAY=%s", server->socket);
 	if (startup_cmd) {
