@@ -14,6 +14,8 @@
 #include "protocols/workspaces.h"
 #include "render/render.h"
 #include "shell/xdg.h"
+#include "xbridge/xbridge.h"
+#include "xshell/xshell.h"
 
 struct flame_config;
 
@@ -34,6 +36,8 @@ struct flame_server {
 	struct flame_xdg xdg;
 	struct flame_layers layers;
 	struct flame_ipc ipc;
+	struct flame_xbridge xbridge;
+	struct flame_xshell xshell;
 	struct flame_ext_workspaces ext_workspaces;
 };
 

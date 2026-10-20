@@ -26,6 +26,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& xdg_init(&server->xdg, server)
 		&& layers_init(&server->layers, server)
 		&& ipc_init(&server->ipc, server)
+		&& xbridge_init(&server->xbridge, server)
+		&& xshell_init(&server->xshell, server, &server->xbridge.xserver)
 		&& ext_workspaces_init(&server->ext_workspaces, server);
 }
 
@@ -48,6 +50,8 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	setenv("XDG_SESSION_TYPE", "wayland", true);
 	// before anything gets started, they all inherit $FLAMEWM_SOCKET
 	ipc_start(&server->ipc, server->socket);
+	// steam's X side, for launchers that hand it over (tools/steam)
+	xbridge_start(&server->xbridge);
 
 	wlr_log(WLR_INFO, "flamewm running on WAYLAND_DISPLAY=%s", server->socket);
 	if (startup_cmd) {
@@ -68,6 +72,8 @@ void server_finish(struct flame_server *server) {
 	wl_display_destroy_clients(server->display);
 	// stop listening to the desktop before it goes
 	ipc_finish(&server->ipc);
+	xbridge_finish(&server->xbridge);
+	xshell_finish(&server->xshell);
 	ext_workspaces_finish(&server->ext_workspaces);
 	desktop_finish(&server->desktop);
 

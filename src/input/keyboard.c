@@ -57,6 +57,11 @@ static void handle_key(struct wl_listener *listener, void *data) {
 		handled = handle_press(keyboard, event->keycode + 8);
 	}
 
+	// an X11 window has the keyboard: through flame's X server
+	if (!handled && xshell_key(&keyboard->input->server->xshell, event->keycode,
+			event->state == WL_KEYBOARD_KEY_STATE_PRESSED, event->time_msec)) {
+		return;
+	}
 	if (!handled) {
 		wlr_seat_set_keyboard(seat, keyboard->wlr);
 		wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);

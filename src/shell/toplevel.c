@@ -125,8 +125,15 @@ static struct wlr_box impl_window_geometry(struct flame_view *view, bool pending
 	return pending ? base->pending.geometry : base->current.geometry;
 }
 
+static struct flame_toplevel *x_focused_popup(struct flame_toplevel *toplevel);
+
 static void impl_set_activated(struct flame_view *view, bool activated) {
 	struct flame_toplevel *toplevel = from_view(view);
+	// one of our menus has X focus: on X11 we'd have had a FocusOut, and the
+	// app stops reacting to hover behind its menu
+	if (x_focused_popup(toplevel)) {
+		activated = false;
+	}
 	if (toplevel->xdg->base->initialized) {
 		wlr_xdg_toplevel_set_activated(toplevel->xdg, activated);
 	}
@@ -153,7 +160,61 @@ static const char *impl_app_id(struct flame_view *view) {
 }
 
 static const char *impl_title(struct flame_view *view) {
-	return from_view(view)->xdg->title;
+	struct flame_toplevel *toplevel = from_view(view);
+	// a bridged app titles its X window, the wayland one stays blank
+	const struct flame_xbridge_verdict *verdict = xbridge_window_verdict(&toplevel->bridge);
+	if (verdict && verdict->title) {
+		return verdict->title;
+	}
+	return toplevel->xdg->title;
+}
+
+static void impl_placed(struct flame_view *view, struct wlr_box content) {
+	xbridge_window_placed(&from_view(view)->bridge, content);
+}
+
+// the window of our bridged process that has X focus, if it's shown as one
+// of our menus or glued inside us
+static struct flame_toplevel *x_focused_part(struct flame_toplevel *toplevel) {
+	struct flame_xbridge_window *window = xbridge_window_x_focus(&toplevel->bridge);
+	if (!window) {
+		return NULL;
+	}
+	struct flame_toplevel *focused = wl_container_of(window, focused, bridge);
+	bool ours = focused->content_in == FLAME_CONTENT_POPUP
+		|| (focused->content_in == FLAME_CONTENT_EMBED && focused->host == toplevel);
+	return ours && focused->xdg->base->surface->mapped ? focused : NULL;
+}
+
+static struct flame_toplevel *x_focused_popup(struct flame_toplevel *toplevel) {
+	struct flame_toplevel *focused = x_focused_part(toplevel);
+	return focused && focused->content_in == FLAME_CONTENT_POPUP ? focused : NULL;
+}
+
+// keys go where the app put X focus (its open menu, its store page), else
+// to whatever inside us was clicked last
+static struct wlr_surface *impl_keyboard_surface(struct flame_view *view) {
+	struct flame_toplevel *toplevel = from_view(view);
+	struct flame_toplevel *focused = x_focused_part(toplevel);
+	if (focused) {
+		return focused->xdg->base->surface;
+	}
+	return toplevel->typing ? toplevel->typing->xdg->base->surface : NULL;
+}
+
+// a click on something glued inside us hands it the keyboard, a click on
+// our own content takes it back
+static void impl_pressed(struct flame_view *view, struct wlr_surface *surface) {
+	struct flame_toplevel *toplevel = from_view(view);
+	struct wlr_surface *root = surface ? wlr_surface_get_root_surface(surface) : NULL;
+	toplevel->typing = NULL;
+	struct flame_toplevel *embed;
+	wl_list_for_each(embed, &toplevel->embeds, embed_link) {
+		if (embed->xdg->base->surface == root) {
+			toplevel->typing = embed;
+			break;
+		}
+	}
 }
 
 static const struct flame_view_impl toplevel_impl = {
@@ -168,19 +229,161 @@ static const struct flame_view_impl toplevel_impl = {
 	.surface = impl_surface,
 	.app_id = impl_app_id,
 	.title = impl_title,
+	.placed = impl_placed,
+	.keyboard_surface = impl_keyboard_surface,
+	.pressed = impl_pressed,
 };
+
+// ---- bridged windows ----
+
+// its content back home in view.tree, from floating or from its host
+static void content_restore(struct flame_toplevel *toplevel) {
+	if (toplevel->content_in == FLAME_CONTENT_OWN) {
+		return;
+	}
+	struct flame_toplevel *host = toplevel->host;
+	if (host) {
+		wl_list_remove(&toplevel->embed_link);
+		wl_list_init(&toplevel->embed_link);
+		toplevel->host = NULL;
+		if (host->typing == toplevel) {
+			// the keys go back to the window itself
+			host->typing = NULL;
+			struct flame_desktop *desktop = host->view.desktop;
+			if (desktop->focused == &host->view) {
+				focus_restore_keyboard(desktop);
+			}
+		}
+	}
+	toplevel->content_in = FLAME_CONTENT_OWN;
+	scene_node_reparent(&toplevel->view.content->node, toplevel->view.tree);
+	view_content_changed(&toplevel->view);
+}
+
+// content out of its own tile into parent at box, sized to box
+static void content_move(struct flame_toplevel *toplevel, struct flame_tree *parent,
+		struct wlr_box box) {
+	struct flame_view *view = &toplevel->view;
+	if (view->content->node.parent != parent) {
+		scene_node_reparent(&view->content->node, parent);
+	}
+	scene_node_set_position(&view->content->node, box.x, box.y);
+	if (box.width > 0 && box.height > 0) {
+		impl_configure(view, box.width, box.height, false);
+		impl_set_display_size(view, box.width, box.height);
+	}
+}
+
+// the window an embed goes inside, if it can hold one right now: on screen in
+// its own tile
+static struct flame_toplevel *embed_host(struct flame_toplevel *toplevel, uint32_t index) {
+	struct flame_xbridge_window *window = xbridge_window_sibling(&toplevel->bridge, index);
+	if (!window) {
+		return NULL;
+	}
+	struct flame_toplevel *host = wl_container_of(window, host, bridge);
+	if (host->dying || !host->xdg->base->surface->mapped
+			|| host->content_in != FLAME_CONTENT_OWN || !host->view.workspace) {
+		return NULL;
+	}
+	return host;
+}
+
+// map, or the X side changed its mind: tile it, float it, glue it inside
+// another window, or keep it away
+static void bridge_apply(struct flame_xbridge_window *window) {
+	struct flame_toplevel *toplevel = wl_container_of(window, toplevel, bridge);
+	struct flame_view *view = &toplevel->view;
+	struct flame_desktop *desktop = view->desktop;
+	const struct flame_xbridge_verdict *verdict = xbridge_window_verdict(window);
+	// not bridged (anymore) is a plain window
+	enum flame_xbridge_role role = verdict ? verdict->role : FLAME_XBRIDGE_WINDOW;
+	bool mapped = toplevel->xdg->base->surface->mapped && !toplevel->dying;
+	bool was_popup = toplevel->content_in == FLAME_CONTENT_POPUP;
+	if (verdict) {
+		wlr_log(WLR_DEBUG, "xbridge: #%u is %s %d,%d %dx%d%s%s", window->index,
+			(const char *[]){"hidden", "window", "popup", "embed"}[verdict->role],
+			verdict->box.x, verdict->box.y, verdict->box.width, verdict->box.height,
+			verdict->grabs ? " (holds the pointer)" : "", mapped ? "" : " (not mapped yet)");
+	}
+	struct flame_toplevel *host =
+		role == FLAME_XBRIDGE_EMBED ? embed_host(toplevel, verdict->host) : NULL;
+	desktop_notify(desktop); // the title may be new
+
+	if (!mapped || role != FLAME_XBRIDGE_POPUP) {
+		if (toplevel->content_in == FLAME_CONTENT_POPUP) {
+			content_restore(toplevel);
+		}
+	}
+	if (!mapped || role != FLAME_XBRIDGE_EMBED || host != toplevel->host) {
+		if (toplevel->content_in == FLAME_CONTENT_EMBED) {
+			content_restore(toplevel);
+		}
+	}
+	if (!mapped) {
+		return; // map comes back here
+	}
+
+	switch (role) {
+	case FLAME_XBRIDGE_HIDDEN:
+		desktop_unmap_view(desktop, view);
+		break;
+	case FLAME_XBRIDGE_WINDOW:
+		if (!view->workspace) {
+			desktop_map_view(desktop, view);
+		}
+		break;
+	case FLAME_XBRIDGE_POPUP:
+		// a menu sits exactly where the app put it, no tile, no border, above all
+		desktop_unmap_view(desktop, view);
+		content_move(toplevel, desktop->server->render.layers[FLAME_LAYER_OVERLAY],
+			verdict->box);
+		toplevel->content_in = FLAME_CONTENT_POPUP;
+		// active while it has X focus, the window behind it isn't
+		if (toplevel->xdg->base->initialized) {
+			wlr_xdg_toplevel_set_activated(toplevel->xdg, xbridge_window_x_focused(window));
+		}
+		break;
+	case FLAME_XBRIDGE_EMBED:
+		// over its host like on X: moves, hides and stacks with it
+		desktop_unmap_view(desktop, view);
+		if (host) {
+			content_move(toplevel, host->view.content, verdict->box);
+			if (toplevel->content_in != FLAME_CONTENT_EMBED) {
+				toplevel->content_in = FLAME_CONTENT_EMBED;
+				toplevel->host = host;
+				wl_list_insert(&host->embeds, &toplevel->embed_link);
+			}
+		}
+		break;
+	}
+	// a window that just showed up or went away takes its embeds along. only
+	// tiles hold embeds, so an embed never recurses into another
+	if (role != FLAME_XBRIDGE_EMBED) {
+		xbridge_window_embeds_changed(window);
+	}
+	// a menu opening or closing moves activation and keys between it and
+	// the window behind it
+	if (was_popup != (toplevel->content_in == FLAME_CONTENT_POPUP) && desktop->focused) {
+		view_set_focused(desktop->focused, true);
+		focus_restore_keyboard(desktop);
+	}
+}
 
 static void handle_map(struct wl_listener *listener, void *data) {
 	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, map);
 	wlr_log(WLR_DEBUG, "map toplevel app_id=%s title=%s",
 		toplevel->xdg->app_id ? toplevel->xdg->app_id : "?",
 		toplevel->xdg->title ? toplevel->xdg->title : "?");
-	desktop_map_view(toplevel->view.desktop, &toplevel->view);
+	bridge_apply(&toplevel->bridge);
 }
 
 static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, unmap);
+	content_restore(toplevel);
 	desktop_unmap_view(toplevel->view.desktop, &toplevel->view);
+	// whatever was glued inside it can't stay there
+	xbridge_window_embeds_changed(&toplevel->bridge);
 	// the next mapping starts with a fresh initial configure
 	toplevel->configured_width = 0;
 	toplevel->configured_height = 0;
@@ -298,6 +501,11 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&toplevel->set_title);
 	listener_disconnect(&toplevel->set_app_id);
 
+	// embeds out of our tree first, it goes down with view.tree
+	toplevel->dying = true;
+	xbridge_window_embeds_changed(&toplevel->bridge);
+	xbridge_window_detach(&toplevel->bridge);
+	content_restore(toplevel);
 	view_finish(&toplevel->view);
 	free(toplevel);
 }
@@ -309,6 +517,8 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 		return;
 	}
 	toplevel->xdg = xdg_toplevel;
+	wl_list_init(&toplevel->embeds);
+	wl_list_init(&toplevel->embed_link);
 	view_init(&toplevel->view, &toplevel_impl, &server->desktop);
 
 	// popups find their parent tree through xdg_surface->data
@@ -333,4 +543,7 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 	listener_connect(&toplevel->set_title, &xdg_toplevel->events.set_title, handle_set_title);
 	listener_connect(&toplevel->set_app_id, &xdg_toplevel->events.set_app_id,
 		handle_set_app_id);
+	// counted in creation order, the same order the bridge sees its X windows
+	xbridge_window_attach(&server->xbridge, &toplevel->bridge,
+		xdg_toplevel->base->client->client, &toplevel->view, bridge_apply);
 }
