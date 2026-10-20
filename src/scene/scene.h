@@ -41,9 +41,21 @@ struct flame_node {
 	} events;
 };
 
+// how a tree and everything in it is drawn, for animations: scaled about
+// origin (tree coords), moved by dx, dy, faded to opacity. hit testing and
+// positions don't see it, only what gets drawn
+struct flame_effect {
+	float opacity;
+	double scale_x, scale_y;
+	double origin_x, origin_y;
+	double dx, dy;
+};
+
 struct flame_tree {
 	struct flame_node node;
 	struct wl_list children; // flame_node.link
+	bool has_effect;
+	struct flame_effect effect;
 };
 
 struct flame_rect {
@@ -112,6 +124,8 @@ void scene_finish(struct flame_scene *scene);
 void scene_changed(struct flame_scene *scene);
 
 struct flame_tree *scene_tree_create(struct flame_tree *parent);
+// NULL takes it off: drawn as it is
+void scene_tree_set_effect(struct flame_tree *tree, const struct flame_effect *effect);
 struct flame_rect *scene_rect_create(struct flame_tree *parent, int width, int height,
 	const float color[4]);
 struct flame_surface_node *scene_surface_create(struct flame_tree *parent,

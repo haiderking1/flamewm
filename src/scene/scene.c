@@ -58,6 +58,17 @@ struct flame_tree *scene_tree_create(struct flame_tree *parent) {
 	return tree;
 }
 
+void scene_tree_set_effect(struct flame_tree *tree, const struct flame_effect *effect) {
+	bool had = tree->has_effect;
+	tree->has_effect = effect != NULL;
+	if (effect) {
+		tree->effect = *effect;
+	}
+	if (had || effect) {
+		scene_changed(tree->node.scene);
+	}
+}
+
 struct flame_rect *scene_rect_create(struct flame_tree *parent, int width, int height,
 		const float color[4]) {
 	struct flame_rect *rect = calloc(1, sizeof(*rect));

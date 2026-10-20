@@ -22,7 +22,8 @@ static bool fbox_equal(const struct wlr_fbox *a, const struct wlr_fbox *b) {
 }
 
 static bool looks_the_same(const struct flame_element *a, const struct flame_element *b) {
-	if (!wlr_box_equal(&a->box, &b->box) || !wlr_box_equal(&a->clip, &b->clip)) {
+	if (!wlr_box_equal(&a->box, &b->box) || !wlr_box_equal(&a->clip, &b->clip)
+			|| a->alpha != b->alpha) {
 		return false;
 	}
 	if (a->type == FLAME_ELEMENT_RECT) {

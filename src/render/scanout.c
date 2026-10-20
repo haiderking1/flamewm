@@ -82,8 +82,8 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 		}
 		only = element;
 	}
-	if (!only || only->type != FLAME_ELEMENT_SURFACE) {
-		return NULL;
+	if (!only || only->type != FLAME_ELEMENT_SURFACE || only->effected) {
+		return NULL; // a faded or scaled one needs drawing
 	}
 	pixman_box32_t box = {area.x, area.y, area.x + area.width, area.y + area.height};
 	// anything it doesn't cover would have to be painted black by us
