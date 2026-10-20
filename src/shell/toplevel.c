@@ -127,6 +127,14 @@ static void impl_set_activated(struct flame_view *view, bool activated) {
 	}
 }
 
+static void impl_set_resizing(struct flame_view *view, bool resizing) {
+	struct wlr_xdg_toplevel *xdg = from_view(view)->xdg;
+	// unmap can end a drag, by then there's nobody to tell
+	if (xdg->base->initialized && xdg->base->surface->mapped) {
+		wlr_xdg_toplevel_set_resizing(xdg, resizing);
+	}
+}
+
 static void impl_close(struct flame_view *view) {
 	wlr_xdg_toplevel_send_close(from_view(view)->xdg);
 }
@@ -141,6 +149,7 @@ static const struct flame_view_impl toplevel_impl = {
 	.set_display_size = impl_set_display_size,
 	.content_size = impl_content_size,
 	.set_activated = impl_set_activated,
+	.set_resizing = impl_set_resizing,
 	.close = impl_close,
 	.surface = impl_surface,
 };
