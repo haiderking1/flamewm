@@ -21,6 +21,40 @@ flame.set {
 	},
 }
 
+-- animations: windows opening, closing and moving around, the
+-- workspace sliding over, bars and notifications coming and going.
+-- `animations = false` turns them all off
+flame.set {
+	animations = {
+		enabled = true,
+		layers = true, -- bars, notifications, launchers
+		open = "slide", -- slide, zoom, fade or none
+		close = "slide",
+		layer_open = "slide",
+		layer_close = "slide",
+		fade_in = true, -- on top of a slide or zoom
+		fade_out = true,
+		fade_in_from = 0.5,
+		fade_out_from = 0.5,
+		zoom_from = 0.4, -- a zoom opens from 40%
+		zoom_to = 0.8, -- and closes to 80%
+		workspace_vertical = false,
+		focused_opacity = 1.0,
+		unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
+		duration = { open = 400, close = 300, move = 500, workspace = 300, focus = 0 },
+		-- css cubic-bezier curves: {x1, y1, x2, y2}
+		curve = {
+			open = { 0.46, 1.0, 0.29, 0.99 },
+			close = { 0.46, 1.0, 0.29, 0.99 },
+			move = { 0.46, 1.0, 0.29, 0.99 },
+			workspace = { 0.46, 1.0, 0.29, 0.99 },
+			focus = { 0.46, 1.0, 0.29, 0.99 },
+			fade_in = { 0.46, 1.0, 0.29, 0.99 },
+			fade_out = { 0.5, 0.5, 0.5, 0.5 },
+		},
+	},
+}
+
 -- the binds flame has on its own, as an example of saying them yourself.
 -- binding the same keys again replaces them, flame.unbind and
 -- flame.clear_binds() take them away
@@ -43,6 +77,9 @@ end
 -- flame.rule({ app_id = "^pavucontrol$" }, { floating = true })
 -- flame.rule({ title = "Picture.in.Picture" }, { floating = true })
 -- flame.rule({ app_id = "^steam$" }, { workspace = 5 })
+-- flame.rule({ app_id = "^mpv$" }, { animation = false })
+-- flame.rule({ app_id = "^rofi$" }, { open = "zoom", close = "fade" })
+-- flame.rule({ app_id = "^foot$" }, { opacity = 0.95 })
 
 -- things to start with flame, once
 -- flame.autostart("waybar")
