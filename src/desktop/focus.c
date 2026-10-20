@@ -1,24 +1,23 @@
 #include "desktop/focus.h"
 
 #include <wlr/types/wlr_scene.h>
-#include <wlr/types/wlr_seat.h>
 
 #include "core/server.h"
 
-static void keyboard_enter(struct wlr_seat *seat, struct wlr_surface *surface) {
-	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
-	if (keyboard) {
-		wlr_seat_keyboard_notify_enter(seat, surface, keyboard->keycodes,
-			keyboard->num_keycodes, &keyboard->modifiers);
-	} else {
-		wlr_seat_keyboard_notify_enter(seat, surface, NULL, 0, NULL);
+void focus_restore_keyboard(struct flame_desktop *desktop) {
+	struct flame_server *server = desktop->server;
+	// an open launcher keeps typing, a clicked bar gives it back
+	if (layers_keyboard_locked(&server->layers)) {
+		return;
 	}
+	layers_drop_keyboard(&server->layers);
+	input_keyboard_enter(&server->input,
+		desktop->focused ? view_surface(desktop->focused) : NULL);
 }
 
 void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
-	struct wlr_seat *seat = desktop->server->input.seat;
-
 	if (view && view == desktop->focused) {
+		focus_restore_keyboard(desktop);
 		return;
 	}
 	if (desktop->focused) {
@@ -26,16 +25,13 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 	}
 	desktop->focused = view;
 
-	if (!view) {
-		wlr_seat_keyboard_notify_clear_focus(seat);
-		return;
+	if (view) {
+		view->workspace->last_focused = view;
+		view_set_focused(view, true);
+		// keeps its popups above the neighbours
+		wlr_scene_node_raise_to_top(&view->tree->node);
 	}
-
-	view->workspace->last_focused = view;
-	view_set_focused(view, true);
-	// keeps its popups above the neighbours
-	wlr_scene_node_raise_to_top(&view->tree->node);
-	keyboard_enter(seat, view_surface(view));
+	focus_restore_keyboard(desktop);
 }
 
 void focus_cycle(struct flame_desktop *desktop, int direction) {

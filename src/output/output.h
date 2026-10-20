@@ -14,6 +14,7 @@ struct flame_output {
 	struct wlr_scene_output *scene_output;
 	struct wlr_scene_rect *background;
 	struct wlr_box box; // layout coords
+	struct wlr_box usable; // box minus what bars reserve, tiles go here
 
 	struct wl_listener frame;
 	struct wl_listener request_state;

@@ -29,6 +29,7 @@ src/
   output/       monitors: modes, frame callbacks, output layout, background
   protocols/    globals wlroots runs on its own (compositor, clipboard, screencopy...)
   shell/        xdg-shell: toplevels become views, popups
+  layers/       layer-shell: bars, launchers, wallpapers. exclusive zones, keyboard grabs
   desktop/      window model: views, workspaces, focus. protocol agnostic
   layout/       bspwm style tree, pure data + math
   transaction/  layout changes land in one frame, raven style resize batches
@@ -36,6 +37,8 @@ src/
   bindings/     keybind matching + the actions they run
   config/       compiled in defaults, lua later
   util/         listener helpers, spawn, macros
+
+protocols/      protocol xml wlroots doesn't ship headers for, generated at build
 ```
 
 how stuff connects:
@@ -68,8 +71,8 @@ mod is super.
 
 ## status
 
-single output, bspwm tiling only, xdg-shell only. no layer-shell (so no waybar yet),
-no xwayland, no floating, no fullscreen.
+single output, bspwm tiling only. xdg-shell and layer-shell (waybar, rofi,
+fuzzel, swaybg, mako...). no floating, no fullscreen yet. no xwayland on purpose.
 
 ## license
 

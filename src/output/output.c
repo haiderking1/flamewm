@@ -39,6 +39,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&output->request_state);
 	listener_disconnect(&output->destroy);
 
+	layers_output_gone(&output->server->layers, output);
 	wlr_scene_node_destroy(&output->background->node);
 	wl_list_remove(&output->link);
 	free(output);
@@ -81,6 +82,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	}
 	output->server = server;
 	output->wlr = wlr_output;
+	wlr_output->data = output;
 	output->background = wlr_scene_rect_create(
 		server->render.layers[FLAME_LAYER_BACKGROUND], 0, 0,
 		server->config->background_color);
@@ -114,6 +116,7 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 			output->box.x, output->box.y);
 		wlr_scene_rect_set_size(output->background,
 			output->box.width, output->box.height);
+		layers_arrange(&outputs->server->layers, output);
 	}
 
 	desktop_arrange(&outputs->server->desktop);

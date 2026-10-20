@@ -8,6 +8,7 @@
 #include "core/signals.h"
 #include "desktop/desktop.h"
 #include "input/input.h"
+#include "layers/layers.h"
 #include "output/output.h"
 #include "render/render.h"
 #include "shell/xdg.h"
@@ -29,6 +30,7 @@ struct flame_server {
 	struct flame_desktop desktop;
 	struct flame_input input;
 	struct flame_xdg xdg;
+	struct flame_layers layers;
 };
 
 bool server_init(struct flame_server *server, const struct flame_config *config);
