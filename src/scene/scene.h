@@ -7,7 +7,11 @@
 #include <wayland-server-core.h>
 #include <wlr/util/box.h>
 
+struct flame_buffer_node;
+struct flame_frame;
+struct wlr_drm_syncobj_timeline;
 struct wlr_surface;
+struct wlr_texture;
 
 // flame's own scene graph: what goes where, in which order. it draws nothing.
 // render/ walks it every frame and works out damage by comparing against what
@@ -17,6 +21,7 @@ enum flame_node_type {
 	FLAME_NODE_TREE,
 	FLAME_NODE_RECT,
 	FLAME_NODE_SURFACE,
+	FLAME_NODE_BUFFER,
 };
 
 struct flame_scene;
@@ -55,6 +60,32 @@ struct flame_surface_node {
 	struct wl_listener surface_destroy;
 };
 
+// what the owner of a buffer node hears about it
+struct flame_buffer_node_impl {
+	// a frame drew it: that frame goes out as draw_id on frame's output (see
+	// flame_frame events.presented), and the gpu is done reading the buffer
+	// once render_done reaches render_point. NULL timeline: done already
+	void (*sampled)(struct flame_buffer_node *node, struct flame_frame *frame,
+		uint64_t draw_id, struct wlr_drm_syncobj_timeline *render_done,
+		uint64_t render_point);
+};
+
+// a picture flame shows for something that isn't a wl_surface (X11 windows):
+// the owner hands it a texture and says when it changes
+struct flame_buffer_node {
+	struct flame_node node;
+	struct wlr_texture *texture; // the owner's, NULL draws nothing
+	// a new value for every new picture, the frame repaints it all then
+	const void *key;
+	int width, height; // layout size it's drawn at
+	bool opaque;
+	// the gpu work that made the picture, waited on before reading it
+	struct wlr_drm_syncobj_timeline *wait_timeline;
+	uint64_t wait_point;
+	const struct flame_buffer_node_impl *impl;
+	void *data;
+};
+
 struct flame_scene {
 	struct flame_tree root;
 	// bumped every time a frame gets built from the scene, surfaces remember
@@ -82,6 +113,8 @@ struct flame_rect *scene_rect_create(struct flame_tree *parent, int width, int h
 	const float color[4]);
 struct flame_surface_node *scene_surface_create(struct flame_tree *parent,
 	struct wlr_surface *surface);
+struct flame_buffer_node *scene_buffer_create(struct flame_tree *parent,
+	const struct flame_buffer_node_impl *impl, void *data);
 
 // trees take their children with them
 void scene_node_destroy(struct flame_node *node);
@@ -97,11 +130,17 @@ void scene_rect_set_size(struct flame_rect *rect, int width, int height);
 void scene_rect_set_color(struct flame_rect *rect, const float color[4]);
 // NULL or an empty box shows all of it
 void scene_surface_set_clip(struct flame_surface_node *node, const struct wlr_box *clip);
+// a new picture: texture (NULL for none) drawn at width x height, readable
+// once wait_timeline reaches wait_point (NULL: right away)
+void scene_buffer_set(struct flame_buffer_node *node, struct wlr_texture *texture,
+	const void *key, int width, int height, bool opaque,
+	struct wlr_drm_syncobj_timeline *wait_timeline, uint64_t wait_point);
 
 struct flame_tree *scene_tree_from_node(struct flame_node *node);
 
 // topmost enabled node under a layout point. surface/sx/sy are set when it's
-// client content that takes input there, NULL for rects (borders, backdrops)
+// client content that takes input there, NULL for rects (borders, backdrops).
+// buffer nodes come back with surface NULL and sx/sy inside them
 struct flame_node *scene_node_at(struct flame_scene *scene, double lx, double ly,
 	struct wlr_surface **surface, double *sx, double *sy);
 

@@ -30,6 +30,11 @@ struct flame_outputs {
 
 	struct wl_listener new_output;
 	struct wl_listener layout_change;
+
+	struct {
+		// an output's frames are set up, struct flame_frame *
+		struct wl_signal new_frame;
+	} events;
 };
 
 bool outputs_init(struct flame_outputs *outputs, struct flame_server *server);
