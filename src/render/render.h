@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+#include "render/acquire.h"
 #include "render/schedule.h"
 #include "scene/scene.h"
 #include "scene/surface.h"
@@ -35,6 +36,7 @@ struct flame_render {
 
 	struct flame_scene scene;
 	struct flame_scene_surfaces surfaces;
+	struct flame_acquire acquire; // client buffers wait for their gpu work
 	struct flame_tree *layers[FLAME_LAYER_COUNT];
 
 	bool frame_timing; // FLAME_FRAME_TIMING=1, frame.c logs probes
