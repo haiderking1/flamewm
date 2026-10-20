@@ -103,7 +103,8 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 			layout_output, output->scene_output);
 	}
 
-	wlr_log(WLR_INFO, "output %s up", wlr_output->name);
+	wlr_log(WLR_INFO, "output %s up: %dx%d@%.3fHz scale %.2f", wlr_output->name,
+		wlr_output->width, wlr_output->height, wlr_output->refresh / 1000.0, wlr_output->scale);
 }
 
 static void handle_layout_change(struct wl_listener *listener, void *data) {

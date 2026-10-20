@@ -33,16 +33,45 @@ void view_finish(struct flame_view *view) {
 	wlr_scene_node_destroy(&view->tree->node);
 }
 
-void view_content_size(struct flame_view *view, struct wlr_box box, int *width, int *height) {
-	int bw = view_config(view)->border_width;
+static int border_width(struct flame_view *view, bool fullscreen) {
+	return fullscreen ? 0 : view_config(view)->border_width;
+}
+
+void view_content_size(struct flame_view *view, struct wlr_box box, bool fullscreen,
+		int *width, int *height) {
+	int bw = border_width(view, fullscreen);
 	*width = MAX(box.width - 2 * bw, 1);
 	*height = MAX(box.height - 2 * bw, 1);
 }
 
-uint32_t view_configure(struct flame_view *view, struct wlr_box box) {
+uint32_t view_configure(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 	int width, height;
-	view_content_size(view, box, &width, &height);
-	return view->impl->configure(view, width, height);
+	view_content_size(view, box, fullscreen, &width, &height);
+	return view->impl->configure(view, width, height, fullscreen);
+}
+
+void view_reparent(struct flame_view *view) {
+	if (view->grabbed || !view->workspace) {
+		return; // a drag or the staging tree owns it
+	}
+	struct wlr_scene_tree *parent = view->fullscreen_shown
+		? view->workspace->fullscreen_tree : view->workspace->tree;
+	if (view->tree->node.parent != parent) {
+		wlr_scene_node_reparent(&view->tree->node, parent);
+	}
+}
+
+void view_content_changed(struct flame_view *view) {
+	int bw = border_width(view, view->fullscreen_shown);
+	int x = bw, y = bw;
+	if (view->fullscreen_shown) {
+		// a client that won't fill the output sits centered on the black
+		int width, height;
+		view->impl->content_size(view, &width, &height);
+		x = MAX((view->geometry.width - width) / 2, 0);
+		y = MAX((view->geometry.height - height) / 2, 0);
+	}
+	wlr_scene_node_set_position(&view->content->node, x, y);
 }
 
 static void place_rect(struct wlr_scene_rect *rect, int x, int y, int width, int height) {
@@ -50,12 +79,14 @@ static void place_rect(struct wlr_scene_rect *rect, int x, int y, int width, int
 	wlr_scene_rect_set_size(rect, MAX(width, 0), MAX(height, 0));
 }
 
-void view_place(struct flame_view *view, struct wlr_box box) {
-	int bw = view_config(view)->border_width;
+void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
+	int bw = border_width(view, fullscreen);
 	int w = box.width;
 	int h = box.height;
 
 	view->geometry = box;
+	view->fullscreen_shown = fullscreen;
+	view_reparent(view);
 	if (!view->grabbed) {
 		wlr_scene_node_set_position(&view->tree->node, box.x, box.y);
 	}
@@ -67,11 +98,10 @@ void view_place(struct flame_view *view, struct wlr_box box) {
 	place_rect(view->border[FLAME_BORDER_LEFT], 0, bw, bw, h - 2 * bw);
 	place_rect(view->border[FLAME_BORDER_RIGHT], w - bw, bw, bw, h - 2 * bw);
 
-	wlr_scene_node_set_position(&view->content->node, bw, bw);
-
 	int width, height;
-	view_content_size(view, box, &width, &height);
+	view_content_size(view, box, fullscreen, &width, &height);
 	view->impl->set_display_size(view, width, height);
+	view_content_changed(view);
 
 	view->shown = true;
 	wlr_scene_node_set_enabled(&view->tree->node, true);
@@ -79,6 +109,7 @@ void view_place(struct flame_view *view, struct wlr_box box) {
 
 void view_hide(struct flame_view *view) {
 	view->shown = false;
+	view->fullscreen_shown = false;
 	wlr_scene_node_set_enabled(&view->tree->node, false);
 }
 

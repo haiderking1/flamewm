@@ -63,6 +63,7 @@ mod is super.
 | `super+q` / `super+enter` | foot |
 | `super+c` | close window |
 | `super+j` / `super+k` | focus next / prev |
+| `super+f` | toggle fullscreen |
 | `super+1..9` | go to workspace |
 | `super+shift+1..9` | send window to workspace |
 | `super` + left drag | drop a window on another to swap them |

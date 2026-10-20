@@ -34,7 +34,7 @@ static struct flame_view *drop_target(struct flame_drag *drag) {
 	struct wlr_cursor *cursor = server->input.cursor.wlr;
 	struct flame_view *view;
 	wl_list_for_each(view, &server->desktop.active->views, link) {
-		if (view != drag->view && view->shown
+		if (view != drag->view && view->shown && !view->fullscreen_shown
 				&& wlr_box_contains_point(&view->geometry, cursor->x, cursor->y)) {
 			return view;
 		}
@@ -54,7 +54,8 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	struct wlr_surface *surface;
 	struct flame_view *view = desktop_view_at(&server->desktop,
 		cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
-	if (!view || !view->shown || view->workspace != server->desktop.active) {
+	if (!view || !view->shown || view->workspace != server->desktop.active
+			|| view->fullscreen_shown || view->fullscreen_wanted) {
 		return false;
 	}
 
@@ -88,9 +89,7 @@ static struct flame_view *let_go(struct flame_drag *drag) {
 	struct flame_view *view = drag->view;
 	drag->view = NULL;
 	view->grabbed = false;
-	if (view->workspace) {
-		wlr_scene_node_reparent(&view->tree->node, view->workspace->tree);
-	}
+	view_reparent(view);
 	return view;
 }
 

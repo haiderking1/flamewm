@@ -11,14 +11,19 @@ struct tree_node;
 
 struct flame_workspace {
 	int index;
-	struct wlr_scene_tree *tree; // disabled while hidden
+	struct wlr_scene_tree *tree; // tiles, disabled while hidden
+	struct wlr_scene_tree *fullscreen_tree; // above the bars, hidden with the rest
+	struct wlr_scene_rect *backdrop; // black behind a fullscreen window
 	struct tree_node *layout; // bsp tree, NULL when empty
 	struct wl_list views; // flame_view.link, in leaf order
 	struct flame_view *last_focused;
+	// one fullscreen window per workspace. it keeps its leaf, so leaving
+	// fullscreen drops it right back into its tile
+	struct flame_view *fullscreen;
 };
 
 void workspace_init(struct flame_workspace *workspace, int index,
-	struct wlr_scene_tree *parent);
+	struct wlr_scene_tree *tiled, struct wlr_scene_tree *fullscreen);
 void workspace_set_visible(struct flame_workspace *workspace, bool visible);
 
 // the leaf a new window splits: the focused one, else the last

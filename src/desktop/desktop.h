@@ -5,6 +5,7 @@
 #include <wlr/util/box.h>
 
 #include "desktop/focus.h"
+#include "desktop/fullscreen.h"
 #include "desktop/view.h"
 #include "desktop/workspace.h"
 #include "transaction/transaction.h"
@@ -27,6 +28,8 @@ void desktop_finish(struct flame_desktop *desktop);
 
 // lay out the visible workspace again, call after anything moves
 void desktop_arrange(struct flame_desktop *desktop);
+// a transaction just put things in place
+void desktop_layout_applied(struct flame_desktop *desktop);
 
 // where a window opening right now would land, so its very first configure
 // already has the final size. false when there's no output to put it on
