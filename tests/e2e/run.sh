@@ -181,5 +181,39 @@ $CTL state | grep -o '\"floating\":[a-z]*,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0
 	'"floating":true' "moved by 60,40 size 0,0" "resized by 50,30 moved 0,0" \
 	'"floating":false,"x":6,"y":6,"width":1268'
 
+cat > "$WORK/init.lua" <<LUA
+flame.set { gap = 20, border_width = 4, border_focused_color = "#00ff00" }
+flame.bind("super", "t", function() flame.workspace(3) end)
+flame.rule({ title = "^target\$" }, { floating = true })
+flame.autostart("echo autostarted > $WORK/auto.txt")
+LUA
+CASE_ARGS="-c $WORK/init.lua"
+case_run "config: init.lua sets things, binds keys, floats by rule, autostarts, reloads" "
+$BIN/xdnd source x 10 > /dev/null 2>&1 &
+sleep 0.5
+$BIN/xdnd target 10 > /dev/null 2>&1 &
+sleep 0.8
+cat auto.txt
+$CTL state | grep -o '\"floating\":[a-z]*'
+$CTL focus next > /dev/null
+$CTL state | grep -o '\"floating\":false,\"x\":[0-9]*,\"y\":[0-9]*'
+$CTL key super press > /dev/null; $CTL key t press > /dev/null
+$CTL key t release > /dev/null; $CTL key super release > /dev/null
+$CTL state | grep -o '\"workspace\":[0-9]*' | head -1
+$CTL workspace 1 > /dev/null
+sed -i 's/gap = 20/gap = 50/' init.lua
+$CTL reload > /dev/null
+sleep 0.3
+$CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" \
+	autostarted '"floating":true' '"floating":false,"x":20,"y":20' '"workspace":3' \
+	'"floating":false,"x":50'
+
+printf 'flame.set { gap = 9 }\nthis is not lua\n' > "$WORK/init.lua"
+case_run "config: a broken init.lua still gets a working flame" "
+$BIN/xdnd target 6 > /dev/null 2>&1 &
+sleep 0.8
+$CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" '"floating":false,"x":6'
+CASE_ARGS=
+
 rm -rf "$WORK"
 exit $failed

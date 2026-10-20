@@ -1,0 +1,574 @@
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/util/log.h>
+#include <xkbcommon/xkbcommon.h>
+
+#include "bindings/action.h"
+#include "config/config.h"
+#include "core/server.h"
+#include "util/spawn.h"
+
+// init.lua: flame's config is lua. it starts from the compiled in defaults
+// and changes what it says. the api, all under the global `flame`:
+//   flame.set{ gap = 6, border_width = 2, border_color = "#2a2a2a",
+//     border_focused_color = "#ff6a00", background = "#111111",
+//     repeat_rate = 30, repeat_delay = 250, focus_follows_mouse = true,
+//     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
+//     keyboard = { layout = "us,ara", variant = "", model = "",
+//       options = "grp:alt_shift_toggle", rules = "" } }
+//   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
+//     action a function or a string to spawn. replaces a bind on the same keys
+//   flame.unbind(mods, key), flame.clear_binds()
+//   flame.rule(match, props)  match { app_id = pattern, title = pattern }
+//     (lua patterns), props { floating = bool, workspace = n, fullscreen = bool }
+//   flame.autostart(command)  run once when flame comes up
+//   flame.spawn(command), flame.quit(), flame.close(), flame.fullscreen(),
+//   flame.toggle_floating(), flame.focus("next"|"prev"), flame.workspace(n),
+//   flame.move_to_workspace(n), flame.reload(), flame.log(message)
+
+struct flame_lua {
+	lua_State *L;
+	struct flame_server *server; // NULL while the first load runs
+	struct flame_config *config;
+	size_t binds_cap;
+	// spawn binds' command lines, freed with it
+	char ***argvs;
+	size_t argvs_len, argvs_cap;
+};
+
+static const char prelude[] =
+	"local rules = {}\n"
+	"function flame.rule(match, props)\n"
+	"  assert(type(match) == 'table' and type(props) == 'table', 'flame.rule(match, props)')\n"
+	"  rules[#rules + 1] = { match = match, props = props }\n"
+	"end\n"
+	"function flame._rules(app_id, title)\n"
+	"  local out = {}\n"
+	"  for _, rule in ipairs(rules) do\n"
+	"    local fits = true\n"
+	"    for key, pattern in pairs(rule.match) do\n"
+	"      local value = key == 'app_id' and app_id or key == 'title' and title or nil\n"
+	"      if not value or not string.find(value, pattern) then fits = false break end\n"
+	"    end\n"
+	"    if fits then for k, v in pairs(rule.props) do out[k] = v end end\n"
+	"  end\n"
+	"  return out\n"
+	"end\n";
+
+static struct flame_lua *self(lua_State *L) {
+	return lua_touserdata(L, lua_upvalueindex(1));
+}
+
+// actions run against a server, there's none while the first load runs
+static struct flame_server *server_or_warn(lua_State *L, const char *what) {
+	struct flame_lua *lua = self(L);
+	if (!lua->server) {
+		wlr_log(WLR_ERROR, "config: %s can't run while the config loads", what);
+	}
+	return lua->server;
+}
+
+// ---- values ----
+
+static bool parse_color(const char *text, float out[4]) {
+	if (!text || text[0] != '#') {
+		return false;
+	}
+	size_t len = strlen(text + 1);
+	if (len != 6 && len != 8) {
+		return false;
+	}
+	char *end;
+	unsigned long v = strtoul(text + 1, &end, 16);
+	if (*end) {
+		return false;
+	}
+	if (len == 6) {
+		v = v << 8 | 0xff;
+	}
+	float a = (float)(v & 0xff) / 255.0f;
+	// premultiplied, what the scene wants
+	out[0] = (float)(v >> 24 & 0xff) / 255.0f * a;
+	out[1] = (float)(v >> 16 & 0xff) / 255.0f * a;
+	out[2] = (float)(v >> 8 & 0xff) / 255.0f * a;
+	out[3] = a;
+	return true;
+}
+
+static bool parse_mods(const char *text, uint32_t *out) {
+	*out = 0;
+	char buf[128];
+	snprintf(buf, sizeof(buf), "%s", text ? text : "");
+	char *save = NULL;
+	for (char *word = strtok_r(buf, "+ ", &save); word; word = strtok_r(NULL, "+ ", &save)) {
+		if (!strcasecmp(word, "super") || !strcasecmp(word, "logo") || !strcasecmp(word, "mod4")) {
+			*out |= WLR_MODIFIER_LOGO;
+		} else if (!strcasecmp(word, "shift")) {
+			*out |= WLR_MODIFIER_SHIFT;
+		} else if (!strcasecmp(word, "ctrl") || !strcasecmp(word, "control")) {
+			*out |= WLR_MODIFIER_CTRL;
+		} else if (!strcasecmp(word, "alt") || !strcasecmp(word, "mod1")) {
+			*out |= WLR_MODIFIER_ALT;
+		} else if (!strcasecmp(word, "altgr") || !strcasecmp(word, "mod5")) {
+			*out |= WLR_MODIFIER_MOD5;
+		} else {
+			return false;
+		}
+	}
+	return true;
+}
+
+static char *dup_field(lua_State *L, int table, const char *key) {
+	lua_getfield(L, table, key);
+	char *value = lua_isstring(L, -1) ? strdup(lua_tostring(L, -1)) : NULL;
+	lua_pop(L, 1);
+	return value;
+}
+
+static void set_keyboard(lua_State *L, struct flame_config *config, int table) {
+	struct flame_keyboard_names *k = &config->keyboard;
+	char **fields[] = {&k->rules, &k->model, &k->layout, &k->variant, &k->options};
+	const char *names[] = {"rules", "model", "layout", "variant", "options"};
+	for (int i = 0; i < 5; i++) {
+		char *value = dup_field(L, table, names[i]);
+		if (value) {
+			free(*fields[i]);
+			*fields[i] = value;
+		}
+	}
+}
+
+// flame.set{...}
+static int l_set(lua_State *L) {
+	struct flame_config *config = self(L)->config;
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushnil(L);
+	while (lua_next(L, 1)) {
+		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+		int value = lua_gettop(L);
+		bool ok = true;
+		if (!strcmp(key, "gap")) {
+			config->gap = (int)luaL_checkinteger(L, value);
+		} else if (!strcmp(key, "border_width")) {
+			config->border_width = (int)luaL_checkinteger(L, value);
+		} else if (!strcmp(key, "repeat_rate")) {
+			config->repeat_rate = (int32_t)luaL_checkinteger(L, value);
+		} else if (!strcmp(key, "repeat_delay")) {
+			config->repeat_delay = (int32_t)luaL_checkinteger(L, value);
+		} else if (!strcmp(key, "cursor_size")) {
+			config->cursor_size = (uint32_t)luaL_checkinteger(L, value);
+		} else if (!strcmp(key, "focus_follows_mouse")) {
+			config->focus_follows_mouse = lua_toboolean(L, value);
+		} else if (!strcmp(key, "border_color")) {
+			ok = parse_color(lua_tostring(L, value), config->border_color);
+		} else if (!strcmp(key, "border_focused_color")) {
+			ok = parse_color(lua_tostring(L, value), config->border_focused_color);
+		} else if (!strcmp(key, "background")) {
+			ok = parse_color(lua_tostring(L, value), config->background_color);
+		} else if (!strcmp(key, "drag_modifier")) {
+			ok = parse_mods(lua_tostring(L, value), &config->drag_modifier);
+		} else if (!strcmp(key, "cursor_theme")) {
+			free(config->owned_cursor_theme);
+			config->owned_cursor_theme = lua_isstring(L, value) ? strdup(lua_tostring(L, value))
+				: NULL;
+			config->cursor_theme = config->owned_cursor_theme;
+		} else if (!strcmp(key, "keyboard")) {
+			luaL_checktype(L, value, LUA_TTABLE);
+			set_keyboard(L, config, value);
+		} else {
+			return luaL_error(L, "flame.set: there's no %s", key);
+		}
+		if (!ok) {
+			return luaL_error(L, "flame.set: %s doesn't make sense as %s",
+				lua_tostring(L, value), key);
+		}
+		lua_pop(L, 1);
+	}
+	return 0;
+}
+
+// ---- keybinds ----
+
+static struct flame_keybind *find_bind(struct flame_config *config, uint32_t mods,
+		xkb_keysym_t sym) {
+	for (size_t i = 0; i < config->keybind_count; i++) {
+		if (config->owned_keybinds[i].mods == mods && config->owned_keybinds[i].sym == sym) {
+			return &config->owned_keybinds[i];
+		}
+	}
+	return NULL;
+}
+
+static void release_bind(struct flame_lua *lua, struct flame_keybind *bind) {
+	if (bind->action == action_lua) {
+		luaL_unref(lua->L, LUA_REGISTRYINDEX, bind->arg.i);
+	}
+}
+
+static void check_keys(lua_State *L, uint32_t *mods, xkb_keysym_t *sym) {
+	if (!parse_mods(luaL_checkstring(L, 1), mods)) {
+		luaL_error(L, "flame.bind: what modifiers are %s", lua_tostring(L, 1));
+	}
+	const char *key = luaL_checkstring(L, 2);
+	*sym = xkb_keysym_from_name(key, XKB_KEYSYM_NO_FLAGS);
+	if (*sym == XKB_KEY_NoSymbol) {
+		*sym = xkb_keysym_from_name(key, XKB_KEYSYM_CASE_INSENSITIVE);
+	}
+	if (*sym == XKB_KEY_NoSymbol) {
+		luaL_error(L, "flame.bind: there's no key %s", key);
+	}
+	*sym = xkb_keysym_to_lower(*sym);
+}
+
+static const char *const *spawn_argv(struct flame_lua *lua, const char *command) {
+	if (lua->argvs_len == lua->argvs_cap) {
+		size_t cap = lua->argvs_cap ? lua->argvs_cap * 2 : 16;
+		char ***grown = realloc(lua->argvs, cap * sizeof(*grown));
+		if (!grown) {
+			return NULL;
+		}
+		lua->argvs = grown;
+		lua->argvs_cap = cap;
+	}
+	char **argv = calloc(4, sizeof(*argv));
+	if (!argv) {
+		return NULL;
+	}
+	argv[0] = strdup("/bin/sh");
+	argv[1] = strdup("-c");
+	argv[2] = strdup(command);
+	lua->argvs[lua->argvs_len++] = argv;
+	return (const char *const *)argv;
+}
+
+// flame.bind(mods, key, action)
+static int l_bind(lua_State *L) {
+	struct flame_lua *lua = self(L);
+	struct flame_config *config = lua->config;
+	uint32_t mods;
+	xkb_keysym_t sym;
+	check_keys(L, &mods, &sym);
+	struct flame_keybind bind = {.mods = mods, .sym = sym};
+	if (lua_isfunction(L, 3)) {
+		lua_pushvalue(L, 3);
+		bind.action = action_lua;
+		bind.arg.i = luaL_ref(L, LUA_REGISTRYINDEX);
+	} else if (lua_isstring(L, 3)) {
+		bind.action = action_spawn;
+		bind.arg.argv = spawn_argv(lua, lua_tostring(L, 3));
+		if (!bind.arg.argv) {
+			return luaL_error(L, "flame.bind: out of memory");
+		}
+	} else {
+		return luaL_error(L, "flame.bind: the action is a function or a command");
+	}
+	struct flame_keybind *existing = find_bind(config, mods, sym);
+	if (existing) {
+		release_bind(lua, existing);
+		*existing = bind;
+		return 0;
+	}
+	if (config->keybind_count == lua->binds_cap) {
+		size_t cap = lua->binds_cap * 2;
+		struct flame_keybind *grown = realloc(config->owned_keybinds, cap * sizeof(*grown));
+		if (!grown) {
+			return luaL_error(L, "flame.bind: out of memory");
+		}
+		config->owned_keybinds = grown;
+		config->keybinds = grown;
+		lua->binds_cap = cap;
+	}
+	config->owned_keybinds[config->keybind_count++] = bind;
+	return 0;
+}
+
+static int l_unbind(lua_State *L) {
+	struct flame_lua *lua = self(L);
+	struct flame_config *config = lua->config;
+	uint32_t mods;
+	xkb_keysym_t sym;
+	check_keys(L, &mods, &sym);
+	struct flame_keybind *bind = find_bind(config, mods, sym);
+	if (bind) {
+		release_bind(lua, bind);
+		size_t at = (size_t)(bind - config->owned_keybinds);
+		memmove(bind, bind + 1, (config->keybind_count - at - 1) * sizeof(*bind));
+		config->keybind_count--;
+	}
+	return 0;
+}
+
+static int l_clear_binds(lua_State *L) {
+	struct flame_lua *lua = self(L);
+	for (size_t i = 0; i < lua->config->keybind_count; i++) {
+		release_bind(lua, &lua->config->owned_keybinds[i]);
+	}
+	lua->config->keybind_count = 0;
+	return 0;
+}
+
+// ---- actions ----
+
+static int l_autostart(lua_State *L) {
+	struct flame_config *config = self(L)->config;
+	const char *command = luaL_checkstring(L, 1);
+	char **grown = realloc(config->autostart, (config->autostart_count + 1) * sizeof(*grown));
+	if (!grown) {
+		return luaL_error(L, "flame.autostart: out of memory");
+	}
+	config->autostart = grown;
+	config->autostart[config->autostart_count++] = strdup(command);
+	return 0;
+}
+
+static int l_spawn(lua_State *L) {
+	const char *argv[] = {"/bin/sh", "-c", luaL_checkstring(L, 1), NULL};
+	spawn(argv);
+	return 0;
+}
+
+static int l_log(lua_State *L) {
+	wlr_log(WLR_INFO, "config: %s", luaL_checkstring(L, 1));
+	return 0;
+}
+
+static int run_action(lua_State *L, const char *name, flame_action_fn action,
+		union flame_arg arg) {
+	struct flame_server *server = server_or_warn(L, name);
+	if (server) {
+		action(server, &arg);
+	}
+	return 0;
+}
+
+static int l_quit(lua_State *L) {
+	return run_action(L, "flame.quit", action_quit, (union flame_arg){0});
+}
+
+static int l_close(lua_State *L) {
+	return run_action(L, "flame.close", action_close, (union flame_arg){0});
+}
+
+static int l_fullscreen(lua_State *L) {
+	return run_action(L, "flame.fullscreen", action_fullscreen, (union flame_arg){0});
+}
+
+static int l_toggle_floating(lua_State *L) {
+	return run_action(L, "flame.toggle_floating", action_toggle_floating,
+		(union flame_arg){0});
+}
+
+static int l_reload(lua_State *L) {
+	return run_action(L, "flame.reload", action_reload, (union flame_arg){0});
+}
+
+static int l_focus(lua_State *L) {
+	int direction = 1;
+	if (lua_isstring(L, 1) && !lua_isnumber(L, 1)) {
+		direction = !strcmp(lua_tostring(L, 1), "prev") ? -1 : 1;
+	} else if (lua_isnumber(L, 1)) {
+		direction = lua_tointeger(L, 1) < 0 ? -1 : 1;
+	}
+	return run_action(L, "flame.focus", action_focus, (union flame_arg){.i = direction});
+}
+
+static int workspace_arg(lua_State *L) {
+	lua_Integer n = luaL_checkinteger(L, 1);
+	if (n < 1 || n > FLAME_WORKSPACE_COUNT) {
+		return luaL_error(L, "workspaces are 1-%d", FLAME_WORKSPACE_COUNT);
+	}
+	return (int)n - 1;
+}
+
+static int l_workspace(lua_State *L) {
+	return run_action(L, "flame.workspace", action_workspace,
+		(union flame_arg){.i = workspace_arg(L)});
+}
+
+static int l_move_to_workspace(lua_State *L) {
+	return run_action(L, "flame.move_to_workspace", action_move_to_workspace,
+		(union flame_arg){.i = workspace_arg(L)});
+}
+
+static const luaL_Reg functions[] = {
+	{"set", l_set},
+	{"bind", l_bind},
+	{"unbind", l_unbind},
+	{"clear_binds", l_clear_binds},
+	{"autostart", l_autostart},
+	{"spawn", l_spawn},
+	{"log", l_log},
+	{"quit", l_quit},
+	{"close", l_close},
+	{"fullscreen", l_fullscreen},
+	{"toggle_floating", l_toggle_floating},
+	{"reload", l_reload},
+	{"focus", l_focus},
+	{"workspace", l_workspace},
+	{"move_to_workspace", l_move_to_workspace},
+	{NULL, NULL},
+};
+
+// ---- loading ----
+
+const char *config_default_path(void) {
+	static char path[512];
+	const char *xdg = getenv("XDG_CONFIG_HOME");
+	if (xdg && *xdg) {
+		snprintf(path, sizeof(path), "%s/flame/init.lua", xdg);
+	} else {
+		snprintf(path, sizeof(path), "%s/.config/flame/init.lua", getenv("HOME") ? getenv("HOME")
+			: "");
+	}
+	return path;
+}
+
+static void lua_free(struct flame_lua *lua) {
+	if (!lua) {
+		return;
+	}
+	if (lua->L) {
+		lua_close(lua->L);
+	}
+	for (size_t i = 0; i < lua->argvs_len; i++) {
+		for (char **arg = lua->argvs[i]; *arg; arg++) {
+			free(*arg);
+		}
+		free(lua->argvs[i]);
+	}
+	free(lua->argvs);
+	free(lua);
+}
+
+void config_free(struct flame_config *config) {
+	if (!config) {
+		return;
+	}
+	lua_free(config->lua);
+	free(config->owned_keybinds);
+	free(config->owned_cursor_theme);
+	struct flame_keyboard_names *k = &config->keyboard;
+	free(k->rules);
+	free(k->model);
+	free(k->layout);
+	free(k->variant);
+	free(k->options);
+	for (size_t i = 0; i < config->autostart_count; i++) {
+		free(config->autostart[i]);
+	}
+	free(config->autostart);
+	free(config);
+}
+
+static char *message(const char *fmt, const char *a, const char *b) {
+	char buf[1024];
+	snprintf(buf, sizeof(buf), fmt, a, b);
+	return strdup(buf);
+}
+
+struct flame_config *config_load(struct flame_server *server, const char *path, char **error) {
+	*error = NULL;
+	struct flame_config *config = calloc(1, sizeof(*config));
+	if (!config) {
+		return NULL;
+	}
+	*config = flame_default_config;
+	config->owned_keybinds = calloc(flame_default_config.keybind_count + 16,
+		sizeof(*config->owned_keybinds));
+	struct flame_lua *lua = calloc(1, sizeof(*lua));
+	if (!config->owned_keybinds || !lua) {
+		free(lua);
+		config_free(config);
+		return NULL;
+	}
+	memcpy(config->owned_keybinds, flame_default_config.keybinds,
+		flame_default_config.keybind_count * sizeof(*config->owned_keybinds));
+	config->keybinds = config->owned_keybinds;
+	config->cursor_theme = NULL;
+	lua->binds_cap = flame_default_config.keybind_count + 16;
+	lua->config = config;
+	config->lua = lua;
+
+	path = path ? path : config_default_path();
+	FILE *file = fopen(path, "r");
+	if (!file) {
+		return config; // no config: the defaults, nothing to complain about
+	}
+	fclose(file);
+
+	lua->L = luaL_newstate();
+	if (!lua->L) {
+		*error = strdup("no memory for lua");
+		return config;
+	}
+	lua_State *L = lua->L;
+	luaL_openlibs(L);
+	lua_newtable(L);
+	lua_pushlightuserdata(L, lua);
+	luaL_setfuncs(L, functions, 1);
+	lua_setglobal(L, "flame");
+	if (luaL_dostring(L, prelude) != LUA_OK) {
+		*error = message("config: %s%s", lua_tostring(L, -1), "");
+		return config;
+	}
+	if (luaL_dofile(L, path) != LUA_OK) {
+		// what got set before the error stays, the rest is defaults
+		*error = message("%s%s", lua_tostring(L, -1), "");
+		lua_pop(L, 1);
+	}
+	lua->server = server;
+	return config;
+}
+
+// ---- at runtime ----
+
+void config_window_rules(const struct flame_config *config, const char *app_id,
+		const char *title, struct flame_window_rule *out) {
+	*out = (struct flame_window_rule){0};
+	lua_State *L = config->lua ? config->lua->L : NULL;
+	if (!L) {
+		return;
+	}
+	lua_getglobal(L, "flame");
+	lua_getfield(L, -1, "_rules");
+	lua_pushstring(L, app_id ? app_id : "");
+	lua_pushstring(L, title ? title : "");
+	if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
+		wlr_log(WLR_ERROR, "config: a window rule broke: %s", lua_tostring(L, -1));
+		lua_pop(L, 2);
+		return;
+	}
+	lua_getfield(L, -1, "floating");
+	if (!lua_isnil(L, -1)) {
+		out->floating_set = true;
+		out->floating = lua_toboolean(L, -1);
+	}
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "fullscreen");
+	out->fullscreen = lua_toboolean(L, -1);
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "workspace");
+	if (lua_isinteger(L, -1)) {
+		lua_Integer n = lua_tointeger(L, -1);
+		out->workspace = n >= 1 && n <= FLAME_WORKSPACE_COUNT ? (int)n : 0;
+	}
+	lua_pop(L, 3);
+}
+
+void config_run_lua_bind(struct flame_server *server, int ref) {
+	struct flame_lua *lua = server->config->lua;
+	if (!lua || !lua->L) {
+		return;
+	}
+	lua_rawgeti(lua->L, LUA_REGISTRYINDEX, ref);
+	if (lua_pcall(lua->L, 0, 0, 0) != LUA_OK) {
+		wlr_log(WLR_ERROR, "config: a keybind broke: %s", lua_tostring(lua->L, -1));
+		lua_pop(lua->L, 1);
+	}
+}

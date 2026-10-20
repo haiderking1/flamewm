@@ -91,11 +91,20 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	input_update_capabilities(input);
 }
 
-static bool set_default_keymap(struct wlr_keyboard *wlr_keyboard) {
-	// empty names means XKB_DEFAULT_LAYOUT and friends from the env
+// the config's layout, model, variant and options. what it leaves out (NULL)
+// comes from XKB_DEFAULT_LAYOUT and friends in the environment
+static bool set_keymap(struct wlr_keyboard *wlr_keyboard,
+		const struct flame_keyboard_names *names) {
+	struct xkb_rule_names rule_names = {
+		.rules = names->rules,
+		.model = names->model,
+		.layout = names->layout,
+		.variant = names->variant,
+		.options = names->options,
+	};
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	struct xkb_keymap *keymap = context
-		? xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS)
+		? xkb_keymap_new_from_names(context, &rule_names, XKB_KEYMAP_COMPILE_NO_FLAGS)
 		: NULL;
 
 	bool ok = keymap && wlr_keyboard_set_keymap(wlr_keyboard, keymap);
@@ -108,7 +117,7 @@ void keyboard_create(struct flame_input *input, struct wlr_input_device *device)
 	const struct flame_config *config = input->server->config;
 	struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
 
-	if (!set_default_keymap(wlr_keyboard)) {
+	if (!set_keymap(wlr_keyboard, &config->keyboard)) {
 		wlr_log(WLR_ERROR, "failed to load a keymap for %s", device->name);
 		return;
 	}
@@ -134,4 +143,15 @@ void keyboard_create(struct flame_input *input, struct wlr_input_device *device)
 	// to hand it back or nothing can type until something gets clicked
 	input_update_capabilities(input);
 	focus_restore_keyboard(&input->server->desktop);
+}
+
+void keyboards_apply_config(struct flame_input *input) {
+	const struct flame_config *config = input->server->config;
+	struct flame_keyboard *keyboard;
+	wl_list_for_each(keyboard, &input->keyboards, link) {
+		if (!set_keymap(keyboard->wlr, &config->keyboard)) {
+			wlr_log(WLR_ERROR, "config: that keyboard layout doesn't compile, kept the old one");
+		}
+		wlr_keyboard_set_repeat_info(keyboard->wlr, config->repeat_rate, config->repeat_delay);
+	}
 }

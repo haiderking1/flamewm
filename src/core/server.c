@@ -3,7 +3,10 @@
 #include <stdlib.h>
 #include <wlr/util/log.h>
 
+#include "config/config.h"
+#include "input/keyboard.h"
 #include "protocols/globals.h"
+#include "scene/scene.h"
 #include "util/spawn.h"
 
 bool server_init(struct flame_server *server, const struct flame_config *config) {
@@ -32,6 +35,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& ext_workspaces_init(&server->ext_workspaces, server);
 }
 
+static void server_keymap_names(struct flame_server *server);
+
 bool server_start(struct flame_server *server, const char *startup_cmd) {
 	server->socket = wl_display_add_socket_auto(server->display);
 	if (!server->socket) {
@@ -55,10 +60,75 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	xbridge_start(&server->xbridge);
 
 	wlr_log(WLR_INFO, "flamewm running on WAYLAND_DISPLAY=%s", server->socket);
+	server_keymap_names(server);
+	for (size_t i = 0; i < server->config->autostart_count; i++) {
+		spawn_shell(server->config->autostart[i]);
+	}
 	if (startup_cmd) {
 		spawn_shell(startup_cmd);
 	}
 	return true;
+}
+
+// X apps read the keymap's names off the root window
+static void server_keymap_names(struct flame_server *server) {
+	const struct flame_keyboard_names *k = &server->config->keyboard;
+	const char *env_layout = getenv("XKB_DEFAULT_LAYOUT");
+	xserver_set_keymap_names(&server->xbridge.xserver,
+		k->rules ? k->rules : "evdev", k->model ? k->model : "pc105",
+		k->layout ? k->layout : env_layout ? env_layout : "us",
+		k->variant ? k->variant : "", k->options ? k->options : "");
+}
+
+// what changed takes effect: borders and colors on every window, gaps and
+// border widths through a new layout, keymaps and repeat on every keyboard
+static void server_apply_config(struct flame_server *server) {
+	struct flame_desktop *desktop = &server->desktop;
+	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
+		struct flame_workspace *workspace = &desktop->workspaces[i];
+		struct flame_view *view;
+		wl_list_for_each(view, &workspace->views, link) {
+			view_refresh_border(view, view == desktop->focused);
+		}
+		wl_list_for_each(view, &workspace->floats, link) {
+			view_refresh_border(view, view == desktop->focused);
+		}
+	}
+	struct flame_output *output;
+	wl_list_for_each(output, &server->outputs.list, link) {
+		scene_rect_set_color(output->background, server->config->background_color);
+	}
+	keyboards_apply_config(&server->input);
+	server_keymap_names(server);
+	desktop_arrange(desktop);
+}
+
+static void handle_reload_idle(void *data) {
+	struct flame_server *server = data;
+	server->reload_idle = NULL;
+	char *error = NULL;
+	struct flame_config *config = config_load(server, server->config_path, &error);
+	if (!config) {
+		wlr_log(WLR_ERROR, "config: no memory to reload");
+		return;
+	}
+	if (error) {
+		wlr_log(WLR_ERROR, "config: %s", error);
+		free(error);
+	} else {
+		wlr_log(WLR_INFO, "config: reloaded %s", server->config_path ? server->config_path
+			: config_default_path());
+	}
+	struct flame_config *old = (struct flame_config *)server->config;
+	server->config = config;
+	server_apply_config(server);
+	config_free(old);
+}
+
+void server_reload_config(struct flame_server *server) {
+	if (!server->reload_idle) {
+		server->reload_idle = wl_event_loop_add_idle(server->loop, handle_reload_idle, server);
+	}
 }
 
 void server_run(struct flame_server *server) {
@@ -70,6 +140,10 @@ void server_terminate(struct flame_server *server) {
 }
 
 void server_finish(struct flame_server *server) {
+	if (server->reload_idle) {
+		wl_event_source_remove(server->reload_idle);
+		server->reload_idle = NULL;
+	}
 	wl_display_destroy_clients(server->display);
 	// stop listening to the desktop before it goes
 	ipc_finish(&server->ipc);

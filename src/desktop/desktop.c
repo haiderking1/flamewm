@@ -147,12 +147,32 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
 	drag_tree_changed(&desktop->server->input.drag);
+	// the user's rules for it (init.lua): float or not, which workspace,
+	// fullscreen
+	struct flame_window_rule rule;
+	config_window_rules(desktop->server->config, view_app_id(view), view_title(view), &rule);
+	if (rule.floating_set) {
+		view->float_wanted = rule.floating;
+	}
+	if (rule.fullscreen) {
+		view->fullscreen_wanted = true;
+	}
+	if (rule.workspace) {
+		workspace = &desktop->workspaces[rule.workspace - 1];
+	}
 	if (view->float_wanted) {
 		view->floating = true;
 		view->float_box = floating_initial_box(desktop, view);
 		view->has_float_box = true;
 		workspace_add_float(workspace, view);
 	} else if (!workspace_add_view(workspace, view)) {
+		return;
+	}
+	if (workspace != desktop->active) {
+		// sent off to another workspace: it lays out when that one shows
+		workspace->last_focused = view;
+		fullscreen_claim_if_wanted(desktop, view);
+		desktop_notify(desktop);
 		return;
 	}
 	fullscreen_claim_if_wanted(desktop, view);

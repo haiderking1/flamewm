@@ -11,6 +11,7 @@ struct flame_ipc_client;
 //   focus next|prev
 //   fullscreen             toggle it on the focused window
 //   togglefloating         the focused window floats, or tiles again
+//   reload                 init.lua again
 //   close                  the focused window
 //   quit
 //   pointer move X Y | pointer button left|middle|right press|release

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <wlr/util/log.h>
 
@@ -8,7 +9,8 @@
 
 static void usage(FILE *out, const char *name) {
 	fprintf(out,
-		"usage: %s [-s command] [-d] [-v]\n"
+		"usage: %s [-c config] [-s command] [-d] [-v]\n"
+		"  -c config   the lua config, instead of ~/.config/flame/init.lua\n"
 		"  -s command  run command once the compositor is up\n"
 		"  -d          debug logging\n"
 		"  -v          print version\n",
@@ -17,11 +19,15 @@ static void usage(FILE *out, const char *name) {
 
 int main(int argc, char *argv[]) {
 	const char *startup_cmd = NULL;
+	const char *config_path = NULL;
 	enum wlr_log_importance verbosity = WLR_INFO;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "s:dvh")) != -1) {
+	while ((opt = getopt(argc, argv, "c:s:dvh")) != -1) {
 		switch (opt) {
+		case 'c':
+			config_path = optarg;
+			break;
 		case 's':
 			startup_cmd = optarg;
 			break;
@@ -50,12 +56,24 @@ int main(int argc, char *argv[]) {
 	// a failed init just exits, the kernel cleans up after us faster than
 	// unwinding a half built server would
 	struct flame_server server = {0};
-	if (!server_init(&server, &flame_default_config)
-			|| !server_start(&server, startup_cmd)) {
+	char *error = NULL;
+	struct flame_config *config = config_load(&server, config_path, &error);
+	if (!config) {
+		return 1;
+	}
+	if (error) {
+		// a broken config doesn't stop flame: what loaded stays, the rest is
+		// defaults, and the error is in the log
+		wlr_log(WLR_ERROR, "config: %s", error);
+		free(error);
+	}
+	server.config_path = config_path;
+	if (!server_init(&server, config) || !server_start(&server, startup_cmd)) {
 		return 1;
 	}
 
 	server_run(&server);
 	server_finish(&server);
+	config_free((struct flame_config *)server.config);
 	return 0;
 }
