@@ -4,9 +4,9 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
 #include "core/server.h"
@@ -28,28 +28,27 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 		return false;
 	}
 
-	render->scene = wlr_scene_create();
-	if (!render->scene) {
-		wlr_log(WLR_ERROR, "failed to create scene");
+	render->compositor = wlr_compositor_create(server->display, 6, render->renderer);
+	if (!render->compositor) {
+		wlr_log(WLR_ERROR, "failed to create compositor");
 		return false;
 	}
-	render->scene_layout = wlr_scene_attach_output_layout(render->scene,
-		server->outputs.layout);
+	scene_init(&render->scene);
+	// every surface gets tracked from birth, so even ones we haven't drawn
+	// yet wake the outputs when they show up
+	scene_surfaces_init(&render->surfaces, &render->scene, render->compositor);
 
-	// dmabuf ourselves instead of wlr_renderer_init_wl_display() so the scene
-	// gets the handle and can send scanout feedback to clients
+	// clients get the formats our renderer can import, default feedback only.
+	// scanout hints come back with direct scanout
 	if (wlr_renderer_get_texture_formats(render->renderer, WLR_BUFFER_CAP_DMABUF)) {
-		struct wlr_linux_dmabuf_v1 *dmabuf =
+		render->dmabuf =
 			wlr_linux_dmabuf_v1_create_with_renderer(server->display, 5, render->renderer);
-		if (dmabuf) {
-			wlr_scene_set_linux_dmabuf_v1(render->scene, dmabuf);
-		}
 	}
 
 	// explicit sync: clients say when the gpu is done with a buffer instead of
 	// us putting it on screen half drawn. nvidia has no implicit sync, so
 	// without this a frame can show up before it's rendered (its background
-	// color flashing through), the scene waits on these timelines for us
+	// color flashing through), frame.c waits on these timelines for us
 	int drm_fd = wlr_renderer_get_drm_fd(render->renderer);
 	if (render->renderer->features.timeline && server->backend.wlr->features.timeline
 			&& drm_fd >= 0
@@ -61,13 +60,21 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 	}
 
 	for (int i = 0; i < FLAME_LAYER_COUNT; i++) {
-		render->layers[i] = wlr_scene_tree_create(&render->scene->tree);
+		render->layers[i] = scene_tree_create(&render->scene.root);
+		if (!render->layers[i]) {
+			wlr_log(WLR_ERROR, "out of memory");
+			return false;
+		}
 	}
 	return true;
 }
 
+void render_unhook(struct flame_render *render) {
+	scene_surfaces_finish(&render->surfaces);
+}
+
 void render_finish(struct flame_render *render) {
-	wlr_scene_node_destroy(&render->scene->tree.node);
+	scene_finish(&render->scene);
 	wlr_allocator_destroy(render->allocator);
 	wlr_renderer_destroy(render->renderer);
 }

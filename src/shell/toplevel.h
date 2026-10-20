@@ -9,12 +9,13 @@
 #include "desktop/view.h"
 
 struct flame_server;
+struct flame_xdg_tree;
 struct wlr_xdg_toplevel;
 
 struct flame_toplevel {
 	struct flame_view view;
 	struct wlr_xdg_toplevel *xdg;
-	struct wlr_scene_tree *scene_tree; // the xdg surface tree inside view.content
+	struct flame_xdg_tree *xdg_tree; // the xdg surface's scene tree inside view.content
 
 	// what we last asked for
 	int configured_width, configured_height;

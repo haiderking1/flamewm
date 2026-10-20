@@ -5,7 +5,6 @@
 #include <wlr/backend.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
 #include "config/config.h"
@@ -17,11 +16,10 @@ static void handle_frame(struct wl_listener *listener, void *data) {
 
 	// a mouse resize lands right before the frame that shows it
 	drag_frame(&output->server->input.drag);
-	wlr_scene_output_commit(output->scene_output, NULL);
 
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	wlr_scene_output_send_frame_done(output->scene_output, &now);
+	frame_render(&output->frames, output->box, &now);
 	if (transaction_frame_done(&output->server->desktop.transaction, &now)) {
 		wlr_output_schedule_frame(output->wlr);
 	}
@@ -42,7 +40,9 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&output->destroy);
 
 	layers_output_gone(&output->server->layers, output);
-	wlr_scene_node_destroy(&output->background->node);
+	scene_surfaces_output_gone(&output->server->render.surfaces, output->wlr);
+	frame_finish(&output->frames);
+	scene_node_destroy(&output->background->node);
 	wl_list_remove(&output->link);
 	free(output);
 }
@@ -84,10 +84,17 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	}
 	output->server = server;
 	output->wlr = wlr_output;
+	output->background = scene_rect_create(server->render.layers[FLAME_LAYER_BACKGROUND],
+		0, 0, server->config->background_color);
+	if (!output->background || !frame_init(&output->frames, &server->render, wlr_output)) {
+		wlr_log(WLR_ERROR, "failed to set up rendering on %s", wlr_output->name);
+		if (output->background) {
+			scene_node_destroy(&output->background->node);
+		}
+		free(output);
+		return;
+	}
 	wlr_output->data = output;
-	output->background = wlr_scene_rect_create(
-		server->render.layers[FLAME_LAYER_BACKGROUND], 0, 0,
-		server->config->background_color);
 
 	listener_connect(&output->frame, &wlr_output->events.frame, handle_frame);
 	listener_connect(&output->request_state, &wlr_output->events.request_state,
@@ -97,13 +104,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	wl_list_insert(outputs->list.prev, &output->link);
 
 	// this also advertises the wl_output global to clients
-	struct wlr_output_layout_output *layout_output =
-		wlr_output_layout_add_auto(outputs->layout, wlr_output);
-	output->scene_output = wlr_scene_output_create(server->render.scene, wlr_output);
-	if (layout_output && output->scene_output) {
-		wlr_scene_output_layout_add_output(server->render.scene_layout,
-			layout_output, output->scene_output);
-	}
+	wlr_output_layout_add_auto(outputs->layout, wlr_output);
 
 	wlr_log(WLR_INFO, "output %s up: %dx%d@%.3fHz scale %.2f", wlr_output->name,
 		wlr_output->width, wlr_output->height, wlr_output->refresh / 1000.0, wlr_output->scale);
@@ -115,10 +116,8 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 	struct flame_output *output;
 	wl_list_for_each(output, &outputs->list, link) {
 		wlr_output_layout_get_box(outputs->layout, output->wlr, &output->box);
-		wlr_scene_node_set_position(&output->background->node,
-			output->box.x, output->box.y);
-		wlr_scene_rect_set_size(output->background,
-			output->box.width, output->box.height);
+		scene_node_set_position(&output->background->node, output->box.x, output->box.y);
+		scene_rect_set_size(output->background, output->box.width, output->box.height);
 		layers_arrange(&outputs->server->layers, output);
 	}
 

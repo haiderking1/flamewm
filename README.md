@@ -25,7 +25,8 @@ src/
   main.c        args, start, run, tear down
   core/         server root, init/teardown order, unix signals
   backend/      wlr_backend + session, vt switching
-  render/       renderer, allocator, scene graph, z-order layers
+  scene/        flame's own scene graph: what goes where, which client surfaces changed
+  render/       the frame pipeline: elements, occlusion, damage, explicit sync, commits
   output/       monitors: modes, frame callbacks, output layout, background
   protocols/    globals wlroots runs on its own (compositor, clipboard, screencopy...),
                 ext-workspace for waybar
@@ -56,8 +57,12 @@ how stuff connects:
 - windows get their final tile size in the very first configure and stay
   hidden until a transaction places them, so nothing spawns at 0,0 and grows
 - the scene graph is layered bottom to top: background, bottom, tiled,
-  floating, top, overlay. every workspace is a tree under `tiled` that gets
-  turned on and off
+  floating, top, fullscreen, grabbing launchers, overlay. every workspace is a
+  tree under `tiled` that gets turned on and off
+- flame renders by itself, no wlr_scene: every frame `render/` flattens the
+  scene into elements, drops what's covered, diffs against the last frame to
+  find damage, draws only that through the wlroots renderer and commits. the
+  renderer is just "this texture here, this rect there"
 
 ## binds
 

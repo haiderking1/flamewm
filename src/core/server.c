@@ -82,10 +82,11 @@ void server_finish(struct flame_server *server) {
 	backend_finish(&server->backend);
 	signals_finish(&server->signals);
 
+	render_unhook(&server->render);
 	// globals, seat and output layout go with the display
 	wl_display_destroy(server->display);
 
-	// scene after the display so no scene output outlives its output,
-	// renderer dead last since everything above may still reference it
+	// scene after the display, its surfaces are gone by then. renderer dead
+	// last since everything above may still reference it
 	render_finish(&server->render);
 }

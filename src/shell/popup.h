@@ -15,11 +15,11 @@ struct flame_popup {
 	struct wl_listener destroy;
 };
 
-struct wlr_scene_tree;
+struct flame_tree;
 
 // frees itself when the client destroys the popup. parent_tree is where it
 // draws: its parent popup or window's tree, or a layer surface's popup tree
 void popup_create(struct flame_server *server, struct wlr_xdg_popup *xdg_popup,
-	struct wlr_scene_tree *parent_tree);
+	struct flame_tree *parent_tree);
 
 #endif

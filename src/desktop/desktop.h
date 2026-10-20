@@ -16,7 +16,7 @@ struct wlr_surface;
 // owns every window and workspace and decides where things go
 struct flame_desktop {
 	struct flame_server *server;
-	struct wlr_scene_tree *staging; // disabled, unmapped views wait here
+	struct flame_tree *staging; // disabled, unmapped views wait here
 	struct flame_workspace workspaces[FLAME_WORKSPACE_COUNT];
 	struct flame_workspace *active;
 	struct flame_view *focused;

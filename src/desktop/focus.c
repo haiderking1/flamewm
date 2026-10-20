@@ -2,7 +2,6 @@
 
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
-#include <wlr/types/wlr_scene.h>
 
 #include "config/config.h"
 #include "core/server.h"
@@ -34,7 +33,7 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 		view->workspace->last_focused = view;
 		view_set_focused(view, true);
 		// keeps its popups above the neighbours
-		wlr_scene_node_raise_to_top(&view->tree->node);
+		scene_node_raise_to_top(&view->tree->node);
 	}
 	focus_restore_keyboard(desktop);
 	desktop_notify(desktop);

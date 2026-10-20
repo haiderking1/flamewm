@@ -5,14 +5,17 @@
 #include <wayland-server-core.h>
 #include <wlr/util/box.h>
 
+#include "render/frame.h"
+
 struct flame_server;
+struct flame_rect;
 
 struct flame_output {
 	struct wl_list link; // flame_outputs.list
 	struct flame_server *server;
 	struct wlr_output *wlr;
-	struct wlr_scene_output *scene_output;
-	struct wlr_scene_rect *background;
+	struct flame_frame frames; // what it showed last and what changed since
+	struct flame_rect *background;
 	struct wlr_box box; // layout coords
 	struct wlr_box usable; // box minus what bars reserve, tiles go here
 
