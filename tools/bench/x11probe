@@ -1,0 +1,17 @@
+#!/bin/sh
+# builds x11probe.c (once, when it changed) and runs it: frameprobe for X11,
+# missed vblanks and present -> screen latency on any X server. inside flame
+# it uses flame's X server, anywhere else $DISPLAY (xwayland).
+# usage: x11probe [seconds] [-v]
+set -e
+here=$(dirname "$(readlink -f "$0")")
+build=${XDG_CACHE_HOME:-$HOME/.cache}/flamewm-x11probe
+mkdir -p "$build"
+if [ ! -x "$build/x11probe" ] || [ "$here/x11probe.c" -nt "$build/x11probe" ]; then
+	clang -O2 -Wall -o "$build/x11probe" "$here/x11probe.c" \
+		$(pkg-config --cflags --libs xcb xcb-dri3 xcb-present gbm)
+fi
+if [ -n "$FLAMEWM_X11_DISPLAY" ]; then
+	export DISPLAY="$FLAMEWM_X11_DISPLAY"
+fi
+exec "$build/x11probe" "$@"
