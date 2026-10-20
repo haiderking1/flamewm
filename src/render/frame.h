@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/box.h>
 
+#include "render/cursor.h"
 #include "render/elements.h"
 #include "render/gpu_time.h"
 #include "render/scanout.h"
@@ -59,13 +60,16 @@ struct flame_frame {
 	// a successor, rendered while the pending one is still waiting to flip
 	struct wlr_output_state queued;
 	bool has_queued;
-	bool queued_scanout; // it's a client buffer going straight to KMS
+	enum timing_commit queued_kind;
+	// the buffer of the newest commit: a frame where only the cursor plane
+	// changed sends it again instead of drawing anything
+	struct wlr_buffer *front;
 
 	struct flame_scanout scanout;
+	struct flame_frame_cursor cursor;
 
 	struct wlr_damage_ring ring; // buffer coords, per swapchain buffer
 	pixman_region32_t pending; // layout coords, from client commits
-	pixman_region32_t pending_buffer; // buffer coords, from wlroots (cursor)
 	bool whole; // mode, scale or transform changed, or the first frame
 
 	struct flame_element_list prev, cur;
@@ -79,7 +83,7 @@ struct flame_frame {
 
 	struct wl_listener scene_changed;
 	struct wl_listener scene_damage;
-	struct wl_listener output_damage;
+	struct wl_listener pointer_changed;
 	struct wl_listener output_needs_frame;
 	struct wl_listener output_commit;
 	struct wl_listener output_frame;

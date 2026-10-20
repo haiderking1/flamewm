@@ -28,7 +28,7 @@ struct flame_frame_timing {
 	struct timespec span_start;
 
 	// this report
-	uint32_t flips, composited, scanout, failed;
+	uint32_t flips, composited, scanout, cursor, failed;
 	// successors: rendered behind a pending flip, sent when it landed, or
 	// refused by KMS right then
 	uint32_t prepared, promoted, discarded;
@@ -62,8 +62,15 @@ void timing_finish(struct flame_frame_timing *timing);
 void timing_frame(struct flame_frame_timing *timing, const struct timespec *start,
 	const struct timespec *end, bool drew);
 
-// a frame went to KMS (composited by us or a client buffer scanned out), or didn't
-void timing_committed(struct flame_frame_timing *timing, bool ok, bool scanout);
+// what a commit carried
+enum timing_commit {
+	TIMING_COMPOSITED, // a frame we drew
+	TIMING_SCANOUT, // a client buffer straight to KMS
+	TIMING_CURSOR, // only the cursor plane moved, the same buffer again
+};
+
+// a frame went to KMS, or didn't
+void timing_committed(struct flame_frame_timing *timing, bool ok, enum timing_commit kind);
 void timing_successor_prepared(struct flame_frame_timing *timing);
 // a successor went to KMS when the flip landed (ok) or got refused
 void timing_successor(struct flame_frame_timing *timing, bool ok);

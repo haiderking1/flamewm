@@ -42,6 +42,21 @@ the window keeps its last frame instead of one slow app delaying the screen.
 
 anything else stops startup, a typo shouldn't quietly test the wrong thing.
 
+### cursor
+
+flame owns the pointer image, wlroots never draws one. on a real tty it goes
+on the cursor plane: the image gets written by the cpu into a dumb buffer
+(that's what nvidia's cursor plane takes, it can't take what the gpu renders)
+and KMS moves it. moving the mouse redraws nothing, it just sends the frame
+that's already on screen again with the plane somewhere else, and a
+fullscreen window keeps direct scanout with the pointer over it.
+
+when the plane can't show it (nested, headless, a rotated output, a client
+cursor at the wrong scale, a recorder that wants the cursor in its frames)
+it's drawn as the topmost thing in the frame instead.
+`FLAME_HARDWARE_CURSOR=0` always draws it, `1` (default) uses the plane when
+it can, anything else stops startup.
+
 ### frame timing
 
 `FLAME_FRAME_TIMING=1 ./flamewm.run` logs a `flame: frame-timing` line per
@@ -50,13 +65,14 @@ output every two seconds, only observing, nothing about rendering changes:
 - `pipeline` / `overlap` / `lead_ms`: the policy, whether it's preparing
   frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
-- `composited` / `scanout` / `failed`: frames we drew, client buffers sent
-  straight to KMS, and frames KMS refused
+- `composited` / `scanout` / `cursor` / `failed`: frames we drew, client
+  buffers sent straight to KMS, the same buffer again because only the
+  cursor plane moved, and frames KMS refused
 - `successors` / `promoted` / `discarded`: frames prepared behind a pending
   flip, sent when it landed, or refused right then
 - `timer_late_ms` / `timer_early`: how far off the frame timer fires
 - `draws` / `draw_ms`: building + drawing + committing a changed frame (cpu)
-- `empty` / `empty_ms`: frames where nothing changed, nothing drawn
+- `empty` / `empty_ms`: frames where nothing got drawn (cursor only counts here)
 - `gpu_batch_max_ms`: our gpu work per frame, the longest finished
   measurement since the last frame (results arrive late, nothing waits)
 - `flip_ms`: spacing between kernel flip timestamps, 6.06ms is one 165hz frame
@@ -76,6 +92,7 @@ src/
   backend/      wlr_backend + session, vt switching
   scene/        flame's own scene graph: what goes where, which client surfaces changed
   render/       the frame pipeline: elements, occlusion, damage, explicit sync, commits
+  cursor/       the pointer image (theme or client surface) and the cursor plane it goes on
   output/       monitors: modes, frame callbacks, output layout, background
   protocols/    globals wlroots runs on its own (compositor, clipboard, screencopy...),
                 ext-workspace for waybar

@@ -24,7 +24,7 @@ static void enter(struct flame_surface_state *state, struct wlr_output *output) 
 }
 
 void feedback_drawn(struct flame_scene_surfaces *surfaces, struct wlr_output *output,
-		const struct flame_element_list *list) {
+		const struct flame_element_list *list, struct wlr_surface *plane) {
 	struct flame_scene *scene = surfaces->scene;
 	uint64_t seq = ++scene->frame_seq;
 
@@ -45,6 +45,13 @@ void feedback_drawn(struct flame_scene_surfaces *surfaces, struct wlr_output *ou
 			? (struct wlr_box){shows->x1, shows->y1, shows->x2 - shows->x1, shows->y2 - shows->y1}
 			: (struct wlr_box){0};
 		enter(state, output);
+	}
+	struct flame_surface_state *plane_state = plane ? scene_surface_state(plane) : NULL;
+	if (plane_state) {
+		// shows, but nothing we draw: its commits repaint nothing
+		plane_state->drawn_seq = seq;
+		plane_state->drawn_visible = (struct wlr_box){0};
+		enter(plane_state, output);
 	}
 
 	// went off screen: hidden workspace, unmapped, moved away
@@ -70,7 +77,12 @@ static void send(struct flame_surface_state *state, uint64_t cycle, int64_t now)
 	state->callback_time = now;
 }
 
-void feedback_frame_done(const struct flame_element_list *list, uint64_t cycle, int64_t now) {
+void feedback_frame_done(const struct flame_element_list *list, struct wlr_surface *plane,
+		uint64_t cycle, int64_t now) {
+	struct flame_surface_state *plane_state = plane ? scene_surface_state(plane) : NULL;
+	if (plane_state && plane_state->callback_cycle != cycle) {
+		send(plane_state, cycle, now);
+	}
 	for (size_t i = 0; i < list->len; i++) {
 		const struct flame_element *element = &list->data[i];
 		if (element->type != FLAME_ELEMENT_SURFACE

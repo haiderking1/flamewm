@@ -1,6 +1,7 @@
 #include "render/render.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <wlr/backend.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
@@ -11,7 +12,40 @@
 #include <wlr/util/log.h>
 
 #include "core/server.h"
+#include "cursor/image.h"
 #include "render/timing.h"
+#include "util/listener.h"
+
+static void pointer_changed(struct flame_render *render) {
+	wl_signal_emit_mutable(&render->pointer.events.changed, NULL);
+}
+
+static void handle_pointer_image_changed(struct wl_listener *listener, void *data) {
+	struct flame_render *render = wl_container_of(listener, render, pointer.image_changed);
+	pointer_changed(render);
+}
+
+void render_pointer_set_image(struct flame_render *render, struct flame_cursor_image *image) {
+	struct flame_render_pointer *pointer = &render->pointer;
+	if (pointer->image) {
+		listener_disconnect(&pointer->image_changed);
+	}
+	pointer->image = image;
+	if (image) {
+		listener_connect(&pointer->image_changed, &image->events.changed,
+			handle_pointer_image_changed);
+	}
+	pointer_changed(render);
+}
+
+void render_pointer_move(struct flame_render *render, double x, double y) {
+	if (render->pointer.x == x && render->pointer.y == y) {
+		return;
+	}
+	render->pointer.x = x;
+	render->pointer.y = y;
+	pointer_changed(render);
+}
 
 bool render_init(struct flame_render *render, struct flame_server *server) {
 	render->renderer = wlr_renderer_autocreate(server->backend.wlr);
@@ -70,6 +104,18 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 		return false;
 	}
 	wlr_log(WLR_INFO, "frame pipeline: %s", schedule_policy_name(render->pipeline));
+
+	// 0 draws the pointer into every frame, for comparing or a broken plane
+	const char *hardware_cursor = getenv("FLAME_HARDWARE_CURSOR");
+	if (hardware_cursor && strcmp(hardware_cursor, "0") && strcmp(hardware_cursor, "1")) {
+		wlr_log(WLR_ERROR, "FLAME_HARDWARE_CURSOR=%s: use 0 or 1", hardware_cursor);
+		return false;
+	}
+	render->hardware_cursor = !hardware_cursor || !strcmp(hardware_cursor, "1");
+	if (!render->hardware_cursor) {
+		wlr_log(WLR_INFO, "hardware cursor off, the pointer is drawn into frames");
+	}
+	wl_signal_init(&render->pointer.events.changed);
 
 	render->frame_timing = timing_enabled_by_env();
 	if (render->frame_timing) {

@@ -8,18 +8,21 @@ struct flame_element_list;
 struct flame_scene;
 struct flame_scene_surfaces;
 struct wlr_output;
+struct wlr_surface;
 
 // what clients hear about a frame of output. scene tracked this for us before
 
 // the frame's surfaces are on output now: remembered for damage and
 // wl_surface.enter, with the output's scale. the ones that aren't anymore get
-// wl_surface.leave. bumps the scene's frame_seq
+// wl_surface.leave. bumps the scene's frame_seq. plane is a client cursor on
+// the cursor plane (or NULL): on screen, just not something we draw
 void feedback_drawn(struct flame_scene_surfaces *surfaces, struct wlr_output *output,
-	const struct flame_element_list *list);
+	const struct flame_element_list *list, struct wlr_surface *plane);
 
 // frame callbacks for everything that actually shows, one turn per surface
 // per cycle (frame.c bumps cycle for a new one). covered surfaces wait
-void feedback_frame_done(const struct flame_element_list *list, uint64_t cycle, int64_t now);
+void feedback_frame_done(const struct flame_element_list *list, struct wlr_surface *plane,
+	uint64_t cycle, int64_t now);
 
 // covered windows asking for callbacks get one every 250ms, so they don't
 // freeze without running at the refresh rate behind something opaque.
