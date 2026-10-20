@@ -607,6 +607,9 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->shm_segments);
 	wl_list_init(&xserver->pictures);
 	wl_list_init(&xserver->glyphset_ids);
+	wl_list_init(&xserver->randr_selects);
+	xserver->monitor_ids = 0x200;
+	xserver->monitors_time = xs_now(xserver);
 	if (!xs_atoms_init(&xserver->atoms)) {
 		return false;
 	}
@@ -747,15 +750,51 @@ void xserver_finish(struct flame_xserver *xserver) {
 		xserver->damage_idle = NULL;
 	}
 	xs_render_finish(xserver);
+	xs_randr_client_gone(xserver, NULL);
+	free(xserver->monitors);
+	xserver->monitors = NULL;
+	xserver->monitors_len = 0;
 	xs_atoms_finish(&xserver->atoms);
 }
 
-void xserver_set_screen_size(struct flame_xserver *xserver, int width, int height) {
-	struct xs_window *root = xserver->root;
-	if (width <= 0 || height <= 0 || (root->width == width && root->height == height)) {
+void xserver_set_monitors(struct flame_xserver *xserver, const struct xs_monitor *monitors,
+		size_t len) {
+	struct xs_monitor *copy = len ? calloc(len, sizeof(*copy)) : NULL;
+	if (len && !copy) {
 		return;
 	}
-	xs_window_configure(xserver, root, 4 | 8, 0, 0, width, height, 0, 0, 0);
+	int width = 0, height = 0;
+	for (size_t i = 0; i < len; i++) {
+		copy[i] = monitors[i];
+		copy[i].name[sizeof(copy[i].name) - 1] = '\0';
+		copy[i].id = 0;
+		for (size_t j = 0; j < xserver->monitors_len; j++) {
+			if (!strcmp(xserver->monitors[j].name, copy[i].name)) {
+				copy[i].id = xserver->monitors[j].id;
+			}
+		}
+		if (!copy[i].id) {
+			copy[i].id = xserver->monitor_ids;
+			xserver->monitor_ids += 4;
+		}
+		width = copy[i].x + copy[i].width > width ? copy[i].x + copy[i].width : width;
+		height = copy[i].y + copy[i].height > height ? copy[i].y + copy[i].height : height;
+	}
+	bool same = len == xserver->monitors_len
+		&& (!len || !memcmp(copy, xserver->monitors, len * sizeof(*copy)));
+	if (same) {
+		free(copy);
+		return;
+	}
+	free(xserver->monitors);
+	xserver->monitors = copy;
+	xserver->monitors_len = len;
+	xserver->monitors_time = xs_now(xserver);
+	struct xs_window *root = xserver->root;
+	if (width > 0 && height > 0 && (root->width != width || root->height != height)) {
+		xs_window_configure(xserver, root, 4 | 8, 0, 0, width, height, 0, 0, 0);
+	}
+	xs_randr_changed(xserver);
 }
 
 struct xs_window *xserver_window(struct flame_xserver *xserver, uint32_t id) {

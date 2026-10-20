@@ -566,11 +566,42 @@ static void hook_pointer(void *data, double *x, double *y) {
 	*y = cursor->y;
 }
 
+// X sees flame's outputs where the layout has them, in its coordinates. the
+// one at the origin is primary, else the first
 static void update_screen(struct flame_xbridge *xbridge) {
-	struct wlr_box box;
-	wlr_output_layout_get_box(xbridge->server->outputs.layout, NULL, &box);
-	if (!wlr_box_empty(&box)) {
-		xserver_set_screen_size(&xbridge->xserver, box.x + box.width, box.y + box.height);
+	struct wlr_output_layout *layout = xbridge->server->outputs.layout;
+	struct xs_monitor monitors[16];
+	size_t len = 0;
+	struct wlr_output_layout_output *lo;
+	wl_list_for_each(lo, &layout->outputs, link) {
+		struct wlr_box box;
+		wlr_output_layout_get_box(layout, lo->output, &box);
+		if (wlr_box_empty(&box) || len == LENGTH(monitors)) {
+			continue;
+		}
+		struct xs_monitor *m = &monitors[len++];
+		*m = (struct xs_monitor){
+			.x = box.x,
+			.y = box.y,
+			.width = box.width,
+			.height = box.height,
+			.mm_width = lo->output->phys_width,
+			.mm_height = lo->output->phys_height,
+			.refresh = lo->output->refresh,
+			.primary = box.x == 0 && box.y == 0,
+		};
+		snprintf(m->name, sizeof(m->name), "%s", lo->output->name);
+	}
+	bool primary = false;
+	for (size_t i = 0; i < len; i++) {
+		monitors[i].primary = monitors[i].primary && !primary;
+		primary = primary || monitors[i].primary;
+	}
+	if (len > 0 && !primary) {
+		monitors[0].primary = true;
+	}
+	if (len > 0) {
+		xserver_set_monitors(&xbridge->xserver, monitors, len);
 	}
 }
 

@@ -70,6 +70,10 @@ enum {
 // pixman's compositing for toolkits: pictures, gradients, trapezoids, glyphs
 #define XS_RENDER_OPCODE 137
 #define XS_RENDER_FIRST_ERROR 146
+// flame's outputs: sizes, positions, refresh rates, see randr.c
+#define XS_RANDR_OPCODE 138
+#define XS_RANDR_FIRST_EVENT 71
+#define XS_RANDR_FIRST_ERROR 151
 
 // ---- talking back (xserver.c) ----
 
@@ -188,6 +192,14 @@ void xs_damage(struct flame_xserver *xserver, struct xs_window *top,
 void xs_render_request(struct xs_client *client, const struct xin *request);
 void xs_render_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 void xs_render_finish(struct flame_xserver *xserver);
+
+// ---- RandR (randr.c) ----
+
+void xs_randr_request(struct xs_client *client, const struct xin *request);
+void xs_randr_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+void xs_randr_window_gone(struct flame_xserver *xserver, uint32_t window);
+// the monitors changed: listeners hear
+void xs_randr_changed(struct flame_xserver *xserver);
 
 // ---- MIT-SHM (shm.c) ----
 
