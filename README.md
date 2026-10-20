@@ -27,7 +27,8 @@ src/
   backend/      wlr_backend + session, vt switching
   render/       renderer, allocator, scene graph, z-order layers
   output/       monitors: modes, frame callbacks, output layout, background
-  protocols/    globals wlroots runs on its own (compositor, clipboard, screencopy...)
+  protocols/    globals wlroots runs on its own (compositor, clipboard, screencopy...),
+                ext-workspace for waybar
   shell/        xdg-shell: toplevels become views, popups
   layers/       layer-shell: bars, launchers, wallpapers. exclusive zones, keyboard grabs
   desktop/      window model: views, workspaces, focus. protocol agnostic
@@ -109,11 +110,20 @@ the state is one json line:
 `flamectl` does it from a shell: `flamectl workspace 3`, `flamectl subscribe`.
 quickshell can talk to the socket straight away with a `Socket`.
 
+### waybar
+
+flame also speaks ext-workspace, so waybar's built in module just works.
+empty workspaces you're not on are hidden, `"ignore-hidden": false` shows all 10:
+
+```jsonc
+"ext/workspaces": { "format": "{name}", "on-click": "activate", "sort-by-id": true }
+```
+
 ## status
 
 single output, bspwm tiling only. xdg-shell and layer-shell (waybar, rofi,
-fuzzel, swaybg, mako...), fullscreen, 10 workspaces with an ipc socket for
-bars. no floating yet. no xwayland on purpose.
+fuzzel, swaybg, mako...), fullscreen, 10 workspaces with an ipc socket and
+ext-workspace for bars. no floating yet. no xwayland on purpose.
 
 ## license
 

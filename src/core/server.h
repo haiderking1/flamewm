@@ -11,6 +11,7 @@
 #include "ipc/ipc.h"
 #include "layers/layers.h"
 #include "output/output.h"
+#include "protocols/workspaces.h"
 #include "render/render.h"
 #include "shell/xdg.h"
 
@@ -33,6 +34,7 @@ struct flame_server {
 	struct flame_xdg xdg;
 	struct flame_layers layers;
 	struct flame_ipc ipc;
+	struct flame_ext_workspaces ext_workspaces;
 };
 
 bool server_init(struct flame_server *server, const struct flame_config *config);

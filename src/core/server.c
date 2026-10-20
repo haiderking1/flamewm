@@ -25,7 +25,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& input_init(&server->input, server)
 		&& xdg_init(&server->xdg, server)
 		&& layers_init(&server->layers, server)
-		&& ipc_init(&server->ipc, server);
+		&& ipc_init(&server->ipc, server)
+		&& ext_workspaces_init(&server->ext_workspaces, server);
 }
 
 bool server_start(struct flame_server *server, const char *startup_cmd) {
@@ -67,6 +68,7 @@ void server_finish(struct flame_server *server) {
 	wl_display_destroy_clients(server->display);
 	// stop listening to the desktop before it goes
 	ipc_finish(&server->ipc);
+	ext_workspaces_finish(&server->ext_workspaces);
 	desktop_finish(&server->desktop);
 
 	// unhook from wlroots objects that are about to die
