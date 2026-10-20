@@ -1,0 +1,81 @@
+#include "input/input.h"
+
+#include <wlr/backend.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_seat.h>
+#include <wlr/util/log.h>
+
+#include "core/server.h"
+#include "input/keyboard.h"
+#include "util/listener.h"
+
+static void handle_new_input(struct wl_listener *listener, void *data) {
+	struct flame_input *input = wl_container_of(listener, input, new_input);
+	struct wlr_input_device *device = data;
+
+	switch (device->type) {
+	case WLR_INPUT_DEVICE_KEYBOARD:
+		keyboard_create(input, device);
+		break;
+	case WLR_INPUT_DEVICE_POINTER:
+		cursor_attach_device(&input->cursor, device);
+		break;
+	default:
+		wlr_log(WLR_DEBUG, "ignoring input device %s", device->name);
+		break;
+	}
+	input_update_capabilities(input);
+}
+
+static void handle_request_set_selection(struct wl_listener *listener, void *data) {
+	struct flame_input *input = wl_container_of(listener, input, request_set_selection);
+	struct wlr_seat_request_set_selection_event *event = data;
+	wlr_seat_set_selection(input->seat, event->source, event->serial);
+}
+
+static void handle_request_set_primary_selection(struct wl_listener *listener, void *data) {
+	struct flame_input *input =
+		wl_container_of(listener, input, request_set_primary_selection);
+	struct wlr_seat_request_set_primary_selection_event *event = data;
+	wlr_seat_set_primary_selection(input->seat, event->source, event->serial);
+}
+
+void input_update_capabilities(struct flame_input *input) {
+	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
+	if (!wl_list_empty(&input->keyboards)) {
+		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	}
+	wlr_seat_set_capabilities(input->seat, caps);
+}
+
+bool input_init(struct flame_input *input, struct flame_server *server) {
+	input->server = server;
+	wl_list_init(&input->keyboards);
+
+	input->seat = wlr_seat_create(server->display, "seat0");
+	if (!input->seat) {
+		wlr_log(WLR_ERROR, "failed to create seat");
+		return false;
+	}
+	if (!cursor_init(&input->cursor, server)) {
+		return false;
+	}
+
+	listener_connect(&input->new_input, &server->backend.wlr->events.new_input,
+		handle_new_input);
+	listener_connect(&input->request_set_selection,
+		&input->seat->events.request_set_selection, handle_request_set_selection);
+	listener_connect(&input->request_set_primary_selection,
+		&input->seat->events.request_set_primary_selection,
+		handle_request_set_primary_selection);
+	return true;
+}
+
+void input_finish(struct flame_input *input) {
+	listener_disconnect(&input->new_input);
+	listener_disconnect(&input->request_set_selection);
+	listener_disconnect(&input->request_set_primary_selection);
+	cursor_finish(&input->cursor);
+}
