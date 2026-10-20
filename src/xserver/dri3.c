@@ -39,6 +39,11 @@ static void close_fds(int *fds, int count) {
 static void pixmap_from_buffers(struct xs_client *client, uint8_t minor, uint32_t id,
 		int planes, int *fds, uint16_t width, uint16_t height, const uint32_t *strides,
 		const uint32_t *offsets, uint8_t depth, uint8_t bpp, uint64_t modifier) {
+	if (!xs_id_available(client, id)) {
+		close_fds(fds, planes);
+		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_DRI3_OPCODE, minor);
+		return;
+	}
 	uint32_t format = format_of(depth, bpp);
 	if (format == DRM_FORMAT_INVALID || !width || !height) {
 		close_fds(fds, planes);
@@ -154,6 +159,11 @@ static void buffers_from_pixmap(struct xs_client *client, const struct xin *in, 
 }
 
 static void import_syncobj(struct xs_client *client, uint32_t id, int fd) {
+	if (!xs_id_available(client, id)) {
+		close(fd);
+		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_DRI3_OPCODE, 10);
+		return;
+	}
 	struct xs_syncobj *syncobj = calloc(1, sizeof(*syncobj));
 	if (!syncobj) {
 		close(fd);
@@ -208,6 +218,13 @@ void xs_dri3_request(struct xs_client *client, const struct xin *in) {
 		break;
 	case 4: { // FenceFromFD: an xshmfence the client and flame share
 		int fd = xs_client_take_fd(client);
+		if (!xs_id_available(client, xin32(in, 8))) {
+			if (fd >= 0) {
+				close(fd);
+			}
+			xs_error(client, XS_ERROR_ID_CHOICE, xin32(in, 8), XS_DRI3_OPCODE, minor);
+			break;
+		}
 		struct xshmfence *shm = fd >= 0 ? xshmfence_map_shm(fd) : NULL;
 		if (fd >= 0) {
 			close(fd); // mapped, the fd isn't needed anymore

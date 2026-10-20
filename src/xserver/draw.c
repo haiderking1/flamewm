@@ -914,7 +914,7 @@ static void gc_change(struct xs_client *client, struct xs_gc *gc, uint32_t mask,
 static void create_gc(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint32_t id = xin32(in, 4);
-	if (gc_find(xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, 55, 0);
 		return;
 	}
@@ -1512,7 +1512,7 @@ bool xs_draw_create_pixmap(struct xs_client *client, uint32_t id, int depth, int
 		int height, void *bits, size_t stride, struct xs_shm_segment *shm, uint8_t major,
 		uint16_t minor) {
 	struct flame_xserver *xserver = client->xserver;
-	if (xs_pixmap_find(xserver, id) || xserver_window(xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, major, minor);
 		return false;
 	}

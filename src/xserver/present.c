@@ -128,6 +128,10 @@ static void select_input(struct xs_client *client, uint32_t id, uint32_t window,
 	if (!mask) {
 		return;
 	}
+	if (!xs_id_available(client, id)) {
+		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_PRESENT_OPCODE, 3);
+		return;
+	}
 	select = calloc(1, sizeof(*select));
 	if (!select) {
 		xs_error(client, XS_ERROR_ALLOC, id, XS_PRESENT_OPCODE, 3);

@@ -96,10 +96,6 @@ static void error(struct xs_client *client, int code, uint32_t value, uint8_t mi
 	xs_error(client, (uint8_t)(XS_RENDER_FIRST_ERROR + code), value, XS_RENDER_OPCODE, minor);
 }
 
-static bool own_id(struct xs_client *client, uint32_t id) {
-	return (id & ~0x1fffffu) == client->id_base;
-}
-
 // ---- pictures ----
 
 static struct picture *picture_find(struct flame_xserver *xserver, uint32_t id) {
@@ -131,7 +127,7 @@ static void picture_free(struct picture *picture) {
 }
 
 static struct picture *picture_new(struct xs_client *client, uint32_t id, uint8_t minor) {
-	if (!own_id(client, id) || picture_find(client->xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_RENDER_OPCODE, minor);
 		return NULL;
 	}
@@ -771,9 +767,30 @@ static void glyphset_unref(struct flame_xserver *xserver, struct glyphset *set) 
 	free(set);
 }
 
+bool xs_render_id_in_use(struct flame_xserver *xserver, uint32_t id) {
+	return picture_find(xserver, id) || glyphset_find(xserver, id);
+}
+
+size_t xs_render_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max) {
+	size_t len = 0;
+	struct picture *picture;
+	wl_list_for_each(picture, &xserver->pictures, link) {
+		if ((picture->id & ~0x1fffffu) == base && len < max) {
+			out[len++] = picture->id;
+		}
+	}
+	struct glyphset_id *gs;
+	wl_list_for_each(gs, &xserver->glyphset_ids, link) {
+		if ((gs->id & ~0x1fffffu) == base && len < max) {
+			out[len++] = gs->id;
+		}
+	}
+	return len;
+}
+
 static bool glyphset_id_new(struct xs_client *client, uint32_t id, struct glyphset *set,
 		uint8_t minor) {
-	if (!own_id(client, id) || glyphset_find(client->xserver, id)) {
+	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_RENDER_OPCODE, minor);
 		return false;
 	}

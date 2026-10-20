@@ -6,6 +6,10 @@
 // looks inside one, flame redraws a presented window whole
 
 static void region_create(struct xs_client *client, uint32_t id) {
+	if (!xs_id_available(client, id)) {
+		xs_error(client, XS_ERROR_ID_CHOICE, id, XS_XFIXES_OPCODE, 5);
+		return;
+	}
 	struct xs_region *region = calloc(1, sizeof(*region));
 	if (!region) {
 		xs_error(client, XS_ERROR_ALLOC, id, XS_XFIXES_OPCODE, 5);
