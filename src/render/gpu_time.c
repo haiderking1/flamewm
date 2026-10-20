@@ -41,8 +41,11 @@ static bool load(void) {
 		&& gl.get_integer && gl.flush;
 }
 
-// GL calls need the renderer's context current. wlroots makes it current
-// itself while drawing and puts back whatever was before, so we do the same
+// GL calls need the renderer's context current. once it is, it stays: on
+// nvidia letting go of a context flushes and can wait on the gpu, a couple
+// of ms in the middle of a frame. wlroots puts back whatever was current
+// around its own drawing, so with ours left current nobody toggles it.
+// only someone else's context gets put back
 struct saved {
 	EGLDisplay display;
 	EGLContext context;
@@ -56,14 +59,14 @@ static struct saved make_current(struct flame_gpu_time *gpu) {
 		.draw = eglGetCurrentSurface(EGL_DRAW),
 		.read = eglGetCurrentSurface(EGL_READ),
 	};
-	eglMakeCurrent(gpu->display, EGL_NO_SURFACE, EGL_NO_SURFACE, gpu->context);
+	if (saved.context != gpu->context) {
+		eglMakeCurrent(gpu->display, EGL_NO_SURFACE, EGL_NO_SURFACE, gpu->context);
+	}
 	return saved;
 }
 
 static void restore(struct flame_gpu_time *gpu, struct saved saved) {
-	if (saved.context == EGL_NO_CONTEXT) {
-		eglMakeCurrent(gpu->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-	} else {
+	if (saved.context != EGL_NO_CONTEXT && saved.context != gpu->context) {
 		eglMakeCurrent(saved.display, saved.draw, saved.read, saved.context);
 	}
 }
