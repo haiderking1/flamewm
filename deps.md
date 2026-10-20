@@ -51,6 +51,6 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
 | dep | for |
 | --- | --- |
-| foot | default terminal on `super+q`, change it in `src/config/defaults.c` |
+| foot | default terminal on `super+q`, bind another in `~/.config/flame/init.lua` (`examples/init.lua`) |
 | seatd or logind | only when running on a real tty, nested doesn't need it |
 
