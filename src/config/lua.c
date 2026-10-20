@@ -25,8 +25,17 @@
 //   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
 //     action a function or a string to spawn. replaces a bind on the same keys
 //   flame.unbind(mods, key), flame.clear_binds()
+//   flame.set{ animations = false } or animations = { enabled, layers,
+//     open, close, layer_open, layer_close ("slide", "zoom", "fade", "none"),
+//     fade_in, fade_out, fade_in_from, fade_out_from, zoom_from, zoom_to,
+//     workspace_vertical, focused_opacity, unfocused_opacity,
+//     duration = { open, close, move, workspace, focus } (ms),
+//     curve = { open, close, move, workspace, focus, fade_in, fade_out }
+//       ({x1, y1, x2, y2}, a css cubic-bezier) }
 //   flame.rule(match, props)  match { app_id = pattern, title = pattern }
-//     (lua patterns), props { floating = bool, workspace = n, fullscreen = bool }
+//     (lua patterns), props { floating = bool, workspace = n, fullscreen = bool,
+//     animation = false, open = "zoom", close = "fade", fade_in = false,
+//     fade_out = false, opacity = 0.9 }
 //   flame.autostart(command)  run once when flame comes up
 //   flame.spawn(command), flame.quit(), flame.close(), flame.fullscreen(),
 //   flame.toggle_floating(), flame.focus("next"|"prev"), flame.workspace(n),
@@ -131,6 +140,108 @@ static char *dup_field(lua_State *L, int table, const char *key) {
 	return value;
 }
 
+static bool parse_anim_type(const char *text, enum flame_anim_type *out) {
+	static const char *const names[] = {"none", "slide", "zoom", "fade"};
+	for (int i = 0; text && i < 4; i++) {
+		if (!strcmp(text, names[i])) {
+			*out = (enum flame_anim_type)i;
+			return true;
+		}
+	}
+	return false;
+}
+
+// {x1, y1, x2, y2} or "x1,y1,x2,y2", like css cubic-bezier
+static bool parse_curve(lua_State *L, int index, struct flame_curve *out) {
+	double v[4];
+	if (lua_istable(L, index)) {
+		for (int i = 0; i < 4; i++) {
+			lua_rawgeti(L, index, i + 1);
+			if (!lua_isnumber(L, -1)) {
+				lua_pop(L, 1);
+				return false;
+			}
+			v[i] = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+	} else if (!lua_isstring(L, index)
+			|| sscanf(lua_tostring(L, index), "%lf,%lf,%lf,%lf", &v[0], &v[1], &v[2], &v[3])
+				!= 4) {
+		return false;
+	}
+	*out = (struct flame_curve){v[0], v[1], v[2], v[3]};
+	return true;
+}
+
+static int set_animations(lua_State *L, struct flame_anim_config *anim, int table) {
+	lua_pushnil(L);
+	while (lua_next(L, table)) {
+		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+		int value = lua_gettop(L);
+		bool ok = true;
+		if (!strcmp(key, "enabled")) {
+			anim->enabled = lua_toboolean(L, value);
+		} else if (!strcmp(key, "layers")) {
+			anim->layers = lua_toboolean(L, value);
+		} else if (!strcmp(key, "open")) {
+			ok = parse_anim_type(lua_tostring(L, value), &anim->open);
+		} else if (!strcmp(key, "close")) {
+			ok = parse_anim_type(lua_tostring(L, value), &anim->close);
+		} else if (!strcmp(key, "layer_open")) {
+			ok = parse_anim_type(lua_tostring(L, value), &anim->layer_open);
+		} else if (!strcmp(key, "layer_close")) {
+			ok = parse_anim_type(lua_tostring(L, value), &anim->layer_close);
+		} else if (!strcmp(key, "fade_in")) {
+			anim->fade_in = lua_toboolean(L, value);
+		} else if (!strcmp(key, "fade_out")) {
+			anim->fade_out = lua_toboolean(L, value);
+		} else if (!strcmp(key, "fade_in_from")) {
+			anim->fade_in_from = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "fade_out_from")) {
+			anim->fade_out_from = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "zoom_from")) {
+			anim->zoom_from = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "zoom_to")) {
+			anim->zoom_to = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "workspace_vertical")) {
+			anim->workspace_vertical = lua_toboolean(L, value);
+		} else if (!strcmp(key, "focused_opacity")) {
+			anim->focused_opacity = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "unfocused_opacity")) {
+			anim->unfocused_opacity = (float)luaL_checknumber(L, value);
+		} else if (!strcmp(key, "duration") || !strcmp(key, "curve")) {
+			bool duration = !strcmp(key, "duration");
+			luaL_checktype(L, value, LUA_TTABLE);
+			static const char *const names[] = {"open", "close", "move", "workspace", "focus",
+				"fade_in", "fade_out"};
+			int *ms[] = {&anim->open_ms, &anim->close_ms, &anim->move_ms, &anim->workspace_ms,
+				&anim->focus_ms, NULL, NULL};
+			struct flame_curve *curves[] = {&anim->open_curve, &anim->close_curve,
+				&anim->move_curve, &anim->workspace_curve, &anim->focus_curve,
+				&anim->fade_in_curve, &anim->fade_out_curve};
+			for (int i = 0; i < 7; i++) {
+				lua_getfield(L, value, names[i]);
+				if (!lua_isnil(L, -1)) {
+					if (duration && ms[i]) {
+						*ms[i] = (int)luaL_checkinteger(L, -1);
+					} else if (!duration && !parse_curve(L, lua_gettop(L), curves[i])) {
+						return luaL_error(L, "flame.set: animations.curve.%s is {x1, y1, x2, y2}",
+							names[i]);
+					}
+				}
+				lua_pop(L, 1);
+			}
+		} else {
+			return luaL_error(L, "flame.set: animations has no %s", key);
+		}
+		if (!ok) {
+			return luaL_error(L, "flame.set: animations.%s is none, slide, zoom or fade", key);
+		}
+		lua_pop(L, 1);
+	}
+	return 0;
+}
+
 static void set_keyboard(lua_State *L, struct flame_config *config, int table) {
 	struct flame_keyboard_names *k = &config->keyboard;
 	char **fields[] = {&k->rules, &k->model, &k->layout, &k->variant, &k->options};
@@ -181,6 +292,14 @@ static int l_set(lua_State *L) {
 		} else if (!strcmp(key, "keyboard")) {
 			luaL_checktype(L, value, LUA_TTABLE);
 			set_keyboard(L, config, value);
+		} else if (!strcmp(key, "animations")) {
+			if (lua_isboolean(L, value)) {
+				config->anim.enabled = lua_toboolean(L, value);
+				config->anim.layers = config->anim.enabled;
+			} else {
+				luaL_checktype(L, value, LUA_TTABLE);
+				set_animations(L, &config->anim, value);
+			}
 		} else {
 			return luaL_error(L, "flame.set: there's no %s", key);
 		}
@@ -530,7 +649,7 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 
 void config_window_rules(const struct flame_config *config, const char *app_id,
 		const char *title, struct flame_window_rule *out) {
-	*out = (struct flame_window_rule){0};
+	*out = (struct flame_window_rule){.open = -1, .close = -1};
 	lua_State *L = config->lua ? config->lua->L : NULL;
 	if (!L) {
 		return;
@@ -557,6 +676,31 @@ void config_window_rules(const struct flame_config *config, const char *app_id,
 	if (lua_isinteger(L, -1)) {
 		lua_Integer n = lua_tointeger(L, -1);
 		out->workspace = n >= 1 && n <= FLAME_WORKSPACE_COUNT ? (int)n : 0;
+	}
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "animation");
+	out->no_animation = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
+	lua_pop(L, 1);
+	enum flame_anim_type type;
+	lua_getfield(L, -1, "open");
+	if (lua_isstring(L, -1) && parse_anim_type(lua_tostring(L, -1), &type)) {
+		out->open = (int)type;
+	}
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "close");
+	if (lua_isstring(L, -1) && parse_anim_type(lua_tostring(L, -1), &type)) {
+		out->close = (int)type;
+	}
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "fade_in");
+	out->no_fade_in = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "fade_out");
+	out->no_fade_out = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
+	lua_pop(L, 1);
+	lua_getfield(L, -1, "opacity");
+	if (lua_isnumber(L, -1)) {
+		out->opacity = (float)lua_tonumber(L, -1);
 	}
 	lua_pop(L, 3);
 }

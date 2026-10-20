@@ -11,6 +11,7 @@
 
 bool server_init(struct flame_server *server, const struct flame_config *config) {
 	server->config = config;
+	anims_init(&server->anims, server);
 	server->display = wl_display_create();
 	if (!server->display) {
 		wlr_log(WLR_ERROR, "failed to create wl_display");
@@ -145,6 +146,7 @@ void server_finish(struct flame_server *server) {
 		server->reload_idle = NULL;
 	}
 	wl_display_destroy_clients(server->display);
+	anims_finish(&server->anims);
 	// stop listening to the desktop before it goes
 	ipc_finish(&server->ipc);
 	xselection_finish(&server->xselection);

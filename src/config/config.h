@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "anim/anim.h"
 #include "bindings/keybind.h"
 
 struct flame_lua;
@@ -14,6 +15,31 @@ struct flame_server;
 // environment, like xkbcommon does on its own
 struct flame_keyboard_names {
 	char *rules, *model, *layout, *variant, *options;
+};
+
+enum flame_anim_type {
+	FLAME_ANIM_NONE,
+	FLAME_ANIM_SLIDE, // in from the nearest screen edge, out to it
+	FLAME_ANIM_ZOOM, // grows from small, shrinks away
+	FLAME_ANIM_FADE,
+};
+
+// windows (and bars, notifications) moving into place
+struct flame_anim_config {
+	bool enabled; // windows: opening, closing, moving, workspaces switching
+	bool layers; // bars, notifications, launchers opening and closing
+	enum flame_anim_type open, close, layer_open, layer_close;
+	// fading on top of a slide or zoom, from (or to) this opacity
+	bool fade_in, fade_out;
+	float fade_in_from, fade_out_from;
+	float zoom_from, zoom_to; // a zoom opens from this size, closes to that
+	// ms
+	int open_ms, close_ms, move_ms, workspace_ms, focus_ms;
+	struct flame_curve open_curve, close_curve, move_curve, workspace_curve, focus_curve,
+		fade_in_curve, fade_out_curve;
+	bool workspace_vertical; // workspaces slide up and down, not sideways
+	// windows without focus fade to this, 1 for not at all
+	float focused_opacity, unfocused_opacity;
 };
 
 // read only while it's in use. the compiled in defaults, with the user's
@@ -39,6 +65,8 @@ struct flame_config {
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;
+
+	struct flame_anim_config anim;
 
 	const struct flame_keybind *keybinds;
 	size_t keybind_count;
@@ -69,6 +97,11 @@ struct flame_window_rule {
 	bool floating_set, floating;
 	bool fullscreen;
 	int workspace; // 0 for wherever it would go, else 1..10
+	bool no_animation;
+	// -1 for the config's
+	int open, close;
+	bool no_fade_in, no_fade_out;
+	float opacity; // 0 for the config's
 };
 void config_window_rules(const struct flame_config *config, const char *app_id,
 	const char *title, struct flame_window_rule *out);

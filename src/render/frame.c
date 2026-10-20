@@ -691,7 +691,12 @@ static void render(struct flame_frame *frame, int64_t now) {
 	struct wlr_output *output = frame->output;
 	struct schedule *schedule = &frame->schedule;
 	if (frame->hooks.before_render) {
-		frame->hooks.before_render(frame->hooks.data);
+		// the refresh this frame is going for: after the pending one, if any
+		int64_t target = schedule_next_vblank(schedule, now);
+		if (schedule->pending) {
+			target = schedule_next_vblank(schedule, target);
+		}
+		frame->hooks.before_render(frame->hooks.data, target);
 	}
 
 	struct flame_render_target target;

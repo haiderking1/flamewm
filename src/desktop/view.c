@@ -1,6 +1,7 @@
 #include "desktop/view.h"
 
 
+#include "anim/window.h"
 #include "config/config.h"
 #include "core/server.h"
 #include "util/macros.h"
@@ -15,6 +16,7 @@ void view_init(struct flame_view *view, const struct flame_view_impl *impl,
 	view->desktop = desktop;
 	wl_list_init(&view->link);
 	transaction_view_init(view);
+	view->rule = (struct flame_window_rule){.open = -1, .close = -1};
 
 	// parked in the hidden staging tree, and hidden itself until a
 	// transaction places it so it never shows up at 0,0
@@ -29,6 +31,7 @@ void view_init(struct flame_view *view, const struct flame_view_impl *impl,
 }
 
 void view_finish(struct flame_view *view) {
+	window_anim_free(view);
 	scene_node_destroy(&view->tree->node);
 }
 
@@ -83,6 +86,8 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 	int w = box.width;
 	int h = box.height;
 
+	struct wlr_box was = view->geometry;
+	bool first = !view->shown;
 	view->geometry = box;
 	view->fullscreen_shown = fullscreen;
 	view_reparent(view);
@@ -107,6 +112,7 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 	if (view->impl->placed) {
 		view->impl->placed(view, (struct wlr_box){box.x + bw, box.y + bw, width, height});
 	}
+	window_anim_placed(view, was, first);
 }
 
 void view_hide(struct flame_view *view) {
@@ -126,6 +132,7 @@ void view_refresh_border(struct flame_view *view, bool focused) {
 void view_set_focused(struct flame_view *view, bool focused) {
 	view_refresh_border(view, focused);
 	view->impl->set_activated(view, focused);
+	window_anim_focus(view, focused);
 }
 
 void view_set_resizing(struct flame_view *view, bool resizing) {

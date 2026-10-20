@@ -2,6 +2,8 @@
 
 #include <wlr/util/log.h>
 
+#include "anim/window.h"
+#include "anim/workspace.h"
 #include "config/config.h"
 #include "core/server.h"
 #include "layout/tree.h"
@@ -151,6 +153,7 @@ void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	// fullscreen
 	struct flame_window_rule rule;
 	config_window_rules(desktop->server->config, view_app_id(view), view_title(view), &rule);
+	view->rule = rule;
 	if (rule.floating_set) {
 		view->float_wanted = rule.floating;
 	}
@@ -198,6 +201,9 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	view->fullscreen_wanted = false;
 	view->floating = false;
 	view->has_float_box = false;
+	// its last picture plays the close, from where it is now
+	window_anim_snapshot_if_missing(view);
+	window_anim_closed(view);
 	workspace_remove_view(workspace, view);
 	transaction_remove(&desktop->transaction, view);
 	view_hide(view);
@@ -237,9 +243,12 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 	transaction_flush(&desktop->transaction);
 
 	focus_view(desktop, NULL);
-	workspace_set_visible(desktop->active, false);
+	struct flame_workspace *from = desktop->active;
+	workspace_set_visible(from, false);
 	desktop->active = target;
 	workspace_set_visible(target, true);
+	// the old one slides out of sight before it hides
+	workspace_anim_switch(desktop, from, target);
 
 	desktop_arrange(desktop);
 	focus_view(desktop, focus_fallback(target));

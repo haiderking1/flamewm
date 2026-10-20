@@ -19,6 +19,7 @@
 #include <xf86drm.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "anim/window.h"
 #include "core/server.h"
 #include "util/listener.h"
 #include "util/timer.h"
@@ -1114,6 +1115,9 @@ static void window_destroy(struct flame_xwindow *window) {
 	struct flame_xshell *xshell = window->xshell;
 	if (xshell->pointer_window == window->id) {
 		xshell->pointer_window = 0;
+	}
+	if (!window->floating) {
+		window_anim_snapshot(&window->view); // the close plays from its last picture
 	}
 	// everything it was showing goes back to the app, nothing completes
 	struct xpresent *shown = window->shown;

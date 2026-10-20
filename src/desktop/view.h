@@ -6,6 +6,7 @@
 #include <wayland-server-core.h>
 #include <wlr/util/box.h>
 
+#include "config/config.h"
 #include "transaction/transaction.h"
 
 struct flame_desktop;
@@ -90,6 +91,10 @@ struct flame_view {
 	// told it's in an interactive resize. terminals hold back the size from
 	// their shell meanwhile, so it doesn't redraw its prompt every frame
 	bool resizing;
+
+	// what init.lua's rules said when it opened, and its animations
+	struct flame_window_rule rule;
+	struct flame_view_anim *anim;
 
 	struct flame_view_txn txn;
 };
