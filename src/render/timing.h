@@ -40,9 +40,14 @@ struct flame_frame_timing {
 	struct timing_stat draw, empty, gpu, flip, dispatch;
 	// a client's new buffer handed over -> the flip that first showed it
 	struct timing_stat wayland_latency, x11_latency;
+	// a composited frame handed to KMS -> our gpu work for it done: what KMS
+	// waits for, the wait behind other apps' gpu work included
+	struct timing_stat gpu_done;
 	// vblanks our frames missed, how early they were submitted for theirs,
 	// app frames that came in after the render they were woken for
 	uint32_t missed, late_app_frames;
+	// the driver's periodic draw stalls, and how many were planned for
+	uint32_t hiccups, hiccups_planned;
 	struct timing_stat slack;
 	uint32_t seq_steps[3]; // vblanks between flips: 1, 2, 3 or more
 	uint32_t seq_repeat, seq_reset, metadata_missing, clock_discontinuities;
@@ -92,5 +97,7 @@ void timing_late_app_frames(struct flame_frame_timing *timing, uint32_t count);
 void timing_latency(struct flame_frame_timing *timing, bool x11, int64_t ns);
 // gpu_time_collect's longest finished measurement
 void timing_gpu(struct flame_frame_timing *timing, double max_ms);
+void timing_gpu_done(struct flame_frame_timing *timing, int64_t ns);
+void timing_hiccup(struct flame_frame_timing *timing, bool planned);
 
 #endif

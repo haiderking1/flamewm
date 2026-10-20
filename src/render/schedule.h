@@ -63,6 +63,8 @@ struct schedule {
 	// render lead estimates, see schedule_observe_*
 	int64_t cpu, gpu;
 	int64_t margin; // on top of them, grows when a flip comes a refresh late
+	// the next render only: a draw that's known to stall needs this much more
+	int64_t extra;
 	// the vblank the pending frame was rendered for, 0 when there was no grid
 	int64_t pending_target;
 	bool last_missed; // the newest flip landed a refresh or more late
@@ -90,6 +92,8 @@ bool schedule_render_due(const struct schedule *schedule, int64_t now);
 int64_t schedule_render_at(const struct schedule *schedule, int64_t now);
 // what one frame is estimated to cost plus the margin, capped at a refresh
 int64_t schedule_lead(const struct schedule *schedule);
+// the next render needs ns more than usual (see render/hiccup.h), 0 for not
+void schedule_set_extra(struct schedule *schedule, int64_t ns);
 // is it rendering ahead of the pending flip (deadline, or adaptive under load)
 bool schedule_overlapping(const struct schedule *schedule);
 // the first vblank after t on the predicted grid
@@ -115,7 +119,8 @@ void schedule_promoted(struct schedule *schedule, int64_t submit);
 // render is requested. never for an accepted submission
 void *schedule_discard_queued(struct schedule *schedule);
 
-// render wall time / gpu elapsed time of a changed frame
+// a changed frame's render wall time / its gpu work, handed to KMS -> done
+// (queueing behind other apps included)
 void schedule_observe_cpu(struct schedule *schedule, int64_t ns);
 void schedule_observe_gpu(struct schedule *schedule, int64_t ns);
 

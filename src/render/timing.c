@@ -108,7 +108,9 @@ static void reset_span(struct flame_frame_timing *timing) {
 	memset(&timing->dispatch, 0, sizeof(timing->dispatch));
 	memset(&timing->wayland_latency, 0, sizeof(timing->wayland_latency));
 	memset(&timing->slack, 0, sizeof(timing->slack));
+	memset(&timing->gpu_done, 0, sizeof(timing->gpu_done));
 	timing->missed = timing->late_app_frames = 0;
+	timing->hiccups = timing->hiccups_planned = 0;
 	memset(&timing->x11_latency, 0, sizeof(timing->x11_latency));
 	memset(timing->seq_steps, 0, sizeof(timing->seq_steps));
 	timing->seq_repeat = timing->seq_reset = 0;
@@ -123,17 +125,18 @@ static int handle_report(void *data) {
 	double span = ms_between(&timing->span_start, &now) / 1e3;
 
 	char draw[64], empty[64], gpu[64], flip[64], dispatch[64], late[64];
-	char wayland[64], x11[64], slack[64];
+	char wayland[64], x11[64], slack[64], gpu_done[64];
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
 		"pipeline=%s overlap=%s lead_ms=%.3f "
 		"flips=%u flip_hz=%.1f composited=%u scanout=%u cursor=%u failed=%u "
 		"successors=%u promoted=%u discarded=%u timer_late_ms=%s timer_early=%u "
-		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s flip_ms=%s "
+		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s gpu_done_ms=%s flip_ms=%s "
 		"seq_steps=1:%u,2:%u,3+:%u dispatch_ms=%s clock=%s "
 		"metadata_missing=%u clock_discontinuities=%u seq_repeat=%u seq_reset=%u seq_last=%u "
 		"wayland_commit_to_flip_ms=%s x11_present_to_flip_ms=%s "
-		"missed_vblanks=%u margin_ms=%.3f slack_ms=%s late_app_frames=%u",
+		"missed_vblanks=%u margin_ms=%.3f slack_ms=%s late_app_frames=%u "
+		"hiccups=%u planned=%u",
 		timing->output->name, timing->output->refresh / 1000.0, span,
 		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
 		schedule_lead(schedule) / 1e6,
@@ -144,6 +147,7 @@ static int handle_report(void *data) {
 		timing->draw.count, stat_str(&timing->draw, draw, sizeof(draw)),
 		timing->empty.count, stat_str(&timing->empty, empty, sizeof(empty)),
 		stat_str(&timing->gpu, gpu, sizeof(gpu)),
+		stat_str(&timing->gpu_done, gpu_done, sizeof(gpu_done)),
 		stat_str(&timing->flip, flip, sizeof(flip)),
 		timing->seq_steps[0], timing->seq_steps[1], timing->seq_steps[2],
 		stat_str(&timing->dispatch, dispatch, sizeof(dispatch)),
@@ -153,7 +157,7 @@ static int handle_report(void *data) {
 		stat_str(&timing->wayland_latency, wayland, sizeof(wayland)),
 		stat_str(&timing->x11_latency, x11, sizeof(x11)),
 		timing->missed, schedule->margin / 1e6, stat_str(&timing->slack, slack, sizeof(slack)),
-		timing->late_app_frames);
+		timing->late_app_frames, timing->hiccups, timing->hiccups_planned);
 
 	reset_span(timing);
 	wl_event_source_timer_update(timing->report, REPORT_MS);
@@ -246,6 +250,19 @@ void timing_latency(struct flame_frame_timing *timing, bool x11, int64_t ns) {
 void timing_gpu(struct flame_frame_timing *timing, double max_ms) {
 	if (timing->enabled) {
 		stat_add(&timing->gpu, max_ms);
+	}
+}
+
+void timing_hiccup(struct flame_frame_timing *timing, bool planned) {
+	if (timing->enabled) {
+		timing->hiccups++;
+		timing->hiccups_planned += planned;
+	}
+}
+
+void timing_gpu_done(struct flame_frame_timing *timing, int64_t ns) {
+	if (timing->enabled) {
+		stat_add(&timing->gpu_done, ns / 1e6);
 	}
 }
 
