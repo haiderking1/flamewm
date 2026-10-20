@@ -15,10 +15,9 @@
 // takes what gpu apps draw with: DRI3 buffers, Present, SYNC fences and
 // explicit sync, GLX enough for Mesa to pick a driver. their pictures go
 // straight into flame's scene (xshell/), no second compositor in between.
-// core drawing requests are accepted and dropped: apps that draw with the
-// cpu through X (no MIT-SHM, no XRender yet) show nothing. xbridge/ ties
-// these windows to flame's, steam's webhelper draws over wayland and runs
-// its window logic here
+// apps drawing with the cpu (core requests, MIT-SHM, RENDER) draw into a
+// backing per top-level that flame shows as a texture. RandR tells them
+// about flame's outputs. xbridge/ ties these windows to flame's
 
 struct flame_xserver;
 struct xs_client;
@@ -190,6 +189,17 @@ struct xs_present {
 	uint64_t acquire_point, release_point;
 };
 
+// an output as flame lays it out, what RandR tells apps about
+struct xs_monitor {
+	char name[32];
+	int x, y, width, height; // root coords
+	int mm_width, mm_height; // 0 when unknown
+	int refresh; // mHz, 0 when unknown
+	bool primary;
+	// the server's: its RandR output is id, its crtc id + 1, its mode id + 2
+	uint32_t id;
+};
+
 struct xs_selection {
 	struct wl_list link; // flame_xserver.selections
 	uint32_t atom;
@@ -283,6 +293,12 @@ struct flame_xserver {
 	struct wl_list pictures, glyphset_ids;
 	pixman_glyph_cache_t *glyph_cache;
 	struct wl_event_source *damage_idle;
+	// RandR, see randr.c: flame's outputs, when they last changed (server
+	// time), and who listens for that
+	struct xs_monitor *monitors;
+	size_t monitors_len;
+	uint32_t monitors_time, monitor_ids;
+	struct wl_list randr_selects;
 	struct xs_window *root;
 	struct xs_atoms atoms;
 	uint32_t focus;
@@ -302,8 +318,10 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 bool xserver_start(struct flame_xserver *xserver);
 void xserver_finish(struct flame_xserver *xserver);
 
-// the screen got bigger or smaller
-void xserver_set_screen_size(struct flame_xserver *xserver, int width, int height);
+// flame's outputs changed: the root covers them all, RandR clients hear.
+// ids are filled in here, monitors with the same name keep theirs
+void xserver_set_monitors(struct flame_xserver *xserver, const struct xs_monitor *monitors,
+	size_t len);
 
 struct xs_window *xserver_window(struct flame_xserver *xserver, uint32_t id);
 // a top-level: a child of the root
