@@ -31,10 +31,12 @@ static void harness(const char *fmt, ...) {
 	if (write(to_harness, line, (size_t)len) != len) {
 		exit(3);
 	}
-	char ok[3];
-	if (read(from_harness, ok, 3) != 3) {
-		exit(3);
-	}
+	char c;
+	do {
+		if (read(from_harness, &c, 1) != 1) {
+			exit(3);
+		}
+	} while (c != '\n');
 }
 
 static struct xkb_context *context;

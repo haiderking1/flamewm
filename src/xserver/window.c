@@ -110,13 +110,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 		wl_list_remove(&interest->link);
 		free(interest);
 	}
-	struct xs_selection *selection;
-	wl_list_for_each(selection, &xserver->selections, link) {
-		if (selection->owner == window->id) {
-			selection->owner = 0;
-			selection->client = NULL;
-		}
-	}
+	xs_selection_window_gone(xserver, window);
 	xs_present_window_gone(xserver, window->id);
 	xs_randr_window_gone(xserver, window->id);
 	xs_xi_window_gone(xserver, window->id);
@@ -393,6 +387,9 @@ bool xs_window_change_property(struct flame_xserver *xserver, struct xs_window *
 	property->type = type;
 	property->format = format;
 	property_notify(xserver, window, name, false);
+	if (!window->owner && window->parent) {
+		xs_selection_window_property(xserver, window, name); // flame's own
+	}
 	return true;
 }
 
@@ -475,6 +472,9 @@ void xs_pixmap_destroy(struct flame_xserver *xserver, struct xs_pixmap *pixmap) 
 // ---- a client leaving ----
 
 void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *client) {
+	// its selections first, like Xorg: listeners hear the client closed, not
+	// that its window went
+	xs_selection_client_gone(xserver, client);
 	// its windows, each from the highest one it owns down
 	bool again = true;
 	while (again) {
@@ -533,13 +533,6 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 		if (select->client == client) {
 			wl_list_remove(&select->link);
 			free(select);
-		}
-	}
-	struct xs_selection *selection;
-	wl_list_for_each(selection, &xserver->selections, link) {
-		if (selection->client == client) {
-			selection->owner = 0;
-			selection->client = NULL;
 		}
 	}
 }

@@ -27,6 +27,7 @@ struct xkb_keymap;
 // server side resources, clients get their own ranges above
 #define XS_ROOT 0x100
 #define XS_COLORMAP 0x101
+#define XS_FLAME_WINDOW 0x102 // flame's own, owns the selections it bridges
 #define XS_VISUAL_24 0x21
 #define XS_VISUAL_32 0x22 // argb, for windows with depth 32
 #define XS_FOCUS_NONE 0
@@ -206,9 +207,23 @@ struct xs_selection {
 	struct wl_list link; // flame_xserver.selections
 	uint32_t atom;
 	uint32_t owner; // window
-	struct xs_client *client;
+	struct xs_client *client; // NULL with an owner: flame's
 	uint32_t time;
 };
+
+// an X client wants a selection flame owns. flame answers with
+// xserver_selection_answer, then or later
+struct xs_selection_request {
+	struct wl_list link; // flame_xserver.selection_requests
+	uint32_t selection, target, property, requestor, time;
+};
+
+// flame asked an X owner for a selection (xserver_selection_convert): the
+// answer, in pieces when it's big. last: that was it. type 0 at the end: it
+// failed or was refused
+struct xs_transfer;
+typedef void (*xs_transfer_fn)(void *data, uint32_t type, const uint8_t *bytes, size_t len,
+	bool last);
 
 struct xs_client {
 	struct wl_list link; // flame_xserver.clients
@@ -278,6 +293,10 @@ struct xs_hooks {
 	// apps drew into a top-level's backing with the cpu, region in backing
 	// coords. at most once per loop iteration and top-level
 	void (*damage)(void *data, struct xs_window *top, const pixman_region32_t *region);
+	// an X client took a selection (x_owned) or the X owner let go of it
+	void (*selection_owner)(void *data, uint32_t selection, bool x_owned);
+	// an X client wants a selection flame owns
+	void (*selection_request)(void *data, struct xs_selection_request *request);
 	void *data;
 };
 
@@ -298,6 +317,10 @@ struct flame_xserver {
 	struct wl_list regions; // xs_region.link
 	struct wl_list present_selects; // xs_present_select.link
 	struct wl_list selections; // xs_selection.link
+	// flame in selections, see selection.c: what it asked owners for, what
+	// clients asked it for, who listens for owners changing (XFIXES)
+	struct wl_list transfers, selection_requests, selection_selects;
+	uint32_t flame_window_ids;
 	struct wl_list gcs; // xs_gc.link
 	struct wl_list shm_segments; // xs_shm_segment.link
 	// RENDER, see render.c: pictures, glyph set ids, and pixman's glyph cache
@@ -357,6 +380,25 @@ struct xs_property *xserver_property(struct flame_xserver *xserver, struct xs_wi
 // its name as the app set it (_NET_WM_NAME, else WM_NAME), NULL for none
 const char *xs_window_title(struct flame_xserver *xserver, struct xs_window *window,
 	char *buf, size_t size);
+
+// flame takes a selection for the X side (the wayland clipboard has
+// something) or lets go of it. requests come through hooks.selection_request
+void xserver_selection_own(struct flame_xserver *xserver, uint32_t selection, bool own);
+// an X client owns it
+bool xserver_selection_owned(struct flame_xserver *xserver, uint32_t selection);
+// the answer to a request: data as type in format (8, 16, 32), or type 0 for
+// no. the request is gone after
+void xserver_selection_answer(struct flame_xserver *xserver,
+	struct xs_selection_request *request, uint32_t type, uint8_t format, const void *data,
+	size_t len);
+// asks the X owner for selection as target. NULL: no X owner, or no memory.
+// fn hears the answer, fn isn't called after a cancel
+struct xs_transfer *xserver_selection_convert(struct flame_xserver *xserver,
+	uint32_t selection, uint32_t target, xs_transfer_fn fn, void *data);
+void xserver_transfer_cancel(struct xs_transfer *transfer);
+// an atom by name, made when it doesn't exist. NULL name for unknown ones
+uint32_t xserver_atom(struct flame_xserver *xserver, const char *name);
+const char *xserver_atom_name(struct flame_xserver *xserver, uint32_t atom);
 
 // like a window manager would: the app finds its window where flame put it
 void xserver_move_window(struct flame_xserver *xserver, struct xs_window *window,

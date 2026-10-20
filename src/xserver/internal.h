@@ -288,6 +288,23 @@ uint8_t xs_xkb_modmap(struct flame_xserver *xserver, uint8_t keycode);
 // the keycodes there are, min returned
 uint8_t xs_xkb_range(struct flame_xserver *xserver, uint8_t *max);
 
+// ---- selections (selection.c) ----
+
+void xs_set_selection_owner(struct xs_client *client, const struct xin *request);
+void xs_get_selection_owner(struct xs_client *client, const struct xin *request);
+void xs_convert_selection(struct xs_client *client, const struct xin *request);
+// XFIXES SelectSelectionInput
+void xs_selection_select_input(struct xs_client *client, const struct xin *request);
+// an event or a property for one of flame's windows: a selection's answer
+void xs_selection_window_event(struct flame_xserver *xserver, struct xs_window *window,
+	const struct xs_event *event);
+void xs_selection_window_property(struct flame_xserver *xserver, struct xs_window *window,
+	uint32_t name);
+void xs_selection_window_gone(struct flame_xserver *xserver, struct xs_window *window);
+// NULL: everyone
+void xs_selection_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+void xs_selection_finish(struct flame_xserver *xserver);
+
 // ---- MIT-SHM (shm.c) ----
 
 void xs_shm_request(struct xs_client *client, const struct xin *request);
