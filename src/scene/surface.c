@@ -6,6 +6,7 @@
 
 #include "scene/scene.h"
 #include "util/listener.h"
+#include "util/timer.h"
 
 static void addon_destroy(struct wlr_addon *addon);
 
@@ -58,6 +59,20 @@ static bool shown(struct flame_surface_state *state) {
 
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct flame_surface_state *state = wl_container_of(listener, state, commit);
+	if (state->surface->current.committed & WLR_SURFACE_STATE_BUFFER) {
+		int64_t now = now_ns();
+		state->buffer_since = now;
+		if (state->drawing && state->callback_time) {
+			int64_t took = now - state->callback_time;
+			state->draw_time = took > state->draw_time
+				? took : state->draw_time + (took - state->draw_time) / 8;
+			state->drawing = false;
+		}
+		if (state->jit_target && now > state->jit_target) {
+			state->scene->late_app_frames++;
+		}
+		state->jit_target = 0;
+	}
 	// what it redrew, where it was last drawn, only where it showed: a window
 	// covered by something opaque can redraw all it wants without a repaint.
 	// moving or resizing it is the frame's business, it compares frames

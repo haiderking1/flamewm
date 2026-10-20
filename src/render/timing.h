@@ -38,6 +38,12 @@ struct flame_frame_timing {
 	// gpu: the longest finished measurement per collection, like raven's
 	// gpu_batch_max_ms. not per frame, results arrive a frame or two late
 	struct timing_stat draw, empty, gpu, flip, dispatch;
+	// a client's new buffer handed over -> the flip that first showed it
+	struct timing_stat wayland_latency, x11_latency;
+	// vblanks our frames missed, how early they were submitted for theirs,
+	// app frames that came in after the render they were woken for
+	uint32_t missed, late_app_frames;
+	struct timing_stat slack;
 	uint32_t seq_steps[3]; // vblanks between flips: 1, 2, 3 or more
 	uint32_t seq_repeat, seq_reset, metadata_missing, clock_discontinuities;
 	bool hw_clock; // the newest flip carried a hardware timestamp
@@ -76,6 +82,14 @@ void timing_successor_prepared(struct flame_frame_timing *timing);
 void timing_successor(struct flame_frame_timing *timing, bool ok);
 // the schedule's timer fired, late_ns after (negative: before) its deadline
 void timing_wake(struct flame_frame_timing *timing, int64_t late_ns);
+// a frame went to KMS slack ns before the vblank it's meant for
+void timing_slack(struct flame_frame_timing *timing, int64_t ns);
+// a flip landed a refresh late, the app frames that missed their render
+void timing_missed(struct flame_frame_timing *timing);
+void timing_late_app_frames(struct flame_frame_timing *timing, uint32_t count);
+// a client buffer reached the screen ns after it was handed over: a wayland
+// commit, or an X11 PresentPixmap
+void timing_latency(struct flame_frame_timing *timing, bool x11, int64_t ns);
 // gpu_time_collect's longest finished measurement
 void timing_gpu(struct flame_frame_timing *timing, double max_ms);
 

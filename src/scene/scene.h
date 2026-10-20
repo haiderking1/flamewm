@@ -91,6 +91,9 @@ struct flame_scene {
 	// bumped every time a frame gets built from the scene, surfaces remember
 	// the last one they were in
 	uint64_t frame_seq;
+	// app frames that came in after the render they were woken just in time
+	// for, frame timing counts them
+	uint32_t late_app_frames;
 
 	struct {
 		// something moved, showed up, went away or looks different

@@ -38,6 +38,19 @@ struct flame_surface_state {
 	struct wlr_output *entered;
 	// the scene node drawing it, when it's the root of one
 	struct flame_surface_node *node;
+	// when its newest buffer came in, ns, 0 once a frame drew it. for the
+	// latency probe
+	int64_t buffer_since;
+	// how long it takes from a frame callback to its next buffer, ns: quick
+	// to grow, slow to shrink. apps that can't make the next vblank when woken
+	// on the flip get their turn earlier, at the submission
+	int64_t draw_time;
+	bool drawing; // woken, its buffer hasn't come in yet
+	// woken just in time for the render at this time, 0 when it wasn't
+	int64_t jit_target;
+	// the just in time wake it's waiting for, 0 for none. a deadline: frames
+	// going out meanwhile move the render it aims at, never this later
+	int64_t jit_wake;
 
 	struct wl_listener commit;
 };
