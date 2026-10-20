@@ -3,6 +3,7 @@
 #include <wlr/util/log.h>
 
 #include "config/config.h"
+#include "core/priority.h"
 #include "core/server.h"
 
 static void usage(FILE *out, const char *name) {
@@ -44,6 +45,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	wlr_log_init(verbosity, NULL);
+	priority_raise();
 
 	// a failed init just exits, the kernel cleans up after us faster than
 	// unwinding a half built server would
