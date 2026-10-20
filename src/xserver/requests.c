@@ -368,84 +368,6 @@ static void list_properties(struct xs_client *client, const struct xin *in) {
 	xs_reply_send(client, &out);
 }
 
-// ---- selections ----
-
-static struct xs_selection *find_selection(struct flame_xserver *xserver, uint32_t atom,
-		bool create) {
-	struct xs_selection *selection;
-	wl_list_for_each(selection, &xserver->selections, link) {
-		if (selection->atom == atom) {
-			return selection;
-		}
-	}
-	if (!create || !(selection = calloc(1, sizeof(*selection)))) {
-		return NULL;
-	}
-	selection->atom = atom;
-	wl_list_insert(&xserver->selections, &selection->link);
-	return selection;
-}
-
-static void set_selection_owner(struct xs_client *client, const struct xin *in) {
-	struct flame_xserver *xserver = client->xserver;
-	uint32_t owner = xin32(in, 4), atom = xin32(in, 8);
-	if (owner && !xserver_window(xserver, owner)) {
-		xs_error(client, XS_ERROR_WINDOW, owner, 22, 0);
-		return;
-	}
-	struct xs_selection *selection = find_selection(xserver, atom, true);
-	if (!selection) {
-		xs_error(client, XS_ERROR_ALLOC, 0, 22, 0);
-		return;
-	}
-	if (selection->client && selection->client != client && selection->owner) {
-		struct xs_event event = {0};
-		xs_event_put8(&event, 0, XS_EVENT_SELECTION_CLEAR);
-		xs_event_put32(&event, 4, xs_now(xserver));
-		xs_event_put32(&event, 8, selection->owner);
-		xs_event_put32(&event, 12, atom);
-		xs_event_send(selection->client, &event);
-	}
-	selection->owner = owner;
-	selection->client = owner ? client : NULL;
-	selection->time = xin32(in, 12);
-}
-
-static void get_selection_owner(struct xs_client *client, const struct xin *in) {
-	struct xs_selection *selection = find_selection(client->xserver, xin32(in, 4), false);
-	struct xout out;
-	xs_reply_begin(client, &out, 0);
-	xout32(&out, selection ? selection->owner : 0);
-	xs_reply_send(client, &out);
-}
-
-static void convert_selection(struct xs_client *client, const struct xin *in) {
-	struct flame_xserver *xserver = client->xserver;
-	uint32_t requestor = xin32(in, 4), atom = xin32(in, 8), target = xin32(in, 12);
-	uint32_t property = xin32(in, 16), time = xin32(in, 20);
-	struct xs_selection *selection = find_selection(xserver, atom, false);
-	struct xs_event event = {0};
-	if (selection && selection->owner && selection->client) {
-		xs_event_put8(&event, 0, XS_EVENT_SELECTION_REQUEST);
-		xs_event_put32(&event, 4, time);
-		xs_event_put32(&event, 8, selection->owner);
-		xs_event_put32(&event, 12, requestor);
-		xs_event_put32(&event, 16, atom);
-		xs_event_put32(&event, 20, target);
-		xs_event_put32(&event, 24, property);
-		xs_event_send(selection->client, &event);
-		return;
-	}
-	// nobody owns it: the answer is no
-	xs_event_put8(&event, 0, XS_EVENT_SELECTION_NOTIFY);
-	xs_event_put32(&event, 4, time);
-	xs_event_put32(&event, 8, requestor);
-	xs_event_put32(&event, 12, atom);
-	xs_event_put32(&event, 16, target);
-	xs_event_put32(&event, 20, 0);
-	xs_event_send(client, &event);
-}
-
 static void send_event(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint32_t destination = xin32(in, 4), mask = xin32(in, 8);
@@ -476,9 +398,11 @@ static void send_event(struct xs_client *client, const struct xin *in) {
 	memcpy(event.bytes, in->data + 12, 32);
 	event.bytes[0] |= 0x80; // came from SendEvent
 	if (mask == 0) {
-		// to whoever made the window
+		// to whoever made the window. flame's own: a selection's answer
 		if (window->owner) {
 			xs_event_send(window->owner, &event);
+		} else if (window->parent) {
+			xs_selection_window_event(xserver, window, &event);
 		}
 		return;
 	}
@@ -783,7 +707,8 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		get_window_attributes(client, in);
 		break;
 	case 4: // DestroyWindow
-		if ((window = get_window(client, in, 4, 4)) && window->parent) {
+		// flame's own windows stay
+		if ((window = get_window(client, in, 4, 4)) && window->parent && window->owner) {
 			wlr_log(WLR_DEBUG, "xserver: %s destroys 0x%x", client->comm, window->id);
 			xs_window_destroy(xserver, window);
 		}
@@ -867,13 +792,13 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		list_properties(client, in);
 		break;
 	case 22:
-		set_selection_owner(client, in);
+		xs_set_selection_owner(client, in);
 		break;
 	case 23:
-		get_selection_owner(client, in);
+		xs_get_selection_owner(client, in);
 		break;
 	case 24:
-		convert_selection(client, in);
+		xs_convert_selection(client, in);
 		break;
 	case 25:
 		send_event(client, in);

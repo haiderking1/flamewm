@@ -70,8 +70,8 @@ $(BUILD)/tests/hiccup_test: tests/hiccup_test.c src/render/hiccup.c
 # flame's X server on its own, a test client against it through the harness.
 # the clients are plain xcb (test-only deps, see deps.md)
 XSERVER_SRCS := $(wildcard src/xserver/*.c) src/util/strbuf.c
-XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xkbcommon-x11 xkbcommon
-XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test
+XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xcb-xfixes xkbcommon-x11 xkbcommon
+XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test
 
 $(BUILD)/tests/harness: tests/xserver/harness.c $(XSERVER_SRCS)
 	@mkdir -p $(dir $@)

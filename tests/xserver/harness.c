@@ -11,6 +11,13 @@
 //   monitors N        N outputs side by side, 1920x1080 each, 165Hz
 //   layouts L         a keymap with these layouts ("us,ara")
 //   mods D L K G      modifiers depressed, latched, locked, and the layout
+//   own SEL, disown SEL   flame takes a selection or lets it go. asked for
+//                     it, flame answers TARGETS and UTF8_STRING ("flame
+//                     clipboard"), nothing else
+//   convert SEL TARGET    flame asks the X owner, the answer comes back as
+//                     "ok TYPE LENGTH FIRST-BYTES" once it's all there
+//   owner SEL         "ok 1" when an X client owns it, as flame last heard
+// every command is answered with a line starting with "ok"
 // usage: harness test-client [args], exits with the client's status
 #include <signal.h>
 #include <time.h>
@@ -34,6 +41,11 @@ struct harness {
 	size_t line_len;
 	uint16_t state;
 	pid_t child;
+	// selections: what flame heard about owners, the answer being collected
+	char owners[256];
+	char *answer;
+	size_t answer_len;
+	bool converting;
 	int status;
 	bool done;
 };
@@ -52,6 +64,67 @@ static uint32_t now_ms(void) {
 
 static struct xs_window *top_at(struct flame_xserver *xserver, int x, int y) {
 	return xs_window_child_at(xserver->root, x, y);
+}
+
+static void reply(struct harness *h, const char *line) {
+	size_t len = strlen(line);
+	if (write(h->replies, line, len) != (ssize_t)len) {
+		h->done = true;
+	}
+}
+
+static void selection_owner(void *data, uint32_t selection, bool x_owned) {
+	struct harness *h = data;
+	const char *name = xserver_atom_name(&h->xserver, selection);
+	char entry[96];
+	snprintf(entry, sizeof(entry), " %s=%d", name ? name : "?", x_owned);
+	if (strlen(h->owners) + strlen(entry) < sizeof(h->owners)) {
+		strcat(h->owners, entry);
+	}
+}
+
+static void selection_request(void *data, struct xs_selection_request *request) {
+	struct harness *h = data;
+	struct flame_xserver *x = &h->xserver;
+	static const char text[] = "flame clipboard";
+	if (request->target == xserver_atom(x, "TARGETS")) {
+		uint32_t targets[] = {xserver_atom(x, "TARGETS"), xserver_atom(x, "UTF8_STRING")};
+		xserver_selection_answer(x, request, xserver_atom(x, "ATOM"), 32, targets,
+			sizeof(targets));
+	} else if (request->target == xserver_atom(x, "UTF8_STRING")) {
+		xserver_selection_answer(x, request, request->target, 8, text, sizeof(text) - 1);
+	} else {
+		xserver_selection_answer(x, request, 0, 8, NULL, 0);
+	}
+}
+
+static void converted(void *data, uint32_t type, const uint8_t *bytes, size_t len, bool last) {
+	struct harness *h = data;
+	char *grown = realloc(h->answer, h->answer_len + len + 1);
+	if (grown && len) {
+		memcpy(grown + h->answer_len, bytes, len);
+		h->answer = grown;
+		h->answer_len += len;
+		grown[h->answer_len] = '\0';
+	} else if (grown) {
+		h->answer = grown;
+		grown[h->answer_len] = '\0';
+	}
+	if (!last) {
+		return;
+	}
+	const char *name = type ? xserver_atom_name(&h->xserver, type) : "None";
+	char line[128];
+	snprintf(line, sizeof(line), "ok %s %zu %.32s\n", name ? name : "?", h->answer_len,
+		h->answer ? h->answer : "");
+	for (char *c = line + 3; *c && c[1]; c++) {
+		*c = *c == '\n' ? ' ' : *c;
+	}
+	free(h->answer);
+	h->answer = NULL;
+	h->answer_len = 0;
+	h->converting = false;
+	reply(h, line);
 }
 
 static void command(struct harness *h, char *line) {
@@ -106,12 +179,31 @@ static void command(struct harness *h, char *line) {
 		sscanf(line, "mods %u %u %u %u", &d, &l, &k, &g);
 		h->state = (uint16_t)((h->state & 0x1f00) | ((d | l | k) & 0xff) | (g & 3) << 13);
 		xserver_keyboard_state(x, d, l, k, g);
+	} else if (!strcmp(word, "own") || !strcmp(word, "disown") || !strcmp(word, "convert")
+			|| !strcmp(word, "owner")) {
+		char selection[64] = "", target[64] = "";
+		sscanf(line, "%*s %63s %63s", selection, target);
+		uint32_t atom = xserver_atom(x, selection);
+		if (!strcmp(word, "convert")) {
+			if (xserver_selection_convert(x, atom, xserver_atom(x, target), converted, h)) {
+				h->converting = true;
+				return; // the answer replies
+			}
+			reply(h, "ok None 0\n");
+			return;
+		}
+		if (!strcmp(word, "owner")) {
+			char out[300];
+			snprintf(out, sizeof(out), "ok %d%s\n", xserver_selection_owned(x, atom), h->owners);
+			h->owners[0] = '\0';
+			reply(h, out);
+			return;
+		}
+		xserver_selection_own(x, atom, !strcmp(word, "own"));
 	} else {
 		fprintf(stderr, "harness: what's '%s'\n", line);
 	}
-	if (write(h->replies, "ok\n", 3) != 3) {
-		h->done = true;
-	}
+	reply(h, "ok\n");
 }
 
 static int handle_command(int fd, uint32_t mask, void *data) {
@@ -152,7 +244,12 @@ int main(int argc, char **argv) {
 	struct harness h = {0};
 	h.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	h.loop = wl_event_loop_create();
-	struct xs_hooks hooks = {.pointer = pointer, .data = &h};
+	struct xs_hooks hooks = {
+		.pointer = pointer,
+		.selection_owner = selection_owner,
+		.selection_request = selection_request,
+		.data = &h,
+	};
 	if (!h.context || !xserver_init(&h.xserver, h.loop, hooks, 1920, 1080)
 			|| !xserver_start(&h.xserver)) {
 		fprintf(stderr, "harness: no X server\n");

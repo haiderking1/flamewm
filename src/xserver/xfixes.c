@@ -65,8 +65,11 @@ void xs_xfixes_request(struct xs_client *client, const struct xin *in) {
 		xout32(&out, 0);
 		xs_reply_send(client, &out);
 		break;
-	// region math, selections, cursors, barriers: accepted, nothing to keep
-	case 2: case 3: case 11: case 12: case 13: case 14: case 15: case 16: case 17:
+	case 2:
+		xs_selection_select_input(client, in);
+		break;
+	// region math, cursors, barriers: accepted, nothing to keep
+	case 3: case 11: case 12: case 13: case 14: case 15: case 16: case 17:
 	case 18: case 20: case 21: case 22: case 23: case 26: case 28: case 29: case 30:
 	case 31: case 32: case 33:
 		break;

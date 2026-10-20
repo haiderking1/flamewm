@@ -639,6 +639,9 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->regions);
 	wl_list_init(&xserver->present_selects);
 	wl_list_init(&xserver->selections);
+	wl_list_init(&xserver->transfers);
+	wl_list_init(&xserver->selection_requests);
+	wl_list_init(&xserver->selection_selects);
 	wl_list_init(&xserver->gcs);
 	wl_list_init(&xserver->shm_segments);
 	wl_list_init(&xserver->pictures);
@@ -659,7 +662,11 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	xserver->root->height = (uint16_t)(height > 0 ? height : 1080);
 	xserver->root->mapped = true;
 	xserver->focus = XS_FOCUS_POINTER_ROOT;
-	if (!xs_xkb_init(xserver)) {
+	struct xs_window *flames = xs_window_create(xserver, NULL, XS_FLAME_WINDOW, xserver->root);
+	if (flames) {
+		flames->class = 2; // InputOnly
+	}
+	if (!flames || !xs_xkb_init(xserver)) {
 		xs_window_destroy(xserver, xserver->root);
 		xs_atoms_finish(&xserver->atoms);
 		return false;
@@ -759,6 +766,9 @@ bool xserver_start(struct flame_xserver *xserver) {
 }
 
 void xserver_finish(struct flame_xserver *xserver) {
+	// flame let go of its side already, owners going away below tell nobody
+	xserver->hooks.selection_owner = NULL;
+	xserver->hooks.selection_request = NULL;
 	struct xs_client *client, *tmp;
 	wl_list_for_each_safe(client, tmp, &xserver->clients, link) {
 		client_free(client);
@@ -795,6 +805,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	xs_randr_client_gone(xserver, NULL);
 	xs_xi_client_gone(xserver, NULL);
 	xs_xkb_finish(xserver);
+	xs_selection_finish(xserver);
 	free(xserver->monitors);
 	xserver->monitors = NULL;
 	xserver->monitors_len = 0;
@@ -839,6 +850,14 @@ void xserver_set_monitors(struct flame_xserver *xserver, const struct xs_monitor
 		xs_window_configure(xserver, root, 4 | 8, 0, 0, width, height, 0, 0, 0);
 	}
 	xs_randr_changed(xserver);
+}
+
+uint32_t xserver_atom(struct flame_xserver *xserver, const char *name) {
+	return xs_atom_intern(&xserver->atoms, name, strlen(name), true);
+}
+
+const char *xserver_atom_name(struct flame_xserver *xserver, uint32_t atom) {
+	return xs_atom_name(&xserver->atoms, atom);
 }
 
 struct xs_window *xserver_window(struct flame_xserver *xserver, uint32_t id) {
