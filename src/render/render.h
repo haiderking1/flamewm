@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+#include "render/schedule.h"
 #include "scene/scene.h"
 #include "scene/surface.h"
 
@@ -37,6 +38,7 @@ struct flame_render {
 	struct flame_tree *layers[FLAME_LAYER_COUNT];
 
 	bool frame_timing; // FLAME_FRAME_TIMING=1, frame.c logs probes
+	enum schedule_policy pipeline; // FLAME_FRAME_PIPELINE, adaptive by default
 };
 
 bool render_init(struct flame_render *render, struct flame_server *server);

@@ -6,6 +6,7 @@
 #include <time.h>
 #include <wayland-server-core.h>
 
+struct schedule;
 struct wlr_output;
 
 // frame timing probes, raven's RAVEN_FRAME_TIMING for flame: start with
@@ -22,11 +23,18 @@ struct timing_stat {
 struct flame_frame_timing {
 	bool enabled;
 	struct wlr_output *output;
+	const struct schedule *schedule; // its policy, overlap and lead get reported
 	struct wl_event_source *report;
 	struct timespec span_start;
 
 	// this report
 	uint32_t flips, composited, failed;
+	// successors: rendered behind a pending flip, sent when it landed, or
+	// refused by KMS right then
+	uint32_t prepared, promoted, discarded;
+	// the schedule's timer firing after its deadline, and before it
+	struct timing_stat timer_late;
+	uint32_t timer_early;
 	// gpu: the longest finished measurement per collection, like raven's
 	// gpu_batch_max_ms. not per frame, results arrive a frame or two late
 	struct timing_stat draw, empty, gpu, flip, dispatch;
@@ -45,7 +53,8 @@ struct flame_frame_timing {
 // FLAME_FRAME_TIMING: 1/true on, unset/0/false off
 bool timing_enabled_by_env(void);
 
-void timing_init(struct flame_frame_timing *timing, struct wlr_output *output, bool enabled);
+void timing_init(struct flame_frame_timing *timing, struct wlr_output *output,
+	const struct schedule *schedule, bool enabled);
 void timing_finish(struct flame_frame_timing *timing);
 
 // one call to frame_render, from start to end. drew: a changed frame got
@@ -55,6 +64,11 @@ void timing_frame(struct flame_frame_timing *timing, const struct timespec *star
 
 // a frame went to KMS, or didn't
 void timing_committed(struct flame_frame_timing *timing, bool ok);
+void timing_successor_prepared(struct flame_frame_timing *timing);
+// a successor went to KMS when the flip landed (ok) or got refused
+void timing_successor(struct flame_frame_timing *timing, bool ok);
+// the schedule's timer fired, late_ns after (negative: before) its deadline
+void timing_wake(struct flame_frame_timing *timing, int64_t late_ns);
 // gpu_time_collect's longest finished measurement
 void timing_gpu(struct flame_frame_timing *timing, double max_ms);
 

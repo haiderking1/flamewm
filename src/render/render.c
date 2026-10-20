@@ -1,5 +1,6 @@
 #include "render/render.h"
 
+#include <stdlib.h>
 #include <wlr/backend.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
@@ -59,6 +60,15 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 		wlr_log(WLR_INFO, "explicit sync not available (renderer timeline=%d backend timeline=%d)",
 			render->renderer->features.timeline, server->backend.wlr->features.timeline);
 	}
+
+	// a typo here would quietly test the wrong thing, so it stops startup
+	const char *pipeline = getenv("FLAME_FRAME_PIPELINE");
+	if (!schedule_policy_parse(pipeline, &render->pipeline)) {
+		wlr_log(WLR_ERROR, "FLAME_FRAME_PIPELINE=%s: use adaptive, immediate or deadline",
+			pipeline);
+		return false;
+	}
+	wlr_log(WLR_INFO, "frame pipeline: %s", schedule_policy_name(render->pipeline));
 
 	render->frame_timing = timing_enabled_by_env();
 	if (render->frame_timing) {
