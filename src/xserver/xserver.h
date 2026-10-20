@@ -364,6 +364,7 @@ struct flame_xserver {
 	uint32_t grab; // the window a held button grabbed, 0 for none
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
+	bool trace; // FLAME_X_TRACE=1: every request in the log
 	uint64_t slots[4]; // client id ranges in use
 	uint32_t timestamp; // ms, for events that carry one
 };
