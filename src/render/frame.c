@@ -116,7 +116,8 @@ static void drop_queued(struct flame_frame *frame) {
 // ours, committing over it would only get refused as busy
 static void adopt_foreign_commit(struct flame_frame *frame) {
 	if (frame->schedule.active && !frame->schedule.pending) {
-		schedule_submitted(&frame->schedule, &frame->foreign_ticket, now_ns());
+		int64_t now = now_ns();
+		schedule_submitted(&frame->schedule, &frame->foreign_ticket, now, now);
 	}
 }
 
@@ -140,6 +141,19 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	const struct wlr_output_event_present *event = data;
 	// a flip without a timestamp anchors on dispatch time instead
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
+	// wayland buffers drawn into that frame made it now
+	int kept = 0;
+	for (int i = 0; i < frame->first_drawn_len; i++) {
+		if (frame->pending_draw && frame->first_drawn[i].draw_id <= frame->pending_draw) {
+			if (event->presented) {
+				timing_latency(&frame->timing, false,
+					timespec_ns(&event->when) - frame->first_drawn[i].since);
+			}
+		} else {
+			frame->first_drawn[kept++] = frame->first_drawn[i];
+		}
+	}
+	frame->first_drawn_len = kept;
 	// buffer nodes drawn into that frame hear it made it
 	if (frame->pending_draw) {
 		struct flame_frame_presented presented = {
@@ -199,6 +213,11 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 		return;
 	}
 	schedule_presented(schedule, frame->present_ns, now);
+	if (schedule->last_missed) {
+		timing_missed(&frame->timing);
+	}
+	timing_late_app_frames(&frame->timing, frame->render->scene.late_app_frames);
+	frame->render->scene.late_app_frames = 0;
 	frame->present_ns = 0;
 	frame->stall_reported = false;
 
@@ -437,6 +456,16 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	});
 	if (client) {
 		sampled(frame, element->surface);
+		// a new buffer's first time on screen, for the latency probe
+		struct flame_surface_state *state = scene_surface_state(element->surface);
+		if (state && state->buffer_since && frame->timing.enabled
+				&& frame->first_drawn_len < (int)(sizeof(frame->first_drawn)
+					/ sizeof(frame->first_drawn[0]))) {
+			frame->first_drawn[frame->first_drawn_len].draw_id = frame->draw_id;
+			frame->first_drawn[frame->first_drawn_len].since = state->buffer_since;
+			frame->first_drawn_len++;
+			state->buffer_since = 0;
+		}
 	} else if (element->buffer_node && element->buffer_node->impl
 			&& element->buffer_node->impl->sampled) {
 		element->buffer_node->impl->sampled(element->buffer_node, frame, frame->draw_id,
@@ -654,6 +683,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		changed = true; // nothing to send again yet
 		cursor_only = false;
 	}
+	bool submitted_now = false;
 	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
 	scanout_hint(&frame->scanout, candidate);
 	bool drew = false;
@@ -673,7 +703,6 @@ static void render(struct flame_frame *frame, int64_t now) {
 		// what buffer nodes will hear about this frame, nothing new for a
 		// cursor move or a client buffer scanned out
 		uint64_t draw_id = kind == TIMING_COMPOSITED ? frame->draw_id : 0;
-
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
@@ -681,8 +710,13 @@ static void render(struct flame_frame *frame, int64_t now) {
 			drew = commit(frame, &state, kind);
 			wlr_output_state_finish(&state);
 			if (drew) {
+				submitted_now = true;
 				frame->pending_draw = draw_id;
-				schedule_submitted(schedule, &frame->submitted_ticket, now_ns());
+				schedule_submitted(schedule, &frame->submitted_ticket, now, now_ns());
+				if (schedule->pending_target) {
+					timing_slack(&frame->timing,
+						schedule->pending_target - schedule->pending_submit);
+				}
 			} else {
 				frame->whole = true;
 			}
@@ -703,6 +737,14 @@ static void render(struct flame_frame *frame, int64_t now) {
 		schedule_empty(schedule, now);
 	}
 	swap_lists(frame);
+	if (submitted_now) {
+		// apps that can't draw a frame between the flip and the deadline get
+		// the next cycle's turn now: they keep their frame rate, everyone
+		// else waits for the flip and makes the next refresh
+		int64_t budget = schedule->period > 0
+			? schedule->period - schedule_lead(schedule) - schedule->margin : INT64_MAX;
+		feedback_frame_done_early(&frame->prev, frame->callback_cycle + 1, now_ns(), budget);
+	}
 
 	int64_t end = now_ns();
 	// a cursor commit costs nothing, it would only drag the estimate down
@@ -720,9 +762,10 @@ static void send_callbacks(struct flame_frame *frame, int64_t now) {
 	if (new_cycle) {
 		frame->callback_cycle++;
 	}
-	// prev is the last frame built, the one that just went out
-	feedback_frame_done(&frame->prev, frame_cursor_surface(&frame->cursor),
-		frame->callback_cycle, now);
+	// prev is the last frame built, the one that just went out. apps that
+	// draw fast get woken just in time for the render that can show them
+	frame->jit_wake = feedback_frame_done(&frame->prev, frame_cursor_surface(&frame->cursor),
+		frame->callback_cycle, now, schedule_render_at(&frame->schedule, now));
 	schedule_callbacks_sent(&frame->schedule, now);
 	if (frame->hooks.callbacks_sent) {
 		frame->hooks.callbacks_sent(frame->hooks.data, &when, new_cycle);
@@ -766,8 +809,18 @@ static void process_once(struct flame_frame *frame) {
 	}
 	if (schedule_callbacks_due(schedule, now)) {
 		send_callbacks(frame, now);
+	} else if (frame->jit_wake && now >= frame->jit_wake) {
+		// the ones held back for just in time
+		frame->jit_wake = feedback_frame_done(&frame->prev,
+			frame_cursor_surface(&frame->cursor), frame->callback_cycle, now,
+			schedule_render_at(schedule, now));
 	}
 
+	// asked again after its turn: a flip would start the next cycle, without
+	// one the refresh grid does
+	if (feedback_waiting_next_cycle(&frame->prev, frame->callback_cycle)) {
+		schedule_callbacks_next(schedule, now);
+	}
 	// covered windows still asking for callbacks, a few times a second
 	int64_t background = feedback_background(&frame->prev, frame->callback_cycle, now);
 
@@ -778,6 +831,9 @@ static void process_once(struct flame_frame *frame) {
 	}
 	if (background && (!deadline || background < deadline)) {
 		deadline = background;
+	}
+	if (frame->jit_wake && (!deadline || frame->jit_wake < deadline)) {
+		deadline = frame->jit_wake > now ? frame->jit_wake : now + 1;
 	}
 	timer_arm(&frame->wake, deadline);
 }

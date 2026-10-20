@@ -33,7 +33,7 @@ static void test_immediate_waits_for_the_slot(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_IMMEDIATE, PERIOD);
 	CHECK(schedule_render_due(&s, 0)); // startup frame
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_request_redraw(&s);
 	// pending flip: no overlap in immediate, however late it gets
 	CHECK(!schedule_render_due(&s, PERIOD - 1));
@@ -46,10 +46,10 @@ static void test_deadline_window(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
 	// a grid from a first flip at t=0
-	schedule_submitted(&s, &a, -MS);
+	schedule_submitted(&s, &a, -MS, -MS);
 	CHECK(schedule_presented(&s, 0, 0) == &a);
-	schedule_submitted(&s, &b, 1 * MS);
-	schedule_callbacks_sent(&s, 1 * MS); // a submission's callbacks are due at once
+	schedule_submitted(&s, &b, 1 * MS, 1 * MS);
+	schedule_callbacks_sent(&s, 1 * MS); // the flip's callbacks went out
 	schedule_request_redraw(&s);
 	int64_t lead = schedule_lead(&s); // 1 + 1 + 0.5ms to start
 	CHECK(lead == 2500000LL);
@@ -64,7 +64,7 @@ static void test_deadline_window(void) {
 static void test_one_successor_only(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_request_redraw(&s);
 	CHECK(schedule_render_due(&s, PERIOD));
 	schedule_queued(&s, &b);
@@ -83,12 +83,103 @@ static void test_one_successor_only(void) {
 static void test_discarded_successor_asks_again(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_queued(&s, &b);
 	CHECK(schedule_presented(&s, PERIOD, PERIOD) == &a);
 	CHECK(schedule_discard_queued(&s) == &b);
 	CHECK(!s.pending && !s.queued && s.redraw);
-	CHECK(schedule_render_due(&s, PERIOD));
+	// asks again, in the window before the next vblank like any frame
+	CHECK(!schedule_render_due(&s, PERIOD));
+	CHECK(schedule_render_due(&s, 2 * PERIOD - schedule_lead(&s)));
+}
+
+static void test_missed_vblank_widens_margin(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, PERIOD, PERIOD); // grid at PERIOD
+	int64_t before = schedule_lead(&s);
+	// submitted for 2 * PERIOD, flipped a refresh late
+	schedule_submitted(&s, &a, 2 * PERIOD - 3 * MS, 2 * PERIOD - MS);
+	schedule_presented(&s, 3 * PERIOD, 3 * PERIOD);
+	CHECK(s.last_missed);
+	CHECK(schedule_lead(&s) == before + SCHEDULE_MARGIN_NS);
+	// on time from then on: it narrows again, slowly
+	int64_t wide = s.margin;
+	for (int i = 4; i < 20; i++) {
+		schedule_submitted(&s, &a, i * PERIOD - 3 * MS, i * PERIOD - MS);
+		schedule_presented(&s, i * PERIOD, i * PERIOD);
+		CHECK(!s.last_missed);
+	}
+	CHECK(s.margin < wide && s.margin > SCHEDULE_MARGIN_NS);
+}
+
+// something came in 0.1ms before a vblank: no render makes that one, the
+// flip a refresh later is on time
+static void test_late_start_is_no_miss(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, PERIOD, PERIOD);
+	schedule_submitted(&s, &a, 2 * PERIOD - MS / 10, 2 * PERIOD + MS / 10);
+	schedule_presented(&s, 3 * PERIOD, 3 * PERIOD);
+	CHECK(!s.last_missed);
+}
+
+// someone asked again after its turn and nothing flips: the next vblank
+// starts a new cycle anyway, once
+static void test_callbacks_next_cycle_without_flip(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, PERIOD, PERIOD);
+	CHECK(schedule_callbacks_due(&s, PERIOD));
+	schedule_callbacks_sent(&s, PERIOD);
+	CHECK(!schedule_callbacks_due(&s, PERIOD + MS));
+	schedule_callbacks_next(&s, PERIOD + MS);
+	CHECK(schedule_deadline(&s, PERIOD + MS) == 2 * PERIOD);
+	CHECK(!schedule_callbacks_due(&s, 2 * PERIOD - 1));
+	CHECK(schedule_callbacks_due(&s, 2 * PERIOD));
+	CHECK(schedule_callbacks_new_cycle(&s, 2 * PERIOD));
+	schedule_callbacks_sent(&s, 2 * PERIOD);
+	CHECK(!schedule_callbacks_due(&s, 2 * PERIOD + MS));
+}
+
+// a render that started for one vblank and only reached KMS after it lands a
+// refresh late: that's a miss, not a frame aimed at the next one
+static void test_render_past_its_vblank_is_a_miss(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, PERIOD, PERIOD);
+	schedule_submitted(&s, &a, 2 * PERIOD - 3 * MS, 2 * PERIOD + MS / 4);
+	schedule_presented(&s, 3 * PERIOD, 3 * PERIOD);
+	CHECK(s.last_missed);
+}
+
+static void test_repaint_window(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	// no grid before the first flip: right away
+	CHECK(schedule_render_due(&s, 0));
+	schedule_submitted(&s, &a, 0, 0);
+	CHECK(schedule_presented(&s, PERIOD, PERIOD) == &a);
+	schedule_callbacks_sent(&s, PERIOD);
+	// a change right after the flip waits until just before the next vblank,
+	// so whatever comes in meanwhile makes that refresh too
+	schedule_request_redraw(&s);
+	int64_t window = 2 * PERIOD - schedule_lead(&s);
+	CHECK(!schedule_render_due(&s, PERIOD + MS));
+	CHECK(schedule_deadline(&s, PERIOD + MS) == window);
+	CHECK(schedule_render_due(&s, window));
+	// past the window: now, still aiming at that vblank
+	CHECK(schedule_render_due(&s, window + MS));
+	// immediate doesn't wait
+	schedule_init(&s, SCHEDULE_IMMEDIATE, PERIOD);
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, PERIOD, PERIOD);
+	schedule_request_redraw(&s);
+	CHECK(schedule_render_due(&s, PERIOD + MS));
 }
 
 static void test_unexpected_flip(void) {
@@ -101,7 +192,7 @@ static void test_unexpected_flip(void) {
 static void test_idle_has_no_timer(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_callbacks_sent(&s, 0);
 	schedule_presented(&s, PERIOD, PERIOD);
 	schedule_callbacks_sent(&s, PERIOD); // the flip revisited the cycle
@@ -109,7 +200,7 @@ static void test_idle_has_no_timer(void) {
 	CHECK(schedule_deadline(&s, PERIOD) == 0);
 	// a pending flip without a request: only its watchdog
 	schedule_request_redraw(&s);
-	schedule_submitted(&s, &b, 2 * PERIOD);
+	schedule_submitted(&s, &b, 2 * PERIOD, 2 * PERIOD);
 	schedule_callbacks_sent(&s, 2 * PERIOD);
 	CHECK(schedule_deadline(&s, 2 * PERIOD) == 2 * PERIOD + SCHEDULE_WATCHDOG_NS);
 }
@@ -117,15 +208,13 @@ static void test_idle_has_no_timer(void) {
 static void test_callbacks(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_IMMEDIATE, PERIOD);
-	// a submission starts a new cycle at once
-	schedule_submitted(&s, &a, 0);
-	CHECK(schedule_callbacks_due(&s, 0) && schedule_callbacks_new_cycle(&s, 0));
-	schedule_callbacks_sent(&s, 0);
+	// a submission wakes nobody, its flip starts the new cycle
+	schedule_submitted(&s, &a, 0, 0);
 	CHECK(!schedule_callbacks_due(&s, 0));
-	// a plain flip revisits it: only latecomers get a turn
 	schedule_presented(&s, PERIOD, PERIOD);
-	CHECK(schedule_callbacks_due(&s, PERIOD) && !schedule_callbacks_new_cycle(&s, PERIOD));
+	CHECK(schedule_callbacks_due(&s, PERIOD) && schedule_callbacks_new_cycle(&s, PERIOD));
 	schedule_callbacks_sent(&s, PERIOD);
+	CHECK(!schedule_callbacks_due(&s, PERIOD));
 	// nothing changed: one wake on the grid, not a pageflip
 	schedule_request_redraw(&s);
 	schedule_empty(&s, PERIOD + MS);
@@ -149,14 +238,13 @@ static void test_callbacks(void) {
 	schedule_empty(&s, 4 * PERIOD + MS);
 	CHECK(schedule_callbacks_new_cycle(&s, 4 * PERIOD + MS));
 
-	// a successor's preparation doesn't wake clients, its promotion does
+	// a successor's preparation doesn't wake clients, the flip it goes in on does
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
-	schedule_callbacks_sent(&s, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_queued(&s, &b);
 	CHECK(!schedule_callbacks_due(&s, MS));
 	schedule_presented(&s, PERIOD, PERIOD);
-	CHECK(!schedule_callbacks_due(&s, PERIOD)); // promotion is coming, not a revisit
+	CHECK(schedule_callbacks_new_cycle(&s, PERIOD));
 	schedule_promoted(&s, PERIOD);
 	CHECK(schedule_callbacks_new_cycle(&s, PERIOD));
 	// an empty pass never downgrades a cycle that's already new
@@ -167,10 +255,10 @@ static void test_callbacks(void) {
 static void test_clock_only_moves_forward(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_presented(&s, 10 * PERIOD, 10 * PERIOD);
 	CHECK(s.vblank == 10 * PERIOD);
-	schedule_submitted(&s, &b, 10 * PERIOD + MS);
+	schedule_submitted(&s, &b, 10 * PERIOD + MS, 10 * PERIOD + MS);
 	// a stale timestamp from an older flip doesn't drag the grid back
 	schedule_presented(&s, 5 * PERIOD, 11 * PERIOD);
 	CHECK(s.vblank == 10 * PERIOD);
@@ -218,7 +306,7 @@ static void test_adaptive_hysteresis(void) {
 static void test_watchdog(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	CHECK(!schedule_stalled(&s, SCHEDULE_WATCHDOG_NS));
 	CHECK(schedule_stalled(&s, SCHEDULE_WATCHDOG_NS + 1));
 	// a successor never restarts the old one's watchdog
@@ -233,7 +321,7 @@ static void test_watchdog(void) {
 static void test_pause_resume(void) {
 	struct schedule s;
 	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
-	schedule_submitted(&s, &a, 0);
+	schedule_submitted(&s, &a, 0, 0);
 	schedule_queued(&s, &b);
 	schedule_observe_cpu(&s, 5 * MS);
 	void *pending, *queued;
@@ -244,7 +332,7 @@ static void test_pause_resume(void) {
 	CHECK(!schedule_render_due(&s, MS)); // away means away
 	schedule_resume(&s);
 	CHECK(schedule_render_due(&s, 2 * MS) && s.cpu == MS && !s.have_vblank);
-	schedule_submitted(&s, &c, 2 * MS);
+	schedule_submitted(&s, &c, 2 * MS, 2 * MS);
 	CHECK(s.pending == &c);
 }
 
@@ -254,6 +342,11 @@ int main(void) {
 	test_deadline_window();
 	test_one_successor_only();
 	test_discarded_successor_asks_again();
+	test_repaint_window();
+	test_missed_vblank_widens_margin();
+	test_render_past_its_vblank_is_a_miss();
+	test_callbacks_next_cycle_without_flip();
+	test_late_start_is_no_miss();
 	test_unexpected_flip();
 	test_idle_has_no_timer();
 	test_callbacks();

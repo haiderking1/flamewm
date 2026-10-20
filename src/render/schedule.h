@@ -10,15 +10,20 @@
 // times are CLOCK_MONOTONIC nanoseconds
 //
 // policies (FLAME_FRAME_PIPELINE):
-// - immediate: render only when the KMS slot is empty, what wlroots did
-// - adaptive (default): immediate while frames are cheap. once the
-//   estimated render work reaches 3/4 of a refresh it may prepare one
-//   successor near the predicted pageflip, below 1/2 it goes back
-// - deadline: always that overlap window, for comparing
+// - immediate: render the moment something changed and the KMS slot is
+//   empty, what wlroots did
+// - adaptive (default): with the slot empty, render at the repaint window,
+//   next vblank minus the estimated render work, so whatever arrives before
+//   then makes that refresh. once the estimated render work reaches 3/4 of a
+//   refresh it may also prepare one successor near the predicted pageflip,
+//   below 1/2 it stops
+// - deadline: repaint window and always that overlap, for comparing
 
-// frame callbacks come in cycles. a new one (a submission, or the refresh
-// grid moving on) gives every visible surface one turn, the current one only
-// catches surfaces that haven't had theirs yet, so nobody wakes twice a refresh
+// frame callbacks come in cycles. a new one (a flip, or the refresh grid
+// moving on) gives every visible surface one turn, the current one only
+// catches surfaces that haven't had theirs yet, so nobody wakes twice a
+// refresh. waking on the flip rather than the submission is a frame of
+// latency for apps that draw fast: their commit lands while the slot is free
 enum schedule_cycle {
 	SCHEDULE_CYCLE_NONE,
 	SCHEDULE_CYCLE_CURRENT,
@@ -34,7 +39,8 @@ enum schedule_policy {
 // a lagging client or driver doesn't get to hold the pending slot longer
 // than this without it being reported
 #define SCHEDULE_WATCHDOG_NS 3000000000LL
-// dispatch and submission jitter on top of the measured render work
+// dispatch and submission jitter on top of the measured render work, the
+// least it ever is. a missed vblank widens it at once, it narrows slowly
 #define SCHEDULE_MARGIN_NS 500000LL
 
 struct schedule {
@@ -56,6 +62,10 @@ struct schedule {
 
 	// render lead estimates, see schedule_observe_*
 	int64_t cpu, gpu;
+	int64_t margin; // on top of them, grows when a flip comes a refresh late
+	// the vblank the pending frame was rendered for, 0 when there was no grid
+	int64_t pending_target;
+	bool last_missed; // the newest flip landed a refresh or more late
 
 	// frame callbacks: a cycle due right now, and a wake on the refresh grid
 	enum schedule_cycle cycle;
@@ -74,6 +84,10 @@ void schedule_set_period(struct schedule *schedule, int64_t period);
 void schedule_request_redraw(struct schedule *schedule);
 // a redraw was asked for and the window to render it is open
 bool schedule_render_due(const struct schedule *schedule, int64_t now);
+// when flame will render the frame a client drawing right now can still make:
+// the repaint window of the next vblank the KMS slot is free for. 0 when
+// there's no vblank grid yet, or with immediate (it renders at once)
+int64_t schedule_render_at(const struct schedule *schedule, int64_t now);
 // what one frame is estimated to cost plus the margin, capped at a refresh
 int64_t schedule_lead(const struct schedule *schedule);
 // is it rendering ahead of the pending flip (deadline, or adaptive under load)
@@ -84,8 +98,9 @@ int64_t schedule_next_vblank(const struct schedule *schedule, int64_t t);
 // what came of a due render. submitted: the KMS slot was empty and the frame
 // went to KMS at now. queued: rendered behind the pending one, the caller
 // holds it until schedule_presented. empty: nothing changed, nothing goes to
-// KMS, callbacks go out on the next refresh instead
-void schedule_submitted(struct schedule *schedule, void *ticket, int64_t now);
+// KMS, callbacks go out on the next refresh instead. started: when rendering
+// it began, it was meant for the vblank after that
+void schedule_submitted(struct schedule *schedule, void *ticket, int64_t started, int64_t now);
 void schedule_queued(struct schedule *schedule, void *ticket);
 void schedule_empty(struct schedule *schedule, int64_t now);
 
@@ -108,6 +123,8 @@ bool schedule_callbacks_due(const struct schedule *schedule, int64_t now);
 // the due callbacks start a new cycle (true) or revisit the current one
 bool schedule_callbacks_new_cycle(const struct schedule *schedule, int64_t now);
 void schedule_callbacks_sent(struct schedule *schedule, int64_t now);
+// someone waits for the next cycle: the next refresh starts one, flip or not
+void schedule_callbacks_next(struct schedule *schedule, int64_t now);
 
 // the earliest moment something is due: the render window, a callback wake
 // or the watchdog. 0 for nothing at all

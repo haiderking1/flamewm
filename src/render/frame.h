@@ -63,6 +63,8 @@ struct flame_frame {
 	int64_t present_ns;
 	// frame callback cycles, see schedule_cycle
 	uint64_t callback_cycle;
+	// surfaces of this cycle waiting to be woken just in time, 0 for none
+	int64_t jit_wake;
 
 	// tickets for the schedule, only their addresses matter. foreign: a
 	// commit that wasn't ours (the modeset turning the output on) has a flip
@@ -94,6 +96,12 @@ struct flame_frame {
 	// and events.presented says when that number reached the screen
 	uint64_t draw_id;
 	uint64_t pending_draw, queued_draw; // the KMS slot's and the successor's
+	// wayland buffers drawn for the first time: latency once their flip lands
+	struct {
+		uint64_t draw_id;
+		int64_t since;
+	} first_drawn[32];
+	int first_drawn_len;
 	struct {
 		struct wl_signal presented; // struct flame_frame_presented
 		struct wl_signal destroy;

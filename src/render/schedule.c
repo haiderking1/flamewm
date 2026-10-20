@@ -33,6 +33,7 @@ const char *schedule_policy_name(enum schedule_policy policy) {
 static void reset_budget(struct schedule *schedule) {
 	schedule->cpu = START_ESTIMATE_NS;
 	schedule->gpu = START_ESTIMATE_NS;
+	schedule->margin = SCHEDULE_MARGIN_NS;
 	schedule->overlap = false;
 }
 
@@ -56,7 +57,7 @@ void schedule_request_redraw(struct schedule *schedule) {
 }
 
 int64_t schedule_lead(const struct schedule *schedule) {
-	int64_t lead = schedule->cpu + schedule->gpu + SCHEDULE_MARGIN_NS;
+	int64_t lead = schedule->cpu + schedule->gpu + schedule->margin;
 	return lead < schedule->period ? lead : schedule->period;
 }
 
@@ -82,12 +83,35 @@ static int64_t render_window(const struct schedule *schedule) {
 	return schedule_next_vblank(schedule, schedule->pending_submit) - schedule_lead(schedule);
 }
 
+// the repaint window: with the slot free, render as late as the next vblank
+// allows, not the moment something changed. everything that comes in before
+// then (an app's frame drawn right after the flip, the pointer, an X11
+// present) makes that refresh instead of the one after. past the window it's
+// now, still aiming at that vblank. no grid yet, or immediate: now
+static int64_t repaint_window(const struct schedule *schedule, int64_t now) {
+	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE) {
+		return now;
+	}
+	int64_t window = schedule_next_vblank(schedule, now) - schedule_lead(schedule);
+	return window > now ? window : now;
+}
+
+int64_t schedule_render_at(const struct schedule *schedule, int64_t now) {
+	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE) {
+		return 0;
+	}
+	// a pending frame holds the slot until its flip, the next one after that
+	int64_t from = schedule->pending
+		? schedule_next_vblank(schedule, schedule->pending_submit) : now;
+	return schedule_next_vblank(schedule, from) - schedule_lead(schedule);
+}
+
 bool schedule_render_due(const struct schedule *schedule, int64_t now) {
 	if (!schedule->active || !schedule->redraw || schedule->queued) {
 		return false;
 	}
 	if (!schedule->pending) {
-		return true;
+		return now >= repaint_window(schedule, now);
 	}
 	return schedule_overlapping(schedule) && now >= render_window(schedule);
 }
@@ -110,11 +134,25 @@ static void current_cycle(struct schedule *schedule) {
 	}
 }
 
-void schedule_submitted(struct schedule *schedule, void *ticket, int64_t now) {
+void schedule_submitted(struct schedule *schedule, void *ticket, int64_t started, int64_t now) {
 	schedule->pending = ticket;
 	schedule->pending_submit = now;
+	// a render that ran past its vblank counts as a miss, not as aimed at
+	// the one after. one that started with less time left than a render
+	// takes (something came in right before a vblank) never had a chance at
+	// it: it's aimed at the one after
+	schedule->pending_target = 0;
+	if (schedule->have_vblank) {
+		int64_t target = schedule_next_vblank(schedule, started);
+		if (target - started < schedule->cpu + schedule->gpu) {
+			target += schedule->period;
+		}
+		schedule->pending_target = target;
+	}
 	schedule->redraw = false;
-	new_cycle(schedule);
+	// nobody wakes yet: a client drawing now commits while this frame waits
+	// for its flip and makes the one after. the flip wakes them (apps too
+	// slow for that get theirs early, see feedback_frame_done_early)
 }
 
 void schedule_queued(struct schedule *schedule, void *ticket) {
@@ -140,6 +178,18 @@ void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now)
 		return NULL; // nobody waited for this one, the clock stays
 	}
 	int64_t anchor = kernel > 0 ? kernel : now;
+	// came a refresh (or more) after the vblank it was meant for: the window
+	// was too tight. wider at once, then back down slowly while flips land
+	schedule->last_missed = kernel > 0 && schedule->pending_target
+		&& kernel > schedule->pending_target + schedule->period / 2;
+	if (schedule->last_missed) {
+		schedule->margin += SCHEDULE_MARGIN_NS;
+		if (schedule->margin > schedule->period / 2) {
+			schedule->margin = schedule->period / 2;
+		}
+	} else if (schedule->margin > SCHEDULE_MARGIN_NS) {
+		schedule->margin -= (schedule->margin - SCHEDULE_MARGIN_NS) / 64 + 1;
+	}
 	// a late or out of order timestamp never drags the grid backwards
 	if (!schedule->have_vblank || anchor > schedule->vblank) {
 		schedule->vblank = anchor;
@@ -147,9 +197,9 @@ void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now)
 	}
 	void *ticket = schedule->pending;
 	schedule->pending = NULL;
-	if (!schedule->queued) {
-		current_cycle(schedule);
-	}
+	// the flip is what clients wait for: draw now, commit, the slot is free
+	// and the frame makes the very next refresh
+	new_cycle(schedule);
 	return ticket;
 }
 
@@ -158,6 +208,7 @@ void schedule_promoted(struct schedule *schedule, int64_t submit) {
 	schedule->queued = NULL;
 	// its own watchdog, starting from the real handoff
 	schedule->pending_submit = submit;
+	schedule->pending_target = schedule->have_vblank ? schedule_next_vblank(schedule, submit) : 0;
 	// preparing it didn't wake anyone, reaching KMS does
 	new_cycle(schedule);
 }
@@ -224,6 +275,12 @@ void schedule_callbacks_sent(struct schedule *schedule, int64_t now) {
 	}
 }
 
+void schedule_callbacks_next(struct schedule *schedule, int64_t now) {
+	if (schedule->active && !schedule->callbacks_wake) {
+		schedule->callbacks_wake = schedule_next_vblank(schedule, now);
+	}
+}
+
 static void earliest(int64_t *best, int64_t candidate) {
 	if (candidate > 0 && (*best == 0 || candidate < *best)) {
 		*best = candidate;
@@ -237,7 +294,7 @@ int64_t schedule_deadline(const struct schedule *schedule, int64_t now) {
 	int64_t best = 0;
 	if (schedule->redraw && !schedule->queued) {
 		if (!schedule->pending) {
-			earliest(&best, now);
+			earliest(&best, repaint_window(schedule, now));
 		} else if (schedule_overlapping(schedule)) {
 			earliest(&best, render_window(schedule));
 		}
