@@ -10,8 +10,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <wlr/interfaces/wlr_buffer.h>
+#include <wlr/render/allocator.h>
 #include <wlr/render/drm_format_set.h>
 #include <wlr/render/drm_syncobj.h>
+#include <wlr/render/pass.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_keyboard.h>
@@ -29,6 +31,7 @@
 #include "xserver/xserver.h"
 
 #define MODE_COPY 0
+#define MODE_FLIP 1
 #define MODE_SKIP 2
 #define OPTION_ASYNC 1
 
@@ -86,6 +89,8 @@ struct xpixmap {
 	struct wlr_texture *texture;
 	int width, height;
 	bool opaque;
+	uint32_t format; // drm fourcc and modifier, what copies of it are made as
+	uint64_t modifier;
 };
 
 static void xpixmap_unref(struct xpixmap *xpixmap) {
@@ -144,6 +149,8 @@ static struct xpixmap *xpixmap_get(struct flame_xshell *xshell, struct xs_pixmap
 	xpixmap->width = pixmap->width;
 	xpixmap->height = pixmap->height;
 	xpixmap->opaque = pixmap->depth != 32;
+	xpixmap->format = pixmap->format;
+	xpixmap->modifier = pixmap->modifier;
 	pixmap->data = xpixmap;
 	return xpixmap;
 }
@@ -191,6 +198,13 @@ struct xlayer {
 	struct xpresent *shown; // its picture right now
 	struct wl_list queue; // xpresent.link, waiting for their msc, soonest first
 	struct wl_list retiring; // xpresent.link, replaced, not done yet
+	// the app draws into the buffer it just presented as soon as it has it
+	// back (nvidia's GLX: one pixmap per window, presented every frame).
+	// shown as it is, it would show half drawn: its presents are copied into
+	// buffers of ours and it gets its own back right after, like Xorg and
+	// Xwayland copy into a window. spare: copies nothing shows anymore
+	bool copying;
+	struct wl_list spare; // xcopy.link
 	// how long the app takes from hearing a frame made it (CompleteNotify) to
 	// its next present: quick to grow, slow to shrink. its completes are held
 	// back to just in time for the render that can show the next one
@@ -219,7 +233,22 @@ struct xpresent {
 	struct wlr_drm_syncobj_timeline_waiter waiter;
 	bool waiting;
 
-	bool completed, released;
+	// completed: its complete went out. released: nothing of ours reads it
+	// anymore. given_back: the app has the buffer back (release point,
+	// IdleNotify), for a copy that's as soon as the copy is done
+	bool completed, released, given_back;
+	// the app gets it back once its acquire point went off and every older
+	// present of the same pixmap went back: one timeline per pixmap for both
+	// is nvidia's way, a release ahead of a pending acquire says that frame
+	// is drawn when it isn't
+	struct wlr_drm_syncobj_timeline_waiter back_waiter;
+	bool back_waiting, back_wanted;
+	// copying layers: what's shown instead of the app's buffer, done on the
+	// gpu at copy_point of the copy timeline
+	struct xcopy *copy;
+	uint64_t copy_point;
+	struct wlr_drm_syncobj_timeline_waiter copy_waiter;
+	bool copy_waiting, copied;
 	// replaced before anything drew it: completes as skipped at its msc
 	bool skipped;
 	// its acquire point hasn't signalled: it waits in the queue for the app's
@@ -233,6 +262,36 @@ struct xpresent {
 	uint64_t done_msc;
 };
 
+// a buffer of ours a present got copied into, and its texture
+struct xcopy {
+	struct wl_list link; // xlayer.spare
+	struct wlr_buffer *buffer;
+	struct wlr_texture *texture;
+	int width, height;
+	bool alpha;
+};
+
+static void copy_destroy(struct xcopy *copy) {
+	wl_list_remove(&copy->link);
+	wlr_texture_destroy(copy->texture);
+	wlr_buffer_drop(copy->buffer);
+	free(copy);
+}
+
+#define SPARE_COPIES 3
+
+// back to the layer for the next present, a few at most
+static void copy_put(struct xlayer *layer, struct xcopy *copy) {
+	wl_list_insert(&layer->spare, &copy->link);
+	int count = 0;
+	struct xcopy *each, *tmp;
+	wl_list_for_each_safe(each, tmp, &layer->spare, link) {
+		if (++count > SPARE_COPIES) {
+			copy_destroy(each);
+		}
+	}
+}
+
 static void stop_acquiring(struct xpresent *xp) {
 	if (xp->acquiring) {
 		wlr_drm_syncobj_timeline_waiter_finish(&xp->acquire_waiter);
@@ -245,6 +304,15 @@ static void xpresent_free(struct xpresent *xp) {
 	stop_acquiring(xp);
 	if (xp->waiting) {
 		wlr_drm_syncobj_timeline_waiter_finish(&xp->waiter);
+	}
+	if (xp->back_waiting) {
+		wlr_drm_syncobj_timeline_waiter_finish(&xp->back_waiter);
+	}
+	if (xp->copy_waiting) {
+		wlr_drm_syncobj_timeline_waiter_finish(&xp->copy_waiter);
+	}
+	if (xp->copy) {
+		copy_put(xp->layer, xp->copy);
 	}
 	xpixmap_unref(xp->pixmap);
 	if (xp->acquire) {
@@ -260,7 +328,7 @@ static void xpresent_free(struct xpresent *xp) {
 }
 
 static void maybe_free(struct xpresent *xp) {
-	if (xp->completed && xp->released && xp != xp->layer->shown) {
+	if (xp->completed && xp->released && xp->given_back && xp != xp->layer->shown) {
 		xpresent_free(xp);
 	}
 }
@@ -384,7 +452,8 @@ static void deliver(struct xpresent *xp, bool woke) {
 		layer->woken = now_ns();
 		layer->drawing = true;
 	}
-	complete(xp, MODE_COPY, xp->done_when, xp->done_msc);
+	// its own buffer on screen is a flip, a copy of it a copy
+	complete(xp, xp->copied ? MODE_COPY : MODE_FLIP, xp->done_when, xp->done_msc);
 }
 
 // the app presented again without waiting for its complete: no point holding
@@ -401,17 +470,97 @@ static void deliver_held(struct xlayer *layer) {
 	}
 }
 
+static void give_back(struct xpresent *xp);
+
+static void handle_back_ready(struct wlr_drm_syncobj_timeline_waiter *waiter) {
+	struct xpresent *xp = wl_container_of(waiter, xp, back_waiter);
+	wlr_drm_syncobj_timeline_waiter_finish(&xp->back_waiter);
+	xp->back_waiting = false;
+	give_back(xp);
+}
+
+// serials wrap, older is behind
+static bool older(uint32_t a, uint32_t b) {
+	return (int32_t)(a - b) < 0;
+}
+
+// an older present of the same pixmap the app doesn't have back yet
+static bool older_out(struct xpresent *xp) {
+	struct xlayer *layer = xp->layer;
+	struct xpresent *other;
+	wl_list_for_each(other, &layer->retiring, link) {
+		if (other != xp && other->pixmap == xp->pixmap && !other->given_back
+				&& older(other->serial, xp->serial)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // the app can have its buffer back: its release point goes off (explicit
-// sync), its idle fence and IdleNotify (implicit)
-static void released(struct xpresent *xp) {
-	xp->released = true;
+// sync), its idle fence and IdleNotify (implicit). in order, see back_waiter
+static void give_back(struct xpresent *xp) {
+	if (xp->given_back || xp->back_waiting) {
+		return;
+	}
+	bool done = true;
+	if (xp->acquire && wlr_drm_syncobj_timeline_check(xp->acquire, xp->acquire_point, 0,
+			&done) && !done) {
+		struct flame_xshell *xshell = xp->layer->window->xshell;
+		if (wlr_drm_syncobj_timeline_waiter_init(&xp->back_waiter, xp->acquire,
+				xp->acquire_point, 0, xshell->server->loop, handle_back_ready)) {
+			xp->back_waiting = true;
+			return;
+		}
+	}
+	if (older_out(xp)) {
+		xp->back_wanted = true; // the older one going back sends this one
+		return;
+	}
+	xp->given_back = true;
+	xp->back_wanted = false;
 	if (xp->release) {
 		wlr_drm_syncobj_timeline_signal(xp->release, xp->release_point);
 	}
-	struct flame_xshell *xshell = xp->layer->window->xshell;
-	xserver_present_idle(xshell->xserver, xp->layer->id, xp->serial, xp->pixmap_id,
+	struct xlayer *layer = xp->layer;
+	struct flame_xshell *xshell = layer->window->xshell;
+	xserver_present_idle(xshell->xserver, layer->id, xp->serial, xp->pixmap_id,
 		xp->idle_fence);
+	// the oldest of the same pixmap that waited on this one goes next, it
+	// sends the one after it
+	struct xpresent *next = NULL, *other;
+	wl_list_for_each(other, &layer->retiring, link) {
+		if (other->back_wanted && other->pixmap == xp->pixmap
+				&& (!next || older(other->serial, next->serial))) {
+			next = other;
+		}
+	}
+	other = layer->shown;
+	if (other && other->back_wanted && other->pixmap == xp->pixmap
+			&& (!next || older(other->serial, next->serial))) {
+		next = other;
+	}
 	maybe_free(xp);
+	if (next) {
+		give_back(next);
+	}
+}
+
+// nothing of ours reads it anymore: a copy goes back to the layer, the app's
+// own buffer goes back to the app
+static void released(struct xpresent *xp) {
+	xp->released = true;
+	if (xp->copy) {
+		copy_put(xp->layer, xp->copy);
+		xp->copy = NULL;
+		maybe_free(xp);
+		return;
+	}
+	if (xp->given_back) {
+		maybe_free(xp);
+	} else {
+		give_back(xp); // frees it once it's back
+	}
 }
 
 static void handle_render_done(struct wlr_drm_syncobj_timeline_waiter *waiter) {
@@ -431,6 +580,123 @@ static void release_when_idle(struct flame_xshell *xshell, struct xpresent *xp) 
 		return;
 	}
 	released(xp);
+}
+
+static void handle_copied(struct wlr_drm_syncobj_timeline_waiter *waiter) {
+	struct xpresent *xp = wl_container_of(waiter, xp, copy_waiter);
+	wlr_drm_syncobj_timeline_waiter_finish(&xp->copy_waiter);
+	xp->copy_waiting = false;
+	give_back(xp);
+}
+
+static struct xcopy *copy_take(struct xlayer *layer, const struct xpixmap *pixmap) {
+	struct xcopy *copy, *tmp;
+	wl_list_for_each_safe(copy, tmp, &layer->spare, link) {
+		if (copy->width == pixmap->width && copy->height == pixmap->height
+				&& copy->alpha == !pixmap->opaque) {
+			wl_list_remove(&copy->link);
+			wl_list_init(&copy->link);
+			return copy;
+		}
+		copy_destroy(copy); // the window changed size
+	}
+	struct flame_render *render = &layer->window->xshell->server->render;
+	copy = calloc(1, sizeof(*copy));
+	if (!copy) {
+		return NULL;
+	}
+	// the app's own format and layout: it draws into those on this gpu, so
+	// we can too. failing that whatever layout the allocator likes
+	uint64_t modifiers[] = {pixmap->modifier, DRM_FORMAT_MOD_INVALID};
+	for (size_t i = 0; i < 2 && !copy->buffer; i++) {
+		struct wlr_drm_format format = {
+			.format = pixmap->format,
+			.len = 1,
+			.capacity = 1,
+			.modifiers = &modifiers[i],
+		};
+		copy->buffer = wlr_allocator_create_buffer(render->allocator, pixmap->width,
+			pixmap->height, &format);
+	}
+	copy->texture = copy->buffer ? wlr_texture_from_buffer(render->renderer, copy->buffer)
+		: NULL;
+	if (!copy->texture) {
+		if (copy->buffer) {
+			wlr_buffer_drop(copy->buffer);
+		}
+		free(copy);
+		return NULL;
+	}
+	copy->width = pixmap->width;
+	copy->height = pixmap->height;
+	copy->alpha = !pixmap->opaque;
+	wl_list_init(&copy->link);
+	return copy;
+}
+
+// the present's pixels into a buffer of ours on the gpu, once its acquire
+// point goes off. the app gets its buffer back when the copy's done. false:
+// no copy, it shows as it is
+static bool copy_frame(struct xpresent *xp) {
+	struct xlayer *layer = xp->layer;
+	struct flame_xshell *xshell = layer->window->xshell;
+	struct wlr_renderer *renderer = xshell->server->render.renderer;
+	struct xcopy *copy = copy_take(layer, xp->pixmap);
+	if (!copy) {
+		return false;
+	}
+	if (!xshell->copy_timeline && renderer->features.timeline) {
+		int drm_fd = wlr_renderer_get_drm_fd(renderer);
+		xshell->copy_timeline = drm_fd >= 0 ? wlr_drm_syncobj_timeline_create(drm_fd) : NULL;
+	}
+	struct wlr_drm_syncobj_timeline *timeline = xshell->copy_timeline;
+	uint64_t point = ++xshell->copy_point;
+	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(renderer, copy->buffer,
+		&(struct wlr_buffer_pass_options){
+			.signal_timeline = timeline,
+			.signal_point = point,
+		});
+	if (pass) {
+		wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+			.texture = xp->pixmap->texture,
+			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+			.wait_timeline = timeline ? xp->acquire : NULL,
+			.wait_point = xp->acquire_point,
+		});
+	}
+	if (!pass || !wlr_render_pass_submit(pass)) {
+		copy_put(layer, copy);
+		return false;
+	}
+	xp->copy = copy;
+	xp->copied = true;
+	xp->copy_point = timeline ? point : 0;
+	if (timeline && wlr_drm_syncobj_timeline_waiter_init(&xp->copy_waiter, timeline, point, 0,
+			xshell->server->loop, handle_copied)) {
+		xp->copy_waiting = true;
+	} else {
+		give_back(xp); // implicit sync: our reads are ordered before theirs
+	}
+	return true;
+}
+
+// the layer has a present of this pixmap the app doesn't have back
+static bool holds(struct xlayer *layer, const struct xpixmap *pixmap) {
+	struct xpresent *xp;
+	if (layer->shown && layer->shown->pixmap == pixmap && !layer->shown->given_back) {
+		return true;
+	}
+	wl_list_for_each(xp, &layer->queue, link) {
+		if (xp->pixmap == pixmap) {
+			return true;
+		}
+	}
+	wl_list_for_each(xp, &layer->retiring, link) {
+		if (xp->pixmap == pixmap && !xp->given_back) {
+			return true;
+		}
+	}
+	return false;
 }
 
 static void retire(struct xlayer *layer, struct xpresent *xp) {
@@ -557,8 +823,13 @@ static void layer_place(struct xlayer *layer) {
 			|| had->height != src.height) {
 		scene_buffer_set_source(layer->node, wlr_fbox_empty(&src) ? NULL : &src);
 	}
-	buffer_show(layer->node, xp->pixmap->texture, xp, from_x(xshell, shows.width),
-		from_x(xshell, shows.height), xp->pixmap->opaque, xp->acquire, xp->acquire_point);
+	// a copy is read once the copy's done, the app's buffer once it's drawn
+	struct wlr_texture *texture = xp->copy ? xp->copy->texture : xp->pixmap->texture;
+	struct wlr_drm_syncobj_timeline *wait = xp->copy
+		? (xp->copy_point ? xshell->copy_timeline : NULL) : xp->acquire;
+	uint64_t wait_point = xp->copy ? xp->copy_point : xp->acquire_point;
+	buffer_show(layer->node, texture, xp, from_x(xshell, shows.width),
+		from_x(xshell, shows.height), xp->pixmap->opaque, wait, wait_point);
 	scene_node_set_enabled(&layer->node->node, true);
 }
 
@@ -581,6 +852,9 @@ static void show(struct xlayer *layer, struct xpresent *xp) {
 	struct xpresent *old = layer->shown;
 	layer->shown = xp;
 	wl_list_init(&xp->link);
+	if (layer->copying && !xp->copied) {
+		copy_frame(xp);
+	}
 	layer_place(layer);
 	if (old) {
 		wl_list_remove(&old->link);
@@ -687,7 +961,8 @@ static void process_msc(struct flame_xshell *xshell, int64_t now) {
 		// FIFO app waits on it forever
 		struct xpresent *shown = layer->shown;
 		if (shown && !shown->completed && !shown->drawn_id && shown->target < now_msc) {
-			complete(shown, MODE_COPY, msc_time(xshell, now_msc), now_msc);
+			complete(shown, shown->copied ? MODE_COPY : MODE_FLIP, msc_time(xshell, now_msc),
+				now_msc);
 		}
 		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			if (xp->skipped && !xp->completed && xp->target <= now_msc) {
@@ -830,6 +1105,7 @@ static struct xlayer *layer_get(struct flame_xwindow *window, uint32_t id) {
 	layer->id = id;
 	wl_list_init(&layer->queue);
 	wl_list_init(&layer->retiring);
+	wl_list_init(&layer->spare);
 	wl_list_insert(window->layers.prev, &layer->link);
 	layers_order(window);
 	return layer;
@@ -847,10 +1123,14 @@ static void layer_destroy(struct xlayer *layer) {
 	wl_list_init(&layer->queue);
 	struct xpresent *xp, *tmp;
 	wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
-		if (!xp->released && xp->release) {
+		if (!xp->given_back && xp->release) {
 			wlr_drm_syncobj_timeline_signal(xp->release, xp->release_point);
 		}
 		xpresent_free(xp);
+	}
+	struct xcopy *copy, *ctmp;
+	wl_list_for_each_safe(copy, ctmp, &layer->spare, link) {
+		copy_destroy(copy);
 	}
 	scene_node_destroy(&layer->node->node);
 	wl_list_remove(&layer->link);
@@ -929,6 +1209,18 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		xserver_present_idle(xshell->xserver, present->window, present->serial,
 			present->pixmap->id, present->idle_fence);
 		return;
+	}
+	if (!layer->copying && holds(layer, xpixmap)) {
+		// a pixmap of ours presented again: the app draws into what it
+		// presented as soon as it's back, see xlayer.copying. what shows
+		// now becomes a copy so the app can have its buffer
+		wlr_log(WLR_DEBUG, "xshell: X window 0x%x presents one buffer over and over, copying",
+			layer->id);
+		layer->copying = true;
+		struct xpresent *shown = layer->shown;
+		if (shown && !shown->copied && !shown->given_back && copy_frame(shown)) {
+			layer_place(layer);
+		}
 	}
 	struct xpresent *xp = calloc(1, sizeof(*xp));
 	if (!xp) {
@@ -2053,6 +2345,9 @@ void xshell_finish(struct flame_xshell *xshell) {
 	}
 	if (xshell->unfocus_idle) {
 		wl_event_source_remove(xshell->unfocus_idle);
+	}
+	if (xshell->copy_timeline) {
+		wlr_drm_syncobj_timeline_unref(xshell->copy_timeline);
 	}
 	timer_finish(&xshell->msc_timer);
 	timer_finish(&xshell->repeat_timer);
