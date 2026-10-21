@@ -270,9 +270,12 @@ static void copy_free(struct pending_copy *copy) {
 
 static void handle_copied(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 	struct pending_copy *copy = wl_container_of(waiter, copy, waiter);
-	wlr_ext_image_copy_capture_frame_v1_ready(copy->frame, WL_OUTPUT_TRANSFORM_NORMAL,
-		&copy->when);
+	// let go first: ready destroys the frame, its destroy would free this
+	// copy a second time
+	struct wlr_ext_image_copy_capture_frame_v1 *frame = copy->frame;
+	struct timespec when = copy->when;
 	copy_free(copy);
+	wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &when);
 }
 
 static void handle_copy_frame_destroy(struct wl_listener *listener, void *data) {

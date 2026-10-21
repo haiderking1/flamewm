@@ -2,6 +2,8 @@
 // window on ext-foreign-toplevel-list, a capture source for it, a frame
 // copied into shared memory. the window is an X one, red, and on a workspace
 // that isn't showing: it comes out red anyway
+// gpu: the frames go into gpu buffers (gbm, linux-dmabuf) the way the portal
+// takes them, several in a row
 // usage: wlcapture FLAMECTL [TITLE]  (TITLE: a window that's there, else its own)
 #define _GNU_SOURCE
 #include <stdbool.h>
@@ -11,17 +13,27 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <gbm.h>
 #include <wayland-client.h>
 #include <xcb/xcb.h>
+#include <xf86drm.h>
 
 #include "ext-foreign-toplevel-list-v1-client-protocol.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
+#include "linux-dmabuf-v1-client-protocol.h"
 
 static struct wl_shm *shm;
 static struct ext_foreign_toplevel_list_v1 *list;
 static struct ext_foreign_toplevel_image_capture_source_manager_v1 *sources;
 static struct ext_image_copy_capture_manager_v1 *copier;
+static struct zwp_linux_dmabuf_v1 *dmabuf;
+static dev_t gpu;
+static bool have_gpu;
+static uint32_t gpu_format;
+static uint64_t gpu_modifiers[64];
+static int gpu_modifiers_len;
 
 static struct ext_foreign_toplevel_handle_v1 *wanted;
 static char title[64];
@@ -78,6 +90,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 			ext_foreign_toplevel_image_capture_source_manager_v1_interface.name)) {
 		sources = wl_registry_bind(registry, name,
 			&ext_foreign_toplevel_image_capture_source_manager_v1_interface, 1);
+	} else if (!strcmp(interface, zwp_linux_dmabuf_v1_interface.name) && version >= 3) {
+		dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 3);
 	} else if (!strcmp(interface, ext_image_copy_capture_manager_v1_interface.name)) {
 		copier = wl_registry_bind(registry, name, &ext_image_copy_capture_manager_v1_interface,
 			1);
@@ -105,10 +119,25 @@ static void session_shm_format(void *data, struct ext_image_copy_capture_session
 
 static void session_dmabuf_device(void *data, struct ext_image_copy_capture_session_v1 *s,
 		struct wl_array *device) {
+	if (device->size == sizeof(gpu)) {
+		memcpy(&gpu, device->data, sizeof(gpu));
+		have_gpu = true;
+	}
 }
 
 static void session_dmabuf_format(void *data, struct ext_image_copy_capture_session_v1 *s,
 		uint32_t f, struct wl_array *modifiers) {
+	// the first argb or xrgb one, with every modifier it comes in
+	if (gpu_format || (f != GBM_FORMAT_ARGB8888 && f != GBM_FORMAT_XRGB8888)) {
+		return;
+	}
+	gpu_format = f;
+	uint64_t *mod;
+	wl_array_for_each(mod, modifiers) {
+		if (gpu_modifiers_len < 64) {
+			gpu_modifiers[gpu_modifiers_len++] = *mod;
+		}
+	}
 }
 
 static void session_done(void *data, struct ext_image_copy_capture_session_v1 *s) {
@@ -188,11 +217,12 @@ int main(int argc, char **argv) {
 	if (argc < 2) {
 		return 2;
 	}
-	if (argc > 2) {
+	bool use_gpu = argc > 2 && !strcmp(argv[2], "gpu");
+	if (argc > 2 && !use_gpu) {
 		want_title = argv[2];
 	}
 	// a window that's there already, by title, else an X one of its own
-	bool own = argc < 3;
+	bool own = argc < 3 || use_gpu;
 	if (own) {
 		x_window();
 	}
@@ -225,6 +255,53 @@ int main(int argc, char **argv) {
 	while (!done && ready != 0 && wl_display_dispatch(display) != -1) {
 	}
 	printf("size %dx%d\n", width, height);
+	if (use_gpu) {
+		// a gpu buffer on the device flame named, in a format it offered
+		drmDevice *device = NULL;
+		int fd = -1;
+		if (have_gpu && drmGetDeviceFromDevId(gpu, 0, &device) == 0) {
+			const char *node = device->available_nodes & (1 << DRM_NODE_RENDER)
+				? device->nodes[DRM_NODE_RENDER] : device->nodes[DRM_NODE_PRIMARY];
+			fd = open(node, O_RDWR | O_CLOEXEC);
+			drmFreeDevice(&device);
+		}
+		struct gbm_device *gbm = fd >= 0 ? gbm_create_device(fd) : NULL;
+		struct gbm_bo *bo = gbm && gpu_format ? gbm_bo_create_with_modifiers2(gbm,
+			(uint32_t)width, (uint32_t)height, gpu_format, gpu_modifiers,
+			(unsigned)gpu_modifiers_len, GBM_BO_USE_RENDERING) : NULL;
+		printf("gpu buffer: %s\n", bo && dmabuf ? "yes" : "no");
+		if (!bo || !dmabuf) {
+			return 1;
+		}
+		struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(dmabuf);
+		uint64_t modifier = gbm_bo_get_modifier(bo);
+		for (int plane = 0; plane < gbm_bo_get_plane_count(bo); plane++) {
+			zwp_linux_buffer_params_v1_add(params, gbm_bo_get_fd_for_plane(bo, plane),
+				(uint32_t)plane, gbm_bo_get_offset(bo, plane), gbm_bo_get_stride_for_plane(bo,
+					plane), (uint32_t)(modifier >> 32), (uint32_t)modifier);
+		}
+		struct wl_buffer *gpu_buffer = zwp_linux_buffer_params_v1_create_immed(params, width,
+			height, gpu_format, 0);
+		// a few in a row: each copy finishes on the gpu before it's ready
+		int frames = 0;
+		for (int i = 0; i < 3; i++) {
+			ready = -1;
+			struct ext_image_copy_capture_frame_v1 *frame =
+				ext_image_copy_capture_session_v1_create_frame(session);
+			ext_image_copy_capture_frame_v1_add_listener(frame, &frame_listener, NULL);
+			ext_image_copy_capture_frame_v1_attach_buffer(frame, gpu_buffer);
+			ext_image_copy_capture_frame_v1_damage_buffer(frame, 0, 0, width, height);
+			ext_image_copy_capture_frame_v1_capture(frame);
+			while (ready < 0 && wl_display_dispatch(display) != -1) {
+			}
+			frames += ready == 1;
+			ext_image_copy_capture_frame_v1_destroy(frame);
+		}
+		printf("gpu frames ready: %d\n", frames);
+		wl_display_roundtrip(display);
+		wl_display_disconnect(display);
+		return frames == 3 ? 0 : 1;
+	}
 	if (!done || width <= 0 || height <= 0 || format == 0xffffffff) {
 		return 1;
 	}
