@@ -222,6 +222,22 @@ void xs_window_configure(struct flame_xserver *xserver, struct xs_window *window
 	xs_changed(xserver);
 }
 
+void xserver_configure_notify(struct flame_xserver *xserver, struct xs_window *window) {
+	int x, y;
+	xs_window_origin(window, &x, &y);
+	struct xs_event event = {0};
+	xs_event_put8(&event, 0, XS_EVENT_CONFIGURE_NOTIFY | 0x80); // sent, not real
+	xs_event_put32(&event, 4, window->id);
+	xs_event_put32(&event, 8, window->id);
+	xs_event_put16(&event, 16, (uint16_t)(x - window->border));
+	xs_event_put16(&event, 18, (uint16_t)(y - window->border));
+	xs_event_put16(&event, 20, window->width);
+	xs_event_put16(&event, 22, window->height);
+	xs_event_put16(&event, 24, window->border);
+	xs_event_put8(&event, 26, window->override_redirect);
+	xs_event_deliver(xserver, window, XS_MASK_STRUCTURE, &event);
+}
+
 void xs_window_reparent(struct flame_xserver *xserver, struct xs_window *window,
 		struct xs_window *parent, int x, int y) {
 	bool was_mapped = window->mapped;

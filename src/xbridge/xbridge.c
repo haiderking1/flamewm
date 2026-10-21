@@ -569,6 +569,12 @@ static void hook_client_message(void *data, uint32_t window, uint32_t type,
 	xselection_client_message(&xbridge->server->xselection, window, type, message);
 }
 
+static bool hook_configure_request(void *data, struct xs_window *window, uint16_t mask,
+		const int32_t values[7]) {
+	struct flame_xbridge *xbridge = data;
+	return xshell_configure_request(&xbridge->server->xshell, window, mask, values);
+}
+
 static void hook_wm_message(void *data, uint32_t window, uint32_t type,
 		const uint32_t message[5]) {
 	struct flame_xbridge *xbridge = data;
@@ -652,6 +658,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.selection_request = hook_selection_request,
 		.client_message = hook_client_message,
 		.wm_message = hook_wm_message,
+		.configure_request = hook_configure_request,
 		.pointer = hook_pointer,
 		.open_device = hook_open_device,
 		.modifiers = hook_modifiers,

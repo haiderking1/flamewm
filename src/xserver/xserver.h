@@ -308,6 +308,12 @@ struct xs_hooks {
 	// window (fullscreen, activate, close)
 	void (*wm_message)(void *data, uint32_t window, uint32_t type,
 		const uint32_t message[5]);
+	// a client asked to move, resize or restack a mapped top-level flame
+	// manages, what a ConfigureRequest is to a window manager: true when
+	// flame took care of it, false lets it happen as asked. mask, values:
+	// ConfigureWindow's (x, y, width, height, border, sibling, stack mode)
+	bool (*configure_request)(void *data, struct xs_window *window, uint16_t mask,
+		const int32_t values[7]);
 	void *data;
 };
 
@@ -517,6 +523,9 @@ void xserver_key_repeat(struct flame_xserver *xserver, uint8_t keycode, uint16_t
 // WM_DELETE_WINDOW when the app said it handles it, else the client goes.
 // true for the polite way
 bool xserver_close_window(struct flame_xserver *xserver, struct xs_window *window);
+// a synthetic ConfigureNotify with its geometry as it is, root coordinates:
+// how a window manager answers a configure request it didn't grant (ICCCM)
+void xserver_configure_notify(struct flame_xserver *xserver, struct xs_window *window);
 
 // Present events. mode: 0 copy, 1 flip, 2 skip. ust in microseconds
 void xserver_present_complete(struct flame_xserver *xserver, uint32_t window,

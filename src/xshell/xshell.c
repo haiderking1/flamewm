@@ -2091,6 +2091,27 @@ void xshell_rescale(struct flame_xshell *xshell) {
 	}
 }
 
+bool xshell_configure_request(struct flame_xshell *xshell, struct xs_window *x,
+		uint16_t mask, const int32_t values[7]) {
+	struct flame_xwindow *window = find_window(xshell, x->id);
+	if (!window || window->floating) {
+		return false; // not one flame places: as asked
+	}
+	// a floating one may pick its size, flame says where it goes. a tile or
+	// a fullscreen window keeps what flame gave it
+	if (window->view.floating && !window->view.fullscreen_wanted && (mask & (4 | 8))) {
+		int width = mask & 4 ? values[2] : x->width;
+		int height = mask & 8 ? values[3] : x->height;
+		if (width > 0 && height > 0) {
+			xserver_move_window(xshell->xserver, x, x->x, x->y, width, height);
+		}
+	}
+	// what it has now, told the ICCCM way: an app that asked to sit at 0,0
+	// learns where it really is, it places its menus from that
+	xserver_configure_notify(xshell->xserver, x);
+	return true;
+}
+
 void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
 		const uint32_t data[5]) {
 	ewmh_message(xshell, window, type, data);

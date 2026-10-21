@@ -1,5 +1,5 @@
 // flame as X's window manager, the EWMH way an app sees it
-// usage: xewmh check | fullscreen | startfull | activate | close | dpi
+// usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -173,6 +173,37 @@ int main(int argc, char **argv) {
 		printf("\nxsettings: %s\nscreen %dx%d\n", xs && xs->owner ? "yes" : "no",
 			s->width_in_pixels, s->height_in_pixels);
 		free(xs);
+	} else if (!strcmp(mode, "configure")) {
+		// a tile asking to sit elsewhere: flame keeps it where it is and says
+		// so with a synthetic ConfigureNotify, like a window manager
+		xcb_window_t w = window(false);
+		settle();
+		xcb_get_geometry_reply_t *before = xcb_get_geometry_reply(c, xcb_get_geometry(c, w),
+			NULL);
+		xcb_generic_event_t *e;
+		while ((e = xcb_poll_for_event(c))) {
+			free(e); // what came before
+		}
+		uint32_t values[] = {0, 0, 300, 200};
+		xcb_configure_window(c, w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y
+			| XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, values);
+		settle();
+		xcb_get_geometry_reply_t *after = xcb_get_geometry_reply(c, xcb_get_geometry(c, w),
+			NULL);
+		bool told = false;
+		while ((e = xcb_poll_for_event(c))) {
+			if (e->response_type == (XCB_CONFIGURE_NOTIFY | 0x80)) {
+				xcb_configure_notify_event_t *n = (xcb_configure_notify_event_t *)e;
+				told |= after && n->x == after->x && n->y == after->y
+					&& n->width == after->width;
+			}
+			free(e);
+		}
+		printf("kept: %s\n", before && after && before->x == after->x && before->y == after->y
+			&& before->width == after->width && after->x != 0 ? "yes" : "no");
+		printf("told: %s\n", told ? "yes" : "no");
+		free(before);
+		free(after);
 	} else if (!strcmp(mode, "close")) {
 		xcb_window_t w = window(false);
 		settle();
