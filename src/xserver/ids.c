@@ -50,7 +50,7 @@ bool xs_id_in_use(struct flame_xserver *xserver, uint32_t id) {
 			return true;
 		}
 	}
-	return xs_damage_id_in_use(xserver, id);
+	return xs_damage_id_in_use(xserver, id) || xs_glx_id_in_use(xserver, id);
 }
 
 bool xs_id_available(struct xs_client *client, uint32_t id) {
@@ -118,14 +118,19 @@ static uint32_t *used_ids(struct xs_client *client, size_t *len) {
 	wl_list_for_each(select, &xserver->present_selects, link) {
 		add(&ids, len, &cap, base, select->id);
 	}
-	size_t damages = xs_damage_ids(xserver, base, NULL, 0);
-	uint32_t *damage = damages ? malloc(damages * sizeof(*damage)) : NULL;
-	if (damage) {
-		damages = xs_damage_ids(xserver, base, damage, damages);
-		for (size_t i = 0; i < damages; i++) {
-			add(&ids, len, &cap, base, damage[i]);
+	size_t (*const lists[])(struct flame_xserver *, uint32_t, uint32_t *, size_t) = {
+		xs_damage_ids, xs_glx_ids,
+	};
+	for (size_t l = 0; l < sizeof(lists) / sizeof(lists[0]); l++) {
+		size_t n = lists[l](xserver, base, NULL, 0);
+		uint32_t *list = n ? malloc(n * sizeof(*list)) : NULL;
+		if (list) {
+			n = lists[l](xserver, base, list, n);
+			for (size_t i = 0; i < n; i++) {
+				add(&ids, len, &cap, base, list[i]);
+			}
+			free(list);
 		}
-		free(damage);
 	}
 	// render's own lists, as many as there are
 	size_t n = xs_render_ids(xserver, base, NULL, 0);

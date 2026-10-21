@@ -351,6 +351,7 @@ struct flame_xserver {
 	struct wl_list damages; // damage.c's
 	// composite.c's: who redirected what, who holds the overlay window
 	struct wl_list redirects, overlay_refs;
+	struct wl_list glx_objects; // glx.c's: contexts, drawables, their configs
 	struct xs_window *overlay;
 	double scroll[2], scroll_notches[2];
 	bool scroll_primed;
@@ -370,12 +371,18 @@ struct flame_xserver {
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
 	bool trace; // FLAME_X_TRACE=1: every request in the log
+	// which GL library glvnd loads for apps: "nvidia" or "mesa"
+	char glx_vendor[16];
 	uint64_t slots[4]; // client id ranges in use
 	uint32_t timestamp; // ms, for events that carry one
 };
 
 bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	struct xs_hooks hooks, int width, int height);
+// the GL driver apps get, after the gpu flame renders on: "nvidia" for its
+// own, "mesa" for everything mesa drives (the default). before
+// xserver_start, glvnd asks once per app
+void xserver_set_glx_vendor(struct flame_xserver *xserver, const char *vendor);
 // picks a free display number and starts listening. false: no X for anyone,
 // flame runs fine without it
 bool xserver_start(struct flame_xserver *xserver);

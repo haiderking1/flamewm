@@ -165,6 +165,19 @@ grim after.png
 cat typed
 cmp -s before.png after.png || echo redrew" "hi" "redrew"
 
+case_run "GL on X: a multisampled srgb config, made current, frames swapped and seen" "
+$BIN/glx > glx.out 2>&1 &
+sleep 0.9
+grim -t ppm shot.ppm
+wait
+cat glx.out
+python3 -I -c \"
+d = open('shot.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):][(h // 2 * w + w // 2) * 3:][:3]
+print('screen center', *px)
+\"" "samples 4" "pixel 255 0 0" "screen center 255 0 0"
+
 case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &
 sleep 0.8

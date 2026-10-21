@@ -1476,6 +1476,15 @@ void xshell_keyboard(struct flame_xshell *xshell, struct wlr_keyboard *keyboard)
 
 // ---- the gpu ----
 
+const char *xshell_gl_vendor(struct flame_xshell *xshell) {
+	// like Xwayland: the kernel driver of the gpu flame renders on decides
+	int drm_fd = wlr_renderer_get_drm_fd(xshell->server->render.renderer);
+	drmVersion *version = drm_fd >= 0 ? drmGetVersion(drm_fd) : NULL;
+	bool nvidia = version && version->name && !strcmp(version->name, "nvidia-drm");
+	drmFreeVersion(version);
+	return nvidia ? "nvidia" : "mesa";
+}
+
 int xshell_open_device(struct flame_xshell *xshell) {
 	int drm_fd = wlr_renderer_get_drm_fd(xshell->server->render.renderer);
 	if (drm_fd < 0) {

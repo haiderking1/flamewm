@@ -413,6 +413,12 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *requ
 // ---- GLX (glx.c) ----
 
 void xs_glx_request(struct xs_client *client, const struct xin *request);
+bool xs_glx_id_in_use(struct flame_xserver *xserver, uint32_t id);
+// the ids of contexts and drawables from base's client (out NULL: count)
+size_t xs_glx_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
+// GLX drawables made on it go with it
+void xs_glx_drawable_gone(struct flame_xserver *xserver, uint32_t drawable);
+void xs_glx_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 
 // ---- X-Resource (xres.c) ----
 

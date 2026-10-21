@@ -660,6 +660,9 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 }
 
 void xbridge_start(struct flame_xbridge *xbridge) {
+	const char *vendor = xshell_gl_vendor(&xbridge->server->xshell);
+	xserver_set_glx_vendor(&xbridge->xserver, vendor);
+	wlr_log(WLR_INFO, "xbridge: X apps get %s's GL", vendor);
 	if (!xserver_start(&xbridge->xserver)) {
 		return;
 	}
