@@ -37,6 +37,7 @@ struct flame_xshell {
 	struct wl_listener desktop_changed; // workspaces switched: floats follow
 	// the X window the pointer is over, flame's idea of it. 0 for none
 	uint32_t pointer_window;
+	uint32_t pointer_logged; // the deepest one the log last said it's over
 	uint16_t buttons; // held, in X's state bits
 	// the key held down that repeats (X keycode, 0 for none) and when it
 	// repeats next. X apps get their repeats from the server
