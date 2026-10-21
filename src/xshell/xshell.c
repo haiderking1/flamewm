@@ -16,6 +16,7 @@
 #include <wlr/render/pass.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
@@ -38,6 +39,9 @@
 // ---- client gpu buffers as textures ----
 
 // a DRI3 pixmap's dmabuf as a wlr_buffer, the fds are its own copies
+static bool grab_honored(const struct flame_xshell *xshell);
+static pid_t view_pid(struct flame_xshell *xshell, struct flame_view *view);
+
 // ---- X's coordinates and flame's ----
 
 int xshell_to_x(const struct flame_xshell *xshell, double v) {
@@ -55,7 +59,8 @@ int xshell_pointer_to_x(const struct flame_xshell *xshell, double v) {
 bool xshell_pointer_confine(const struct flame_xshell *xshell, double *x0, double *y0,
 		double *x1, double *y1) {
 	int x, y, width, height;
-	if (!xserver_pointer_confine(xshell->xserver, &x, &y, &width, &height)) {
+	if (!grab_honored(xshell)
+			|| !xserver_pointer_confine(xshell->xserver, &x, &y, &width, &height)) {
 		return false;
 	}
 	// the middle of its edge pixels: anywhere between floors into it
@@ -1576,10 +1581,42 @@ static void handle_unfocus_idle(void *data) {
 	pid_t pid = xshell->unfocus;
 	xshell->unfocus = 0;
 	struct flame_view *focused = xshell->server->desktop.focused;
-	pid_t now = is_xview(focused) ? x_pid(xshell->xserver, from_view(focused)->id) : 0;
+	pid_t now = view_pid(xshell, focused);
+	if (pid && pid != now) {
+		// out of the app for real: what it held goes (a game's clipped mouse)
+		xserver_break_grabs(xshell->xserver, pid);
+	}
 	if (pid && pid != now && x_pid(xshell->xserver, xshell->xserver->focus) == pid) {
 		xserver_set_focus(xshell->xserver, XS_FOCUS_NONE);
 	}
+}
+
+// the app behind any window, X or wayland (steam's bridged ones), 0 unknown
+static pid_t view_pid(struct flame_xshell *xshell, struct flame_view *view) {
+	if (!view) {
+		return 0;
+	}
+	if (is_xview(view)) {
+		return x_pid(xshell->xserver, from_view(view)->id);
+	}
+	struct wlr_surface *surface = view->impl->surface ? view->impl->surface(view) : NULL;
+	pid_t pid = 0;
+	if (surface) {
+		wl_client_get_credentials(wl_resource_get_client(surface->resource), &pid, NULL, NULL);
+	}
+	return pid;
+}
+
+// an X app holding the pointer has it everywhere (its menu closes on a
+// click outside, a game keeps the mouse) only while it's the app the user
+// is in. another workspace, a launcher over it: the rest of the desktop is
+// the user's, like under Xwayland
+static bool grab_honored(const struct flame_xshell *xshell) {
+	if (xshell->server->layers.focused) {
+		return false; // a launcher or the like over it has the user
+	}
+	pid_t pid = xserver_pointer_grab_pid(xshell->xserver);
+	return pid && pid == view_pid((struct flame_xshell *)xshell, xshell->server->desktop.focused);
 }
 
 static void xview_set_activated(struct flame_view *view, bool activated) {
@@ -2297,7 +2334,7 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 		? find_window(xshell, xshell->pointer_window)
 		: window_at(xshell, pointer_snap(xshell, lx), pointer_snap(xshell, ly));
 	int x = xshell_pointer_to_x(xshell, lx), y = xshell_pointer_to_x(xshell, ly);
-	if (xserver_pointer_grabbed(xserver)) {
+	if (grab_honored(xshell)) {
 		// an X client holds the pointer (its menu is open): everything goes
 		// to it wherever the pointer is, over wayland windows too, and the
 		// pointer moves no focus until it lets go, like under any X server
@@ -2369,11 +2406,11 @@ bool xshell_menu_open(struct flame_xshell *xshell) {
 }
 
 bool xshell_has_pointer(const struct flame_xshell *xshell) {
-	return xshell->pointer_window != 0 || xserver_pointer_grabbed(xshell->xserver);
+	return xshell->pointer_window != 0 || grab_honored(xshell);
 }
 
 bool xshell_pointer_grabbed(const struct flame_xshell *xshell) {
-	return xserver_pointer_grabbed(xshell->xserver);
+	return grab_honored(xshell);
 }
 
 bool xshell_buttons_held(const struct flame_xshell *xshell) {
@@ -2392,7 +2429,7 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 	// a click in the window flame has focused while X's keyboard focus is
 	// out of the app (it was offered with WM_TAKE_FOCUS and let it go by):
 	// offered again, like X window managers do on a click
-	struct flame_xwindow *window = pressed && !xserver_pointer_grabbed(xshell->xserver)
+	struct flame_xwindow *window = pressed && !grab_honored(xshell)
 		? find_window(xshell, xshell->pointer_window) : NULL;
 	struct xs_window *x = window && &window->view == xshell->server->desktop.focused
 		? x_of(window) : NULL;

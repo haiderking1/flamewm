@@ -1,6 +1,6 @@
 // flame as X's window manager, the EWMH way an app sees it
 // usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure |
-//   subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL
+//   subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL | grabaway FLAMECTL
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -261,6 +261,38 @@ int main(int argc, char **argv) {
 		settle();
 		pointer_in(w, &x, &y, &rx, &ry);
 		printf("let go: %d,%d\n", rx, ry);
+	} else if (!strcmp(mode, "grabaway") && argc > 2) {
+		// a game holding the mouse in its window, the user switches workspace:
+		// its grab breaks, the mouse is the user's again, others can grab
+		xcb_window_t w = window(false);
+		listen_motion(w);
+		xcb_window_t box = xcb_generate_id(c);
+		xcb_create_window(c, XCB_COPY_FROM_PARENT, box, w, 100, 100, 40, 30, 0,
+			XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, 0, NULL);
+		xcb_map_window(c, box);
+		settle();
+		xcb_grab_pointer_reply_t *g = xcb_grab_pointer_reply(c, xcb_grab_pointer(c, 0, w,
+			XCB_EVENT_MASK_POINTER_MOTION, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, box,
+			XCB_NONE, XCB_CURRENT_TIME), NULL);
+		printf("grabbed: %s\n", g && g->status == XCB_GRAB_STATUS_SUCCESS ? "yes" : "no");
+		free(g);
+		char cmd[600];
+		snprintf(cmd, sizeof(cmd), "%s workspace 2 > /dev/null && sleep 0.3 && %s pointer move"
+			" 2 3 > /dev/null", argv[2], argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		int x, y, rx, ry;
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("away, the mouse goes: %d,%d\n", rx, ry);
+		xcb_connection_t *other = xcb_connect(NULL, NULL);
+		g = xcb_grab_pointer_reply(other, xcb_grab_pointer(other, 0, s->root, 0,
+			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE, XCB_CURRENT_TIME), NULL);
+		printf("another app can grab: %s\n",
+			g && g->status == XCB_GRAB_STATUS_SUCCESS ? "yes" : "no");
+		free(g);
+		xcb_disconnect(other);
 	} else if (!strcmp(mode, "takefocus") && argc > 2) {
 		// wine's game window: no input hint, WM_TAKE_FOCUS. WM_STATE comes
 		// before the offer (wine drops one that comes first), a click offers
