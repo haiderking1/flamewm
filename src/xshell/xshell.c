@@ -779,6 +779,20 @@ static bool x_visible(const struct xs_window *top, const struct xs_window *win, 
 
 static void core_update(struct flame_xwindow *window);
 
+// what a layer shows goes, the app gets its buffer back: X lost the window's
+// contents. it shows nothing until it draws again
+static void layer_drop(struct xlayer *layer) {
+	struct xpresent *xp = layer->shown;
+	if (!xp) {
+		return;
+	}
+	layer->shown = NULL;
+	scene_node_set_enabled(&layer->node->node, false);
+	scene_buffer_set(layer->node, NULL, NULL, 0, 0, false, NULL, 0);
+	retire(layer, xp);
+	core_update(layer->window);
+}
+
 // a layer's picture where X has its window, cut to what of that window
 // shows: Present puts the pixmap at the window's corner plus its offset and
 // nothing outside the window. off while its window isn't viewable
@@ -792,12 +806,8 @@ static void layer_place(struct xlayer *layer) {
 		// unmapped: what it showed is gone, like X loses a window's contents.
 		// mapped again it shows nothing until it draws, never the old picture
 		// (a menu flashing what it showed last time)
-		layer->shown = NULL;
-		scene_node_set_enabled(&layer->node->node, false);
-		scene_buffer_set(layer->node, NULL, NULL, 0, 0, false, NULL, 0);
-		retire(layer, xp);
-		core_update(window);
-		xp = NULL;
+		layer_drop(layer);
+		return;
 	}
 	int ox, oy;
 	struct wlr_box clip, shows;
@@ -2137,6 +2147,22 @@ bool xshell_configure_request(struct flame_xshell *xshell, struct xs_window *x,
 void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
 		const uint32_t data[5]) {
 	ewmh_message(xshell, window, type, data);
+}
+
+void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *x) {
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		struct xlayer *layer;
+		wl_list_for_each(layer, &window->layers, link) {
+			struct xs_window *lx = xserver_window(xshell->xserver, layer->id);
+			for (struct xs_window *w = lx; w; w = w->parent) {
+				if (w == x) {
+					layer_drop(layer);
+					break;
+				}
+			}
+		}
+	}
 }
 
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *x) {

@@ -120,6 +120,9 @@ void xshell_finish(struct flame_xshell *xshell);
 // the X side changed, see which top-levels are on screen
 void xshell_windows_changed(struct flame_xshell *xshell);
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *window);
+// an X window unmapped (reparenting does too): what it and its children
+// showed goes now. an app reusing it elsewhere doesn't flash the old picture
+void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *window);
 // the X server listens: flame says it's the window manager
 void xshell_started(struct flame_xshell *xshell);
 // flame's layout coords to X's and back, see flame_xshell.scale

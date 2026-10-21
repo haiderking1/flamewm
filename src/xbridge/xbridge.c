@@ -484,6 +484,11 @@ static void hook_window_created(void *data, struct xs_window *window) {
 		process->views_len, window->id);
 }
 
+static void hook_window_unmapped(void *data, struct xs_window *window) {
+	struct flame_xbridge *xbridge = data;
+	xshell_window_unmapped(&xbridge->server->xshell, window);
+}
+
 static void hook_window_destroyed(void *data, struct xs_window *window) {
 	struct flame_xbridge *xbridge = data;
 	if (xs_window_top_level(window)) {
@@ -652,6 +657,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.disconnected = hook_disconnected,
 		.window_created = hook_window_created,
 		.window_destroyed = hook_window_destroyed,
+		.window_unmapped = hook_window_unmapped,
 		.windows_changed = hook_windows_changed,
 		.focus_changed = hook_focus_changed,
 		.selection_owner = hook_selection_owner,

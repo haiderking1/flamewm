@@ -85,6 +85,9 @@ void xs_window_unmap(struct flame_xserver *xserver, struct xs_window *window) {
 		return;
 	}
 	window->mapped = false;
+	if (xserver->hooks.window_unmapped) {
+		xserver->hooks.window_unmapped(xserver->hooks.data, window);
+	}
 	struct xs_event event = {0};
 	xs_event_put8(&event, 0, XS_EVENT_UNMAP_NOTIFY);
 	xs_event_put32(&event, 8, window->id);
