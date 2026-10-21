@@ -192,9 +192,14 @@ sleep 0.3
 echo \"foot got: \$(head -c1 typed), F9 \$(grep -o '\\[20~' typed | wc -l) time\"" \
 	"hotkey grabbed: yes" "taken twice: no" "held while typed in wayland: yes" "up after: yes" \
 	"raw events: 2" "hotkey presses: 1" "hotkey presses after ungrab: 0" "foot got: a, F9 1 time"
+case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
+foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
+sleep 1.5
+$BIN/wlcapture $CTL capme" "listed: yes" "drawn pixels: 889856 of 889856" \
+	"unchanged window, next frame: yes"
 case_run "sharing one window: listed, captured on its own, even on a hidden workspace" "
 $BIN/wlcapture $CTL" "protocols: yes" "listed: yes" "hidden window captured: red" \
-	"closed while shared, session stopped: yes"
+	"unchanged window, next frame: yes" "closed while shared, session stopped: yes"
 case_run "an X grab breaks when the user leaves the app: the mouse is theirs again" "
 $BIN/xewmh grabaway $CTL" "grabbed: yes" "away, the mouse goes: 2,3" "another app can grab: yes"
 case_run "WM_TAKE_FOCUS windows (wine's): WM_STATE first, a click offers focus again" "

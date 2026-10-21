@@ -364,3 +364,37 @@ const struct flame_element *elements_find(const struct flame_element_list *list,
 	}
 	return NULL;
 }
+
+static uint64_t mix(uint64_t hash, uint64_t value) {
+	return (hash ^ value) * 0x100000001b3ull;
+}
+
+static uint64_t float_bits(float value) {
+	uint32_t bits;
+	memcpy(&bits, &value, sizeof(bits));
+	return bits;
+}
+
+uint64_t elements_look(const struct flame_element_list *list, struct wlr_box area,
+		float scale) {
+	uint64_t hash = 0xcbf29ce484222325ull;
+	hash = mix(hash, (uint64_t)area.width << 32 | (uint32_t)area.height);
+	hash = mix(hash, float_bits(scale));
+	for (size_t i = 0; i < list->len; i++) {
+		const struct flame_element *e = &list->data[i];
+		hash = mix(hash, (uint64_t)e->type);
+		hash = mix(hash, (uintptr_t)e->id);
+		hash = mix(hash, (uint64_t)(uint32_t)e->box.x << 32 | (uint32_t)e->box.y);
+		hash = mix(hash, (uint64_t)(uint32_t)e->box.width << 32 | (uint32_t)e->box.height);
+		hash = mix(hash, (uint64_t)(uint32_t)e->clip.width << 32 | (uint32_t)e->clip.height);
+		hash = mix(hash, (uintptr_t)e->buffer);
+		hash = mix(hash, (uintptr_t)e->image);
+		hash = mix(hash, (uintptr_t)e->texture);
+		hash = mix(hash, e->surface ? e->surface->current.seq : 0);
+		hash = mix(hash, float_bits(e->alpha));
+		for (int c = 0; c < 4; c++) {
+			hash = mix(hash, float_bits(e->color[c]));
+		}
+	}
+	return hash;
+}

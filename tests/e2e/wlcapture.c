@@ -2,7 +2,7 @@
 // window on ext-foreign-toplevel-list, a capture source for it, a frame
 // copied into shared memory. the window is an X one, red, and on a workspace
 // that isn't showing: it comes out red anyway
-// usage: wlcapture FLAMECTL
+// usage: wlcapture FLAMECTL [TITLE]  (TITLE: a window that's there, else its own)
 #define _GNU_SOURCE
 #include <stdbool.h>
 #include <stdio.h>
@@ -25,6 +25,7 @@ static struct ext_image_copy_capture_manager_v1 *copier;
 
 static struct ext_foreign_toplevel_handle_v1 *wanted;
 static char title[64];
+static const char *want_title = "capme";
 static int width, height, ready = -1;
 static uint32_t format = 0xffffffff;
 static bool done, stopped;
@@ -32,7 +33,7 @@ static xcb_connection_t *x;
 
 static void handle_title(void *data, struct ext_foreign_toplevel_handle_v1 *handle,
 		const char *t) {
-	if (!strcmp(t, "capme")) {
+	if (!strcmp(t, want_title)) {
 		wanted = handle;
 	}
 	snprintf(title, sizeof(title), "%s", t);
@@ -187,7 +188,14 @@ int main(int argc, char **argv) {
 	if (argc < 2) {
 		return 2;
 	}
-	x_window();
+	if (argc > 2) {
+		want_title = argv[2];
+	}
+	// a window that's there already, by title, else an X one of its own
+	bool own = argc < 3;
+	if (own) {
+		x_window();
+	}
 	nanosleep(&(struct timespec){0, 500000000}, NULL);
 	char cmd[512];
 	snprintf(cmd, sizeof(cmd), "%s workspace 2 > /dev/null", argv[1]);
@@ -242,8 +250,32 @@ int main(int argc, char **argv) {
 		uint8_t *p = pixels + (size_t)(height / 2) * stride + (size_t)(width / 2) * 4;
 		bool bgr = format == WL_SHM_FORMAT_XBGR8888 || format == WL_SHM_FORMAT_ABGR8888;
 		int r = bgr ? p[0] : p[2], g = p[1], b = bgr ? p[2] : p[0];
+		// anything drawn at all: a window that isn't there comes out clear
+		size_t lit = 0;
+		for (size_t i = 0; i < size; i += 4) {
+			lit += pixels[i] | pixels[i + 1] | pixels[i + 2] | pixels[i + 3] ? 1 : 0;
+		}
+		printf("drawn pixels: %zu of %zu\n", lit, size / 4);
 		printf("hidden window captured: %s (%d %d %d)\n",
 			r > 200 && g < 60 && b < 60 ? "red" : "other", r, g, b);
+	}
+	// a window that doesn't change still sends frames: the stream gets a
+	// picture even when its first ones went while it was being set up
+	ready = -1;
+	frame = ext_image_copy_capture_session_v1_create_frame(session);
+	ext_image_copy_capture_frame_v1_add_listener(frame, &frame_listener, NULL);
+	ext_image_copy_capture_frame_v1_attach_buffer(frame, buffer);
+	ext_image_copy_capture_frame_v1_capture(frame);
+	struct timespec t0, t1;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	while (ready < 0 && wl_display_dispatch(display) != -1) {
+	}
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	long ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+	printf("unchanged window, next frame: %s\n", ready == 1 && ms < 1500 ? "yes" : "no");
+	if (!own) {
+		wl_display_disconnect(display);
+		return 0;
 	}
 	// the window closes while it's shared: the session stops, nothing breaks
 	xcb_disconnect(x);
