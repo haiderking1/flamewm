@@ -642,6 +642,10 @@ static int handle_accept(int fd, uint32_t mask, void *data) {
 
 // ---- the server ----
 
+void xserver_set_glx_vendor(struct flame_xserver *xserver, const char *vendor) {
+	snprintf(xserver->glx_vendor, sizeof(xserver->glx_vendor), "%s", vendor);
+}
+
 bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 		struct xs_hooks hooks, int width, int height) {
 	*xserver = (struct flame_xserver){
@@ -649,6 +653,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 		.hooks = hooks,
 		.display = -1,
 		.fds = {-1, -1},
+		.glx_vendor = "mesa",
 	};
 	wl_list_init(&xserver->clients);
 	wl_list_init(&xserver->windows);
@@ -675,6 +680,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->damages);
 	wl_list_init(&xserver->redirects);
 	wl_list_init(&xserver->overlay_refs);
+	wl_list_init(&xserver->glx_objects);
 	xserver->monitor_ids = 0x200;
 	xserver->monitors_time = xs_now(xserver);
 	xserver->last_input = xserver->monitors_time;
@@ -840,6 +846,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	xs_shape_client_gone(xserver, NULL);
 	xs_damage_client_gone(xserver, NULL);
 	xs_composite_client_gone(xserver, NULL);
+	xs_glx_client_gone(xserver, NULL);
 	xs_xkb_finish(xserver);
 	xs_selection_finish(xserver);
 	free(xserver->monitors);

@@ -112,11 +112,15 @@ $(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-cli
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client)
 
+$(E2E)/glx: tests/e2e/glx.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -o $@ $< $(shell pkg-config --cflags --libs gl x11)
+
 $(E2E)/%: tests/e2e/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
-e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins
+e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

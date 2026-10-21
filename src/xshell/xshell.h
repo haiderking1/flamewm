@@ -101,6 +101,8 @@ void xshell_notify_msc(struct flame_xshell *xshell, uint32_t window, uint32_t se
 void xshell_pixmap_destroyed(struct flame_xshell *xshell, struct xs_pixmap *pixmap);
 void xshell_syncobj_destroyed(struct flame_xshell *xshell, struct xs_syncobj *syncobj);
 int xshell_open_device(struct flame_xshell *xshell);
+// the GL library X apps should load: "nvidia" on nvidia's driver, else "mesa"
+const char *xshell_gl_vendor(struct flame_xshell *xshell);
 size_t xshell_modifiers(struct flame_xshell *xshell, uint32_t format, uint64_t *out,
 	size_t max);
 // the X top-level flame shows at a layout point, 0 when it's something else
