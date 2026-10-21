@@ -196,13 +196,25 @@ void xs_focus_events(struct flame_xserver *xserver, uint32_t from, uint32_t to, 
 
 // active grabs (input.c). take one of the pointer or the keyboard for client
 // on window: the X status, 0 Success, 1 AlreadyGrabbed, 3 NotViewable. xi:
-// mask is XI2 event bits, else a core event mask
+// mask is XI2 event bits, else a core event mask. confine: the pointer
+// stays in that window while it's held, 0 for anywhere
 #define XS_NOTIFY_NORMAL 0
 #define XS_NOTIFY_GRAB 1
 #define XS_NOTIFY_UNGRAB 2
 #define XS_NOTIFY_WHILE_GRABBED 3
 uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard,
-	uint32_t window, bool owner_events, bool xi, uint32_t mask);
+	uint32_t window, bool owner_events, bool xi, uint32_t mask, uint32_t confine);
+// where the pointer is, root coords
+void xs_pointer_position(struct flame_xserver *xserver, int *x, int *y);
+// the pointer to x, y root coords, kept on the screen and in a grab's
+// confine window. client: who asked, NULL for XTest's fake input, which
+// may always. others only when the pointer is theirs to move (see input.c)
+void xs_warp_pointer(struct flame_xserver *xserver, struct xs_client *client, int x, int y);
+// WarpPointer and XIWarpPointer: only when the pointer is in src's
+// rectangle (src NULL: anywhere), to x, y in dst (NULL: by x, y from where
+// it is). width, height 0: to src's edge
+void xs_warp_request(struct xs_client *client, struct xs_window *src, int src_x, int src_y,
+	int src_width, int src_height, struct xs_window *dst, int x, int y);
 // lets go when client holds it
 void xs_ungrab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard);
 // grabs whose window went out of sight or whose client left let go

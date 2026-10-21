@@ -595,7 +595,8 @@ static void query_pointer(struct xs_client *client, const struct xin *in) {
 		xs_error(client, XS_ERROR_WINDOW, id, XS_XI_OPCODE, 40);
 		return;
 	}
-	int x = xserver->pointer_x, y = xserver->pointer_y;
+	int x, y;
+	xs_pointer_position(xserver, &x, &y);
 	int wx, wy;
 	xs_window_origin(window, &wx, &wy);
 	struct xs_window *child = xs_window_child_at(window, x, y);
@@ -615,6 +616,25 @@ static void query_pointer(struct xs_client *client, const struct xin *in) {
 	xout_bytes(&out, mods, sizeof(mods));
 	xout32(&out, buttons_of(xserver->state));
 	xs_reply_send(client, &out);
+}
+
+// XIWarpPointer: src, dst, src x, y (16.16), width, height, dst x, y
+// (16.16), device. X's pointer is whole pixels
+static void warp_pointer(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	struct xs_window *src = NULL, *dst = NULL;
+	uint32_t src_id = xin32(in, 4), dst_id = xin32(in, 8);
+	if (src_id && !(src = xserver_window(xserver, src_id))) {
+		xs_error(client, XS_ERROR_WINDOW, src_id, XS_XI_OPCODE, 41);
+		return;
+	}
+	if (dst_id && !(dst = xserver_window(xserver, dst_id))) {
+		xs_error(client, XS_ERROR_WINDOW, dst_id, XS_XI_OPCODE, 41);
+		return;
+	}
+	xs_warp_request(client, src, (int32_t)xin32(in, 12) >> 16, (int32_t)xin32(in, 16) >> 16,
+		xin16(in, 20), xin16(in, 22), dst, (int32_t)xin32(in, 24) >> 16,
+		(int32_t)xin32(in, 28) >> 16);
 }
 
 static void get_property(struct xs_client *client) {
@@ -665,6 +685,9 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 40:
 		query_pointer(client, in);
 		break;
+	case 41:
+		warp_pointer(client, in);
+		break;
 	case 45: // XIGetClientPointer
 		xs_reply_begin(client, &out, 0);
 		xout8(&out, 1); // set
@@ -709,7 +732,7 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 			break;
 		}
 		bool keyboard = device == MASTER_KEYBOARD || device == SLAVE_KEYBOARD;
-		status = xs_grab(xserver, client, keyboard, xin32(in, 4), xin8(in, 20), true, mask);
+		status = xs_grab(xserver, client, keyboard, xin32(in, 4), xin8(in, 20), true, mask, 0);
 		xs_reply_begin(client, &out, 0);
 		xout8(&out, status);
 		xs_reply_send(client, &out);
@@ -762,10 +785,10 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 60:
 		get_selected_events(client, in);
 		break;
-	// accepted, nothing changes: XI1's event selection, warping, cursors,
-	// the hierarchy, the client pointer, ungrabs, allowing events, device
+	// accepted, nothing changes: XI1's event selection, cursors, the
+	// hierarchy, the client pointer, ungrabs, allowing events, device
 	// properties, barriers
-	case 6: case 37: case 38: case 41: case 42: case 43: case 44: case 53: case 55:
+	case 6: case 37: case 38: case 42: case 43: case 44: case 53: case 55:
 	case 57: case 58:
 	case 61:
 		break;

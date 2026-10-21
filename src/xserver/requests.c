@@ -451,6 +451,21 @@ static void query_pointer(struct xs_client *client, const struct xin *in) {
 	xs_reply_send(client, &out);
 }
 
+// WarpPointer: src, dst, src x, y, width, height, dst x, y. games center
+// the pointer every frame (wine's SetCursorPos) and look around by how far
+// it got
+static void warp_pointer(struct xs_client *client, const struct xin *in) {
+	struct xs_window *src = NULL, *dst = NULL;
+	if (xin32(in, 4) && !(src = get_window(client, in, 4, 41))) {
+		return;
+	}
+	if (xin32(in, 8) && !(dst = get_window(client, in, 8, 41))) {
+		return;
+	}
+	xs_warp_request(client, src, xin16s(in, 12), xin16s(in, 14), xin16(in, 16), xin16(in, 18),
+		dst, xin16s(in, 20), xin16s(in, 22));
+}
+
 static void set_input_focus(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint32_t focus = xin32(in, 4);
@@ -814,13 +829,14 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case 26: // GrabPointer: owner events, window, event mask, modes, confine, cursor, time
 		reply_empty(client, xs_grab(xserver, client, false, xin32(in, 4), xin8(in, 1), false,
-			xin16(in, 8)));
+			xin16(in, 8), xin32(in, 12)));
 		break;
 	case 27: // UngrabPointer
 		xs_ungrab(xserver, client, false);
 		break;
 	case 31: // GrabKeyboard: owner events, window, time, modes
-		reply_empty(client, xs_grab(xserver, client, true, xin32(in, 4), xin8(in, 1), false, 0));
+		reply_empty(client, xs_grab(xserver, client, true, xin32(in, 4), xin8(in, 1), false, 0,
+			0));
 		break;
 	case 32: // UngrabKeyboard
 		xs_ungrab(xserver, client, true);
@@ -835,6 +851,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case 40:
 		translate_coordinates(client, in);
+		break;
+	case 41:
+		warp_pointer(client, in);
 		break;
 	case 42:
 		set_input_focus(client, in);
@@ -1008,7 +1027,7 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	// accepted, nothing to do: grabs letting go, cursors, colormaps,
 	// keyboard and pointer settings, server grabs
 	case 6: case 13: case 28: case 29: case 30: case 33: case 34:
-	case 35: case 36: case 37: case 41: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
+	case 35: case 36: case 37: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
 	case 90: case 93: case 94: case 95: case 96: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:
 		break;

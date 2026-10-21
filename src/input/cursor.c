@@ -1,5 +1,6 @@
 #include "input/cursor.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -156,12 +157,25 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 	wlr_seat_pointer_notify_motion(seat, time_msec, sx, sy);
 }
 
+// an X grab confines the pointer: it goes no further than the box's edge
+static void confine(struct flame_cursor *cursor) {
+	double x0, y0, x1, y1;
+	if (!xshell_pointer_confine(&cursor->server->xshell, &x0, &y0, &x1, &y1)) {
+		return;
+	}
+	double x = fmin(fmax(cursor->wlr->x, x0), x1), y = fmin(fmax(cursor->wlr->y, y0), y1);
+	if (x != cursor->wlr->x || y != cursor->wlr->y) {
+		wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
+	}
+}
+
 static void handle_motion(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
 	struct wlr_pointer_motion_event *event = data;
 	xshell_pointer_raw_motion(&cursor->server->xshell, event->delta_x, event->delta_y,
 		event->unaccel_dx, event->unaccel_dy, event->time_msec);
 	wlr_cursor_move(cursor->wlr, &event->pointer->base, event->delta_x, event->delta_y);
+	confine(cursor);
 	process_motion(cursor, event->time_msec, true);
 }
 
@@ -169,6 +183,7 @@ static void handle_motion_absolute(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
 	wlr_cursor_warp_absolute(cursor->wlr, &event->pointer->base, event->x, event->y);
+	confine(cursor);
 	process_motion(cursor, event->time_msec, true);
 }
 
@@ -369,10 +384,17 @@ void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
 }
 
+void cursor_warp(struct flame_cursor *cursor, double x, double y) {
+	wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
+	process_motion(cursor, now_msec(), false);
+	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
+}
+
 // each one a whole event, the way a mouse frames them: clients hold pointer
 // events until the frame that ends them
 void cursor_test_move(struct flame_cursor *cursor, double x, double y) {
 	wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
+	confine(cursor);
 	process_motion(cursor, now_msec(), true);
 	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
 }

@@ -1,11 +1,13 @@
 // flame as X's window manager, the EWMH way an app sees it
 // usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure |
-//   subpixel | wmstate
+//   subpixel | wmstate | warp | confine FLAMECTL
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 #include <xcb/xcb.h>
 
 static xcb_connection_t *c;
@@ -80,6 +82,22 @@ static xcb_window_t window(bool fullscreen) {
 	xcb_map_window(c, w);
 	xcb_flush(c);
 	return w;
+}
+
+// where the pointer is in w, and on the root
+static void pointer_in(xcb_window_t w, int *x, int *y, int *rx, int *ry) {
+	xcb_query_pointer_reply_t *r = xcb_query_pointer_reply(c, xcb_query_pointer(c, w), NULL);
+	*x = r ? r->win_x : -1;
+	*y = r ? r->win_y : -1;
+	*rx = r ? r->root_x : -1;
+	*ry = r ? r->root_y : -1;
+	free(r);
+}
+
+static void listen_motion(xcb_window_t w) {
+	uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_STRUCTURE_NOTIFY
+		| XCB_EVENT_MASK_POINTER_MOTION;
+	xcb_change_window_attributes(c, w, XCB_CW_EVENT_MASK, &mask);
 }
 
 // to the window manager, the way EWMH says
@@ -175,6 +193,74 @@ int main(int argc, char **argv) {
 		printf("unmapped: %u, type is WM_STATE: %s\n", first32(w, "WM_STATE"),
 			r && r->type == atom("WM_STATE") ? "yes" : "no");
 		free(r);
+	} else if (!strcmp(mode, "warp")) {
+		// an app moves the pointer (wine centering it for mouse look): flame's
+		// cursor goes there and the app hears it move
+		xcb_window_t w = window(false);
+		listen_motion(w);
+		settle();
+		xcb_warp_pointer(c, XCB_NONE, w, 0, 0, 0, 0, 50, 60);
+		settle();
+		int x, y, rx, ry;
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("pointer in window %d,%d\n", x, y);
+		xcb_generic_event_t *e;
+		while ((e = xcb_poll_for_event(c))) {
+			xcb_motion_notify_event_t *m = (xcb_motion_notify_event_t *)e;
+			if ((e->response_type & 0x7f) == XCB_MOTION_NOTIFY && m->event == w) {
+				printf("motion %d,%d\n", m->event_x, m->event_y);
+			}
+			free(e);
+		}
+		// another app, nothing of its under the pointer, not focused: the
+		// pointer isn't its to take
+		pid_t pid = fork();
+		if (pid == 0) {
+			xcb_connection_t *other = xcb_connect(NULL, NULL);
+			xcb_warp_pointer(other, XCB_NONE, s->root, 0, 0, 0, 0, 5, 5);
+			free(xcb_get_input_focus_reply(other, xcb_get_input_focus(other), NULL));
+			xcb_disconnect(other);
+			_exit(0);
+		}
+		waitpid(pid, NULL, 0);
+		settle();
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("after another app tried: %d,%d\n", x, y);
+	} else if (!strcmp(mode, "confine") && argc > 2) {
+		// a grab confining the pointer to a box in the window (wine clipping
+		// the cursor): it's moved into it, the mouse can't take it out,
+		// letting go frees it
+		xcb_window_t w = window(false);
+		listen_motion(w);
+		xcb_window_t box = xcb_generate_id(c);
+		xcb_create_window(c, XCB_COPY_FROM_PARENT, box, w, 100, 100, 40, 30, 0,
+			XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, 0, NULL);
+		xcb_map_window(c, box);
+		settle();
+		xcb_grab_pointer_reply_t *g = xcb_grab_pointer_reply(c, xcb_grab_pointer(c, 0, w,
+			XCB_EVENT_MASK_POINTER_MOTION, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, box,
+			XCB_NONE, XCB_CURRENT_TIME), NULL);
+		printf("grabbed: %s\n", g && g->status == XCB_GRAB_STATUS_SUCCESS ? "yes" : "no");
+		free(g);
+		int x, y, rx, ry;
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("moved inside: %s\n", x >= 100 && x < 140 && y >= 100 && y < 130 ? "yes" : "no");
+		char cmd[512];
+		snprintf(cmd, sizeof(cmd), "%s pointer move 2 3 > /dev/null", argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("mouse pushed out: %d,%d\n", x, y);
+		xcb_ungrab_pointer(c, XCB_CURRENT_TIME);
+		settle();
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		pointer_in(w, &x, &y, &rx, &ry);
+		printf("let go: %d,%d\n", rx, ry);
 	} else if (!strcmp(mode, "dpi")) {
 		xcb_get_property_reply_t *rm = prop(s->root, "RESOURCE_MANAGER");
 		printf("resources: %.*s", rm ? xcb_get_property_value_length(rm) : 0,

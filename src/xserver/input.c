@@ -268,7 +268,7 @@ static struct xs_window *pointer_at(struct flame_xserver *xserver) {
 }
 
 uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard,
-		uint32_t window_id, bool owner_events, bool xi, uint32_t mask) {
+		uint32_t window_id, bool owner_events, bool xi, uint32_t mask, uint32_t confine) {
 	struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
 	struct xs_window *window = xserver_window(xserver, window_id);
 	bool held = grab_on(xserver, grab);
@@ -277,6 +277,10 @@ uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool ke
 	}
 	if (!window || !xs_window_viewable(window)) {
 		return 3; // NotViewable
+	}
+	struct xs_window *confine_to = confine ? xserver_window(xserver, confine) : NULL;
+	if (confine && (!confine_to || !xs_window_viewable(confine_to))) {
+		return 3;
 	}
 	struct xs_window *from = held ? xserver_window(xserver, grab->window) : NULL;
 	wlr_log(WLR_DEBUG, "xserver: %s holds the %s on 0x%x%s", client->comm,
@@ -287,6 +291,7 @@ uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool ke
 		.owner_events = owner_events,
 		.xi = xi,
 		.mask = mask,
+		.confine = confine,
 	};
 	// as if the pointer or the focus moved to the grab window, mode Grab
 	if (keyboard) {
@@ -299,6 +304,12 @@ uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool ke
 		cross_chain(xserver, from ? from : pointer_at(xserver), window, xserver->state,
 			xs_now(xserver));
 		cross_mode = XS_NOTIFY_NORMAL;
+		if (confine_to) {
+			// outside it: moved to its nearest point, like X does
+			int x, y;
+			xs_pointer_position(xserver, &x, &y);
+			xs_warp_pointer(xserver, NULL, x, y);
+		}
 	}
 	return 0;
 }
@@ -342,6 +353,106 @@ void xs_grabs_check(struct flame_xserver *xserver, struct xs_client *gone) {
 			let_go(xserver, keyboard);
 		}
 	}
+}
+
+bool xserver_pointer_confine(const struct flame_xserver *xserver, int *x, int *y, int *width,
+		int *height) {
+	const struct xs_grab *grab = &xserver->pointer_grab;
+	struct xs_window *window = grab->confine
+		? xserver_window((struct flame_xserver *)xserver, grab->confine) : NULL;
+	if (!grab_on((struct flame_xserver *)xserver, grab) || !window
+			|| !xs_window_viewable(window)) {
+		return false;
+	}
+	// what of it is on the screen
+	int wx, wy;
+	xs_window_origin(window, &wx, &wy);
+	int x0 = wx > 0 ? wx : 0, y0 = wy > 0 ? wy : 0;
+	int x1 = wx + window->width, y1 = wy + window->height;
+	x1 = x1 < xserver->root->width ? x1 : xserver->root->width;
+	y1 = y1 < xserver->root->height ? y1 : xserver->root->height;
+	if (x1 <= x0 || y1 <= y0) {
+		return false;
+	}
+	*x = x0;
+	*y = y0;
+	*width = x1 - x0;
+	*height = y1 - y0;
+	return true;
+}
+
+void xs_pointer_position(struct flame_xserver *xserver, int *x, int *y) {
+	if (!xserver->hooks.pointer) {
+		*x = xserver->pointer_x;
+		*y = xserver->pointer_y;
+		return;
+	}
+	double px, py;
+	xserver->hooks.pointer(xserver->hooks.data, &px, &py);
+	*x = (int)px;
+	*y = (int)py;
+}
+
+static bool same_app(const struct xs_client *a, const struct xs_client *b) {
+	return a && b && (a == b || (a->pid && a->pid == b->pid));
+}
+
+static bool owns(struct flame_xserver *xserver, const struct xs_client *client, uint32_t id) {
+	struct xs_window *window = alive(xserver, id) ? xserver_window(xserver, id) : NULL;
+	return window && same_app(window->owner, client);
+}
+
+static int clamp(int v, int lo, int hi) {
+	return v < lo ? lo : v > hi ? hi : v;
+}
+
+void xs_warp_pointer(struct flame_xserver *xserver, struct xs_client *client, int x, int y) {
+	// like Xwayland: an app moves the pointer when it holds it, it's over
+	// one of its windows or it has the keyboard, not from under another app.
+	// the app, not the connection: wine has one connection a thread
+	if (client && !same_app(xserver->pointer_grab.client, client)
+			&& !owns(xserver, client, xserver->pointer_window)
+			&& !owns(xserver, client, xserver->focus)) {
+		wlr_log(WLR_DEBUG, "xserver: %s may not move the pointer, it isn't theirs",
+			client->comm);
+		return;
+	}
+	x = clamp(x, 0, xserver->root->width - 1);
+	y = clamp(y, 0, xserver->root->height - 1);
+	int cx, cy, cw, ch;
+	if (xserver_pointer_confine(xserver, &cx, &cy, &cw, &ch)) {
+		x = clamp(x, cx, cx + cw - 1);
+		y = clamp(y, cy, cy + ch - 1);
+	}
+	if (xserver->hooks.warp_pointer) {
+		xserver->hooks.warp_pointer(xserver->hooks.data, x, y);
+		return;
+	}
+	struct xs_window *top = xs_window_child_at(xserver->root, x, y);
+	xserver_pointer_motion(xserver, top, x, y, xserver->state, xs_now(xserver));
+}
+
+void xs_warp_request(struct xs_client *client, struct xs_window *src, int src_x, int src_y,
+		int src_width, int src_height, struct xs_window *dst, int x, int y) {
+	struct flame_xserver *xserver = client->xserver;
+	int px, py;
+	xs_pointer_position(xserver, &px, &py);
+	if (src) {
+		int sx, sy;
+		xs_window_origin(src, &sx, &sy);
+		int w = src_width ? src_width : src->width - src_x;
+		int h = src_height ? src_height : src->height - src_y;
+		px -= sx + src_x;
+		py -= sy + src_y;
+		if (!xs_window_viewable(src) || px < 0 || py < 0 || px >= w || py >= h) {
+			return;
+		}
+		xs_pointer_position(xserver, &px, &py);
+	}
+	if (dst) {
+		xs_window_origin(dst, &px, &py);
+	}
+	xs_warp_pointer(xserver, client, px + x, py + y);
 }
 
 void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top, int x,

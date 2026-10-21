@@ -131,6 +131,10 @@ double xshell_from_x(const struct flame_xshell *xshell, double v);
 // a pointer position to X's: the X pixel it's in (floor), the same one flame
 // decides the window under the pointer by
 int xshell_pointer_to_x(const struct flame_xshell *xshell, double v);
+// an X grab confines the pointer (wine clipping the cursor to a game): the
+// layout box it stays in, x1, y1 the furthest it goes
+bool xshell_pointer_confine(const struct flame_xshell *xshell, double *x0, double *y0,
+	double *x1, double *y1);
 // the screen's scale or x_zero_scaling changed: X's coordinates follow,
 // every X window moves to where it is in them
 void xshell_rescale(struct flame_xshell *xshell);

@@ -174,6 +174,11 @@ case_run "EWMH: an X window that starts fullscreen does" "
 $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
+case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "
+$BIN/xewmh warp" "pointer in window 50,60" "motion 50,60" "after another app tried: 50,60"
+case_run "an X grab confining the pointer to a window keeps flame's cursor in it" "
+$BIN/xewmh confine $CTL" "grabbed: yes" "moved inside: yes" "mouse pushed out: 100,100" \
+	"let go: 2,3"
 case_run "ICCCM WM_STATE: Normal while managed, Withdrawn once unmapped" "
 $BIN/xewmh wmstate" "mapped: 1" "unmapped: 0, type is WM_STATE: yes"
 
