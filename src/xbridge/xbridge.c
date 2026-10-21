@@ -568,6 +568,12 @@ static void hook_client_message(void *data, uint32_t window, uint32_t type,
 	xselection_client_message(&xbridge->server->xselection, window, type, message);
 }
 
+static void hook_wm_message(void *data, uint32_t window, uint32_t type,
+		const uint32_t message[5]) {
+	struct flame_xbridge *xbridge = data;
+	xshell_wm_message(&xbridge->server->xshell, window, type, message);
+}
+
 static void hook_focus_changed(void *data, uint32_t focus) {
 	focus_moved(data, focus);
 }
@@ -638,6 +644,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.selection_owner = hook_selection_owner,
 		.selection_request = hook_selection_request,
 		.client_message = hook_client_message,
+		.wm_message = hook_wm_message,
 		.pointer = hook_pointer,
 		.open_device = hook_open_device,
 		.modifiers = hook_modifiers,
@@ -668,6 +675,7 @@ void xbridge_start(struct flame_xbridge *xbridge) {
 	}
 	xbridge->running = true;
 	update_screen(xbridge);
+	xshell_started(&xbridge->server->xshell);
 	char display[16];
 	snprintf(display, sizeof(display), ":%d", xbridge->xserver.display);
 	// not $DISPLAY: an app picking X over wayland here would draw into

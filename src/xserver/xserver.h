@@ -303,6 +303,11 @@ struct xs_hooks {
 	// a ClientMessage (format 32) for one of flame's windows: drag and drop
 	void (*client_message)(void *data, uint32_t window, uint32_t type,
 		const uint32_t message[5]);
+	// a ClientMessage for the window manager (sent to the root with
+	// SubstructureRedirect or SubstructureNotify): EWMH's requests, about
+	// window (fullscreen, activate, close)
+	void (*wm_message)(void *data, uint32_t window, uint32_t type,
+		const uint32_t message[5]);
 	void *data;
 };
 

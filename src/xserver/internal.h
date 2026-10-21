@@ -42,6 +42,7 @@ enum {
 #define XS_MASK_EXPOSURE (1u << 15)
 #define XS_MASK_STRUCTURE (1u << 17)
 #define XS_MASK_SUBSTRUCTURE (1u << 19)
+#define XS_MASK_SUBSTRUCTURE_REDIRECT (1u << 20)
 #define XS_MASK_FOCUS (1u << 21)
 #define XS_MASK_PROPERTY (1u << 22)
 

@@ -165,6 +165,20 @@ grim after.png
 cat typed
 cmp -s before.png after.png || echo redrew" "hi" "redrew"
 
+case_run "EWMH: flame is X's window manager, and composites" "
+export DISPLAY=\$FLAMEWM_X11_DISPLAY
+$BIN/xewmh check" "wm flame, check points at itself: yes" "compositor: yes" \
+	"supports fullscreen: yes"
+case_run "EWMH: an X window goes fullscreen and back, asked to" "
+$BIN/xewmh fullscreen" "state: FOCUSED MAXIMIZED_VERT MAXIMIZED_HORZ" \
+	"state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
+case_run "EWMH: an X window that starts fullscreen does" "
+$BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
+case_run "EWMH: activating and closing the EWMH way" "
+$BIN/xewmh activate
+$BIN/xewmh close" "active is the new one: yes" "active is the first one: yes" "clients: 2" \
+	"asked to close: yes"
+
 case_run "GL on X: a multisampled srgb config, made current, frames swapped and seen" "
 $BIN/glx > glx.out 2>&1 &
 sleep 0.9
