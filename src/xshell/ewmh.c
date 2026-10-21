@@ -124,10 +124,25 @@ void ewmh_window_new(struct flame_xshell *xshell, struct flame_xwindow *window,
 	}
 }
 
+// ICCCM's WM_STATE: the window manager's word that it has the window, state
+// and icon window. Normal while flame manages it (a hidden workspace too, it
+// isn't iconic), Withdrawn once the app unmaps it. wine waits for it before
+// it lets its window take focus: without it a game never became foreground,
+// keys and mouse look went nowhere
+#define WM_STATE_WITHDRAWN 0
+#define WM_STATE_NORMAL 1
+
+static void set_wm_state(struct flame_xshell *xshell, struct xs_window *x, uint32_t state) {
+	uint32_t wm_state = xserver_atom(xshell->xserver, "WM_STATE");
+	const uint32_t value[2] = {state, 0}; // no icon window
+	set_cardinals(xshell, x, wm_state, wm_state, value, 2);
+}
+
 void ewmh_window_gone(struct flame_xshell *xshell, uint32_t id) {
 	struct xs_window *x = xserver_window(xshell->xserver, id);
 	if (xshell->ewmh.started && x) {
 		xserver_delete_property(xshell->xserver, x, atom(xshell, NET_WM_STATE));
+		set_wm_state(xshell, x, WM_STATE_WITHDRAWN);
 	}
 }
 
@@ -191,6 +206,9 @@ void ewmh_update(struct flame_xshell *xshell) {
 			active = window->id;
 		}
 		uint32_t bits = state_of(xshell, window);
+		if (!window->ewmh_state_set) {
+			set_wm_state(xshell, x, WM_STATE_NORMAL); // managed from here on
+		}
 		if (!window->ewmh_state_set || bits != window->ewmh_state) {
 			window->ewmh_state = bits;
 			window->ewmh_state_set = true;
