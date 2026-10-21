@@ -14,6 +14,7 @@ struct flame_buffer_node;
 struct flame_frame;
 struct flame_server;
 struct flame_xserver;
+struct wlr_drm_syncobj_timeline;
 struct wlr_keyboard;
 struct flame_tree;
 struct xs_window;
@@ -41,6 +42,9 @@ struct flame_xshell {
 	// repeats next. X apps get their repeats from the server
 	uint8_t repeat_key;
 	struct flame_timer repeat_timer;
+	// what copies of X apps' presents are done on, see xlayer.copying
+	struct wlr_drm_syncobj_timeline *copy_timeline;
+	uint64_t copy_point;
 	// an X window flame's focus just left, X's focus comes off it when idle
 	uint32_t unfocus;
 	struct wl_event_source *unfocus_idle;
