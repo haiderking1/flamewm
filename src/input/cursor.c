@@ -225,6 +225,9 @@ static void button_event(struct flame_cursor *cursor,
 		return;
 	}
 
+	// on a wayland window: X apps listening for raw buttons hear it (push
+	// to talk on a side button)
+	xshell_button_elsewhere(&server->xshell, event->button, pressed, event->time_msec);
 	if (pressed) {
 		double sx, sy;
 		struct wlr_surface *surface;

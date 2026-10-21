@@ -674,6 +674,7 @@ bool xserver_init(struct flame_xserver *xserver, struct wl_event_loop *loop,
 	wl_list_init(&xserver->selection_selects);
 	wl_list_init(&xserver->gcs);
 	wl_list_init(&xserver->cursors);
+	wl_list_init(&xserver->key_grabs);
 	wl_list_init(&xserver->fonts);
 	wl_list_init(&xserver->shm_segments);
 	wl_list_init(&xserver->pictures);
@@ -855,6 +856,7 @@ void xserver_finish(struct flame_xserver *xserver) {
 	xs_damage_client_gone(xserver, NULL);
 	xs_font_client_gone(xserver, NULL);
 	xs_cursor_client_gone(xserver, NULL);
+	xs_key_grabs_gone(xserver, NULL, 0);
 	xs_composite_client_gone(xserver, NULL);
 	xs_glx_client_gone(xserver, NULL);
 	xs_xkb_finish(xserver);

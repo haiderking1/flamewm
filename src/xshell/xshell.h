@@ -184,6 +184,15 @@ bool xshell_pointer_grabbed(const struct flame_xshell *xshell);
 // pointer passing over other windows moves no focus until it closes, like
 // a wayland popup's grab. clicks still do
 bool xshell_menu_open(struct flame_xshell *xshell);
+// a key typed in a wayland window: X apps see it the way the config's
+// x_global_keys says (push to talk, obs hotkeys, global hotkeys). true: an
+// X app's global hotkey took it, the window doesn't get it
+bool xshell_key_elsewhere(struct flame_xshell *xshell, struct wlr_keyboard *keyboard,
+	uint32_t keycode, bool pressed, uint32_t time);
+// a mouse button on a wayland window, as a raw event to X apps that listen
+// (x_global_keys = "always")
+void xshell_button_elsewhere(struct flame_xshell *xshell, uint32_t button, bool pressed,
+	uint32_t time);
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 	uint32_t time);
 // the mouse moved, before acceleration too: games over X read it raw. only

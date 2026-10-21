@@ -124,6 +124,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 	xs_glx_drawable_gone(xserver, window->id);
 	xs_draw_window_freed(window);
 	xs_cursor_unref(window->cursor);
+	xs_key_grabs_gone(xserver, NULL, window->id);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
 	free(window);
@@ -730,6 +731,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	// that its window went
 	xs_selection_client_gone(xserver, client);
 	xs_grabs_check(xserver, client); // what it held lets go
+	xs_key_grabs_gone(xserver, client, 0);
 
 	// its windows, each from the highest one it owns down
 	bool again = true;
