@@ -6,9 +6,12 @@
 //   blue: a GL child at 100,80 120x90, above green
 //   yellow: a GL child at 50,50 200x200 inside a 100x100 window at 300,30,
 //     only its corner inside that window shows
+// glxchild remap: green is unmapped and mapped again in one go without
+// drawing, like an app reusing a popup: its old picture is gone with it
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 static Display *d;
@@ -33,7 +36,7 @@ static void draw(GLXContext ctx, Window win, float r, float g, float b) {
 	glFinish();
 }
 
-int main(void) {
+int main(int argc, char **argv) {
 	d = XOpenDisplay(NULL);
 	if (!d) {
 		return 2;
@@ -72,6 +75,12 @@ int main(void) {
 	draw(ctx, blue, 0, 0, 1);
 	draw(ctx, yellow, 1, 1, 0);
 	XSync(d, False);
+	if (argc > 1 && !strcmp(argv[1], "remap")) {
+		usleep(300000);
+		XUnmapWindow(d, green);
+		XMapWindow(d, green);
+		XSync(d, False);
+	}
 	puts("drawn");
 	fflush(stdout);
 	sleep(2);

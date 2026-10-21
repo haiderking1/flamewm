@@ -269,6 +269,21 @@ for name, x, y in (('top', 20, 20), ('green', 60, 50), ('blue', 150, 110),
 \"
 wait" "drawn" "top 255 0 0" "green 0 255 0" "blue 0 0 255" "yellow 255 255 0" "cut 255 0 0"
 
+case_run "GL child unmapped and mapped again: its old picture doesn't come back" "
+$BIN/glxchild remap > child.out 2>&1 &
+sleep 1.6
+grim -t ppm shot.ppm
+cat child.out
+set -- \$($BIN/xwins | grep glxchild | $XGEO)
+python3 -I -c \"
+d = open('shot.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+pixels = d[-(w * h * 3):]
+at = ((\$2 + 50) * w + \$1 + 60) * 3
+print('green gone' if pixels[at:at + 3] != bytes([0, 255, 0]) else 'green still there')
+\"
+wait" "drawn" "green gone"
+
 case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &
 sleep 0.8

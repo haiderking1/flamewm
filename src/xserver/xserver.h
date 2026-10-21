@@ -275,6 +275,10 @@ struct xs_hooks {
 	void (*window_created)(void *data, struct xs_window *window);
 	// about to go away
 	void (*window_destroyed)(void *data, struct xs_window *window);
+	// just unmapped, reparenting included (it unmaps and maps again): what
+	// it and everything in it showed is gone, right now, not at the next
+	// windows_changed
+	void (*window_unmapped)(void *data, struct xs_window *window);
 	// anything about windows that flame may care about changed: mapping,
 	// geometry, parents, names. called at most once per loop iteration
 	void (*windows_changed)(void *data);
