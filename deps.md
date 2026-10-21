@@ -36,6 +36,15 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 wlroots also pulls in libinput, libseat (seatd), libliftoff,
 libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 
+## runtime
+
+not linked, flame works without them, these features don't.
+
+| dep | why |
+| --- | --- |
+| xdg-desktop-portal, xdg-desktop-portal-wlr, pipewire | screen sharing (obs, discord, browsers): the portal asks wlr's backend, it captures through flame's screencopy into pipewire. `data/flamewm-portals.conf` (installed by `make install`) points the portal at it. slurp, pulled in with it, picks the screen |
+| xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
+
 ## tests
 
 `make test` and `make e2e` only, flamewm never links these.
