@@ -30,9 +30,10 @@ static void follow_mouse(struct flame_server *server, struct flame_view *view,
 		return;
 	}
 	// selecting text and dragging out of the window keeps typing where it
-	// was, an X window's buttons too (they never reach the seat)
+	// was, an X window's buttons too (they never reach the seat). an X
+	// app's open menu keeps it too, until it closes
 	if (server->input.seat->pointer_state.button_count > 0
-			|| xshell_buttons_held(&server->xshell)) {
+			|| xshell_buttons_held(&server->xshell) || xshell_menu_open(&server->xshell)) {
 		return;
 	}
 	if (!view) {
@@ -195,7 +196,8 @@ static void button_event(struct flame_cursor *cursor,
 		// focus first, then the click: the app hears FocusIn before the
 		// press like under any X window manager. a button already held is
 		// the implicit grab, the focus stays
-		if (pressed && !xshell_buttons_held(&server->xshell)) {
+		if (pressed && !xshell_buttons_held(&server->xshell)
+				&& !xshell_pointer_grabbed(&server->xshell)) {
 			double sx, sy;
 			struct wlr_surface *surface;
 			struct flame_view *view = desktop_view_at(&server->desktop,

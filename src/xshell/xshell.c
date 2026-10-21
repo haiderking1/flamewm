@@ -1504,16 +1504,26 @@ static struct wlr_box xview_window_geometry(struct flame_view *view, bool pendin
 	return (struct wlr_box){0};
 }
 
-// flame's focus went from an X window to something else: X's focus leaves
-// it once this round of focus changes is done. another X window taking it
-// takes it straight over, apps don't see a detour through None
+static bool is_xview(struct flame_view *view);
+
+// the app (its process) an X window is from, 0 for none
+static pid_t x_pid(struct flame_xserver *xserver, uint32_t id) {
+	struct xs_window *x = id > XS_FOCUS_POINTER_ROOT ? xserver_window(xserver, id) : NULL;
+	return x && x->owner ? x->owner->pid : 0;
+}
+
+// flame's focus went from an X app to something else: X's focus leaves it
+// once this round of focus changes is done, wherever in the app it is (a
+// menu it opened and focused is a top-level of its own). another X window
+// taking it takes it straight over, apps don't see a detour through None
 static void handle_unfocus_idle(void *data) {
 	struct flame_xshell *xshell = data;
 	xshell->unfocus_idle = NULL;
-	struct xs_window *x = xshell->unfocus ? xserver_window(xshell->xserver, xshell->unfocus)
-		: NULL;
+	pid_t pid = xshell->unfocus;
 	xshell->unfocus = 0;
-	if (x && xserver_focus_in(xshell->xserver, x)) {
+	struct flame_view *focused = xshell->server->desktop.focused;
+	pid_t now = is_xview(focused) ? x_pid(xshell->xserver, from_view(focused)->id) : 0;
+	if (pid && pid != now && x_pid(xshell->xserver, xshell->xserver->focus) == pid) {
 		xserver_set_focus(xshell->xserver, XS_FOCUS_NONE);
 	}
 }
@@ -1523,17 +1533,14 @@ static void xview_set_activated(struct flame_view *view, bool activated) {
 	struct flame_xshell *xshell = window->xshell;
 	struct xs_window *x = x_of(window);
 	if (activated) {
-		if (xshell->unfocus == window->id) {
-			xshell->unfocus = 0;
-		}
 		// the window manager's part, ICCCM's way. focus the app moved onto
 		// one of its own windows in there stays where it put it
 		if (x) {
 			xserver_focus_window(xshell->xserver, x);
 		}
 		x_stack_update(xshell);
-	} else if (x && xserver_focus_in(xshell->xserver, x)) {
-		xshell->unfocus = window->id;
+	} else if (x && x->owner) {
+		xshell->unfocus = x->owner->pid;
 		if (!xshell->unfocus_idle) {
 			xshell->unfocus_idle = wl_event_loop_add_idle(xshell->server->loop,
 				handle_unfocus_idle, xshell);
@@ -1645,6 +1652,23 @@ static bool read_extents(struct flame_xshell *xshell, struct flame_xwindow *wind
 	return changed;
 }
 
+// _NET_WM_WINDOW_TYPE says one of these
+static bool x_typed(struct flame_xserver *xserver, struct xs_window *x,
+		const char *const *types, size_t count) {
+	struct xs_property *type = xserver_property(xserver, x, "_NET_WM_WINDOW_TYPE");
+	for (uint32_t i = 0; type && type->format == 32 && i < type->units; i++) {
+		uint32_t atom;
+		memcpy(&atom, type->data + i * 4, 4);
+		const char *name = xserver_atom_name(xserver, atom);
+		for (size_t j = 0; name && j < count; j++) {
+			if (!strcmp(name, types[j])) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // managed windows that float instead of tiling: dialogs, utility windows,
 // splash screens, anything transient for another, anything one size only
 static bool x_wants_float(struct flame_xshell *xshell, struct xs_window *x) {
@@ -1652,22 +1676,12 @@ static bool x_wants_float(struct flame_xshell *xshell, struct xs_window *x) {
 	if (xserver_property(xserver, x, "WM_TRANSIENT_FOR")) {
 		return true;
 	}
-	struct xs_property *type = xserver_property(xserver, x, "_NET_WM_WINDOW_TYPE");
-	if (type && type->format == 32) {
-		static const char *const floaty[] = {
-			"_NET_WM_WINDOW_TYPE_DIALOG", "_NET_WM_WINDOW_TYPE_UTILITY",
-			"_NET_WM_WINDOW_TYPE_SPLASH", "_NET_WM_WINDOW_TYPE_TOOLBAR",
-		};
-		for (uint32_t i = 0; i < type->units; i++) {
-			uint32_t atom;
-			memcpy(&atom, type->data + i * 4, 4);
-			const char *name = xserver_atom_name(xserver, atom);
-			for (size_t j = 0; name && j < sizeof(floaty) / sizeof(floaty[0]); j++) {
-				if (!strcmp(name, floaty[j])) {
-					return true;
-				}
-			}
-		}
+	static const char *const floaty[] = {
+		"_NET_WM_WINDOW_TYPE_DIALOG", "_NET_WM_WINDOW_TYPE_UTILITY",
+		"_NET_WM_WINDOW_TYPE_SPLASH", "_NET_WM_WINDOW_TYPE_TOOLBAR",
+	};
+	if (x_typed(xserver, x, floaty, sizeof(floaty) / sizeof(floaty[0]))) {
+		return true;
 	}
 	// WM_NORMAL_HINTS: flags, 4 obsolete, then min and max size
 	struct xs_property *hints = xserver_property(xserver, x, "WM_NORMAL_HINTS");
@@ -2137,6 +2151,15 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 	// a held button keeps feeding the window it went down on
 	struct flame_xwindow *window = xshell->buttons && xshell->pointer_window
 		? find_window(xshell, xshell->pointer_window) : window_at(xshell, lx, ly);
+	if (xserver_pointer_grabbed(xserver)) {
+		// an X client holds the pointer (its menu is open): everything goes
+		// to it wherever the pointer is, over wayland windows too, and the
+		// pointer moves no focus until it lets go, like under any X server
+		xshell->pointer_window = window ? window->id : 0;
+		xserver_pointer_motion(xserver, window ? x_of(window) : NULL,
+			xshell_to_x(xshell, lx), xshell_to_x(xshell, ly), x_state(xshell), time);
+		return true;
+	}
 	if (!window) {
 		if (xshell->pointer_window) {
 			xserver_pointer_leave(xserver, time);
@@ -2168,8 +2191,34 @@ static uint8_t x_button(uint32_t button) {
 	}
 }
 
+bool xshell_menu_open(struct flame_xshell *xshell) {
+	static const char *const menus[] = {
+		"_NET_WM_WINDOW_TYPE_POPUP_MENU", "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+		"_NET_WM_WINDOW_TYPE_MENU", "_NET_WM_WINDOW_TYPE_COMBO",
+	};
+	struct flame_view *focused = xshell->server->desktop.focused;
+	struct xs_window *app = is_xview(focused) ? x_of(from_view(focused)) : NULL;
+	pid_t pid = app && app->owner ? app->owner->pid : 0;
+	if (!pid) {
+		return false;
+	}
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		struct xs_window *x = window->floating ? x_of(window) : NULL;
+		if (x && x->owner && x->owner->pid == pid
+				&& x_typed(xshell->xserver, x, menus, sizeof(menus) / sizeof(menus[0]))) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool xshell_has_pointer(const struct flame_xshell *xshell) {
-	return xshell->pointer_window != 0;
+	return xshell->pointer_window != 0 || xserver_pointer_grabbed(xshell->xserver);
+}
+
+bool xshell_pointer_grabbed(const struct flame_xshell *xshell) {
+	return xserver_pointer_grabbed(xshell->xserver);
 }
 
 bool xshell_buttons_held(const struct flame_xshell *xshell) {
@@ -2178,7 +2227,7 @@ bool xshell_buttons_held(const struct flame_xshell *xshell) {
 
 bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pressed,
 		uint32_t time) {
-	if (!xshell->pointer_window) {
+	if (!xshell_has_pointer(xshell)) {
 		return false;
 	}
 	uint8_t xbutton = x_button(button);
@@ -2197,7 +2246,7 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 		uint32_t time) {
-	if (!xshell->pointer_window) {
+	if (!xshell_has_pointer(xshell)) {
 		return false;
 	}
 	xserver_pointer_scroll(xshell->xserver, vertical, delta, x_state(xshell), time);

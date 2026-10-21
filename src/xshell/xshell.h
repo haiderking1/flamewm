@@ -45,8 +45,9 @@ struct flame_xshell {
 	// what copies of X apps' presents are done on, see xlayer.copying
 	struct wlr_drm_syncobj_timeline *copy_timeline;
 	uint64_t copy_point;
-	// an X window flame's focus just left, X's focus comes off it when idle
-	uint32_t unfocus;
+	// the X app flame's focus just left (its pid), X's focus comes off it
+	// when idle
+	int unfocus;
 	struct wl_event_source *unfocus_idle;
 
 	// the msc X apps see, Present paces them on it. NVIDIA flips carry no
@@ -160,6 +161,12 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 bool xshell_has_pointer(const struct flame_xshell *xshell);
 // a button is down on an X window, its implicit grab
 bool xshell_buttons_held(const struct flame_xshell *xshell);
+// an X client holds the pointer (a menu open): no focus changes meanwhile
+bool xshell_pointer_grabbed(const struct flame_xshell *xshell);
+// the focused X app has a menu open (a dropdown, a context menu): the
+// pointer passing over other windows moves no focus until it closes, like
+// a wayland popup's grab. clicks still do
+bool xshell_menu_open(struct flame_xshell *xshell);
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 	uint32_t time);
 // the mouse moved, before acceleration too: games over X read it raw. only
