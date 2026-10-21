@@ -50,6 +50,12 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
 
+## data
+
+| what | where | why |
+| --- | --- | --- |
+| misc-fixed 6x13 (xorg's font/misc-misc, public domain: "Public domain font. Share and enjoy.") | `src/xserver/fixed.c`, made by `tools/fonts/bdf2c.py 6x13.bdf` | flame's X server's built-in "fixed", the font core text draws with, like Xorg's. iso8859-1, 256 cells baked in, nothing read at runtime |
+
 ## runtime
 
 | dep | for |

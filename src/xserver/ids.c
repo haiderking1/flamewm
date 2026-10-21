@@ -50,7 +50,8 @@ bool xs_id_in_use(struct flame_xserver *xserver, uint32_t id) {
 			return true;
 		}
 	}
-	return xs_damage_id_in_use(xserver, id) || xs_glx_id_in_use(xserver, id);
+	return xs_damage_id_in_use(xserver, id) || xs_glx_id_in_use(xserver, id)
+		|| xs_font_id_in_use(xserver, id);
 }
 
 bool xs_id_available(struct xs_client *client, uint32_t id) {
@@ -119,7 +120,7 @@ static uint32_t *used_ids(struct xs_client *client, size_t *len) {
 		add(&ids, len, &cap, base, select->id);
 	}
 	size_t (*const lists[])(struct flame_xserver *, uint32_t, uint32_t *, size_t) = {
-		xs_damage_ids, xs_glx_ids,
+		xs_damage_ids, xs_glx_ids, xs_font_ids,
 	};
 	for (size_t l = 0; l < sizeof(lists) / sizeof(lists[0]); l++) {
 		size_t n = lists[l](xserver, base, NULL, 0);

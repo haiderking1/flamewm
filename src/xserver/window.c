@@ -517,6 +517,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	xs_xi_client_gone(xserver, client);
 	xs_shape_client_gone(xserver, client);
 	xs_damage_client_gone(xserver, client);
+	xs_font_client_gone(xserver, client);
 	xs_composite_client_gone(xserver, client);
 	xs_glx_client_gone(xserver, client);
 	struct xs_fence *fence, *ftmp;
