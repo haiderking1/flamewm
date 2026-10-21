@@ -537,6 +537,9 @@ static void set_input_focus(struct xs_client *client, const struct xin *in) {
 			return;
 		}
 	}
+	if (focus != xserver->focus) {
+		wlr_log(WLR_DEBUG, "xserver: %s puts the keyboard focus on 0x%x", client->comm, focus);
+	}
 	xs_focus_set(xserver, focus, xin8(in, 1));
 	if (xserver->hooks.focus_changed) {
 		xserver->hooks.focus_changed(xserver->hooks.data, focus);
