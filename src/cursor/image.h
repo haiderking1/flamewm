@@ -50,6 +50,7 @@ struct flame_cursor_image {
 	struct wlr_xcursor *pixels;
 	float pixels_scale;
 	uint64_t pixels_key;
+	bool pixels_blank; // not a pixel shows: hidden (a game's blank cursor)
 
 	struct {
 		struct wl_signal changed;

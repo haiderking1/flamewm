@@ -260,6 +260,12 @@ struct xpresent {
 	// the last frame that read it, the buffer is free once its gpu work is done
 	struct wlr_drm_syncobj_timeline *render_done;
 	uint64_t render_point;
+	// its buffer went to KMS itself (direct scanout) as frame's scan_id: KMS
+	// reads it until a later frame of that output flips. release_held: it
+	// was replaced meanwhile, it goes back once that flip comes
+	uint64_t scan_id;
+	struct flame_frame *scan_frame;
+	bool release_held;
 	struct wlr_drm_syncobj_timeline_waiter waiter;
 	bool waiting;
 
@@ -602,8 +608,13 @@ static void handle_render_done(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 
 // replaced: free once the last frame that read it is done reading. waited on
 // here and signalled from here: our timeline can live on another device fd
-// than the app's syncobj (KMS vs render node), the kernel won't chain those
+// than the app's syncobj (KMS vs render node), the kernel won't chain those.
+// on screen by scanout it waits for a later frame's flip first
 static void release_when_idle(struct flame_xshell *xshell, struct xpresent *xp) {
+	if (xp->scan_id) {
+		xp->release_held = true;
+		return;
+	}
 	if (xp->render_done && wlr_drm_syncobj_timeline_waiter_init(&xp->waiter,
 			xp->render_done, xp->render_point, 0, xshell->server->loop, handle_render_done)) {
 		xp->waiting = true;
@@ -819,6 +830,7 @@ static void layer_drop(struct xlayer *layer) {
 	layer->shown = NULL;
 	scene_node_set_enabled(&layer->node->node, false);
 	scene_buffer_set(layer->node, NULL, NULL, 0, 0, false, NULL, 0);
+	layer->node->scanout_buffer = NULL;
 	retire(layer, xp);
 	core_update(layer->window);
 }
@@ -870,6 +882,8 @@ static void layer_place(struct xlayer *layer) {
 	uint64_t wait_point = xp->copy ? xp->copy_point : xp->acquire_point;
 	buffer_show(layer->node, texture, xp, from_x(xshell, shows.width),
 		from_x(xshell, shows.height), xp->pixmap->opaque, wait, wait_point);
+	// fullscreen and alone, KMS can show it itself (see layer_scanned_out)
+	layer->node->scanout_buffer = xp->copy ? xp->copy->buffer : xp->pixmap->buffer;
 	scene_node_set_enabled(&layer->node->node, true);
 }
 
@@ -1385,6 +1399,21 @@ static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 	deliver(xp, true);
 }
 
+// a scanned out buffer is off the screen once a later frame of its output
+// flipped: whatever was waiting on that goes ahead
+static void scan_done(struct flame_xshell *xshell, struct xpresent *xp, struct flame_frame *frame,
+		uint64_t draw_id) {
+	if (!xp->scan_id || xp->scan_frame != frame || draw_id <= xp->scan_id) {
+		return;
+	}
+	xp->scan_id = 0;
+	xp->scan_frame = NULL;
+	if (xp->release_held) {
+		xp->release_held = false;
+		release_when_idle(xshell, xp);
+	}
+}
+
 static void handle_presented(struct wl_listener *listener, void *data) {
 	struct xshell_frame *xframe = wl_container_of(listener, xframe, presented);
 	const struct flame_frame_presented *event = data;
@@ -1399,6 +1428,14 @@ static void handle_presented(struct wl_listener *listener, void *data) {
 		if (layer->shown) {
 			check_presented(xframe->xshell, layer->shown, xframe->frame, event);
 		}
+		if (event->presented) {
+			wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
+				scan_done(xshell, xp, xframe->frame, event->draw_id);
+			}
+			if (layer->shown) {
+				scan_done(xshell, layer->shown, xframe->frame, event->draw_id);
+			}
+		}
 	}
 	// the msc moved: queued presents and NotifyMSCs may be due
 	process_msc(xshell, now_ns());
@@ -1411,6 +1448,13 @@ static void handle_frame_destroy(struct wl_listener *listener, void *data) {
 	struct xlayer *layer;
 	wl_list_for_each(window, &xframe->xshell->windows, link) wl_list_for_each(layer, &window->layers, link) {
 		struct xpresent *xp, *tmp;
+		// that output's screen is gone, nothing scans anything out anymore
+		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
+			scan_done(xframe->xshell, xp, xframe->frame, UINT64_MAX);
+		}
+		if (layer->shown) {
+			scan_done(xframe->xshell, layer->shown, xframe->frame, UINT64_MAX);
+		}
 		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			if (xp->frame == xframe->frame) {
 				xp->frame = NULL;
@@ -1487,6 +1531,23 @@ static void layer_sampled(struct flame_buffer_node *node, struct flame_frame *fr
 	xp->render_point = render_point;
 }
 
+// a frame put a layer's buffer itself on screen: the frame it's in completes
+// it like a drawn one, and the buffer stays the screen's until a later flip
+static void layer_scanned_out(struct flame_buffer_node *node, struct flame_frame *frame,
+		uint64_t draw_id) {
+	struct xlayer *layer = node->data;
+	struct xpresent *xp = layer->shown;
+	if (!xp || node->key != xp) {
+		return;
+	}
+	if (!xp->drawn_id) {
+		xp->drawn_id = draw_id;
+		xp->frame = frame;
+	}
+	xp->scan_id = draw_id;
+	xp->scan_frame = frame;
+}
+
 // what the window cut out of its input shape (a toolkit's shadow) goes to
 // whatever is below it. x, y: in the node, which is at dx, dy in the window
 static bool accepts_input(struct flame_xwindow *window, int dx, int dy, double x, double y) {
@@ -1506,6 +1567,7 @@ static bool core_accepts_input(struct flame_buffer_node *node, double x, double 
 
 static const struct flame_buffer_node_impl layer_impl = {
 	.sampled = layer_sampled,
+	.scanned_out = layer_scanned_out,
 	.accepts_input = layer_accepts_input,
 };
 

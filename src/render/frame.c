@@ -689,6 +689,18 @@ static void keep_scanout_buffer(struct flame_frame *frame,
 		frame->out_point, frame->output->event_loop);
 }
 
+// a picture's own buffer goes to KMS (a fullscreen X game): a draw id for
+// it, and its owner holds on to the buffer until a later frame flips
+static uint64_t picture_scanned_out(struct flame_frame *frame,
+		const struct flame_element *candidate) {
+	struct flame_buffer_node *node = candidate->buffer_node;
+	frame->draw_id++;
+	if (node->impl && node->impl->scanned_out) {
+		node->impl->scanned_out(node, frame, frame->draw_id);
+	}
+	return frame->draw_id;
+}
+
 // the schedule said now: build a frame from the latest scene and send it to
 // KMS, or hold it behind the pending one. nothing changed: no pageflip at all
 static void render(struct flame_frame *frame, int64_t now) {
@@ -732,21 +744,30 @@ static void render(struct flame_frame *frame, int64_t now) {
 		wlr_output_state_init(&state);
 		enum timing_commit kind = TIMING_CURSOR;
 		bool ready = true;
+		// what buffer nodes will hear about this frame, nothing new for a
+		// cursor move or a client buffer scanned out
+		uint64_t draw_id = 0;
 		if (cursor_only) {
 			// no damage set: it's the same picture either way
 			wlr_output_state_set_buffer(&state, frame->front);
 			keep_scanout_buffer(frame, candidate, &state);
+			if (frame->scanout.active && candidate && candidate->buffer_node
+					&& candidate->buffer == frame->front) {
+				draw_id = picture_scanned_out(frame, candidate); // on screen again
+			}
 		} else {
 			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
 			drew_gl = kind == TIMING_COMPOSITED;
 			if (drew_gl && ready) {
 				watch_gpu_done(frame);
 			}
+			if (drew_gl) {
+				draw_id = frame->draw_id;
+			} else if (ready && candidate->buffer_node) {
+				draw_id = picture_scanned_out(frame, candidate);
+			}
 		}
 
-		// what buffer nodes will hear about this frame, nothing new for a
-		// cursor move or a client buffer scanned out
-		uint64_t draw_id = kind == TIMING_COMPOSITED ? frame->draw_id : 0;
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;

@@ -1,5 +1,6 @@
 #include "render/scanout.h"
 
+#include <wlr/backend.h>
 #include <wlr/render/drm_syncobj.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -82,8 +83,15 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 		}
 		only = element;
 	}
-	if (!only || only->type != FLAME_ELEMENT_SURFACE || only->effected) {
+	if (!only || only->effected) {
 		return NULL; // a faded or scaled one needs drawing
+	}
+	// a client surface, or a picture whose owner lets KMS show its buffer (a
+	// fullscreen X game)
+	bool scannable = only->type == FLAME_ELEMENT_SURFACE
+		|| (only->type == FLAME_ELEMENT_TEXTURE && only->buffer_node && only->buffer);
+	if (!scannable) {
+		return NULL;
 	}
 	pixman_box32_t box = {area.x, area.y, area.x + area.width, area.y + area.height};
 	// anything it doesn't cover would have to be painted black by us
@@ -95,6 +103,10 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 }
 
 void scanout_hint(struct flame_scanout *scanout, const struct flame_element *candidate) {
+	// only wayland clients get told what KMS takes, X apps allocate on their own
+	if (candidate && !candidate->surface) {
+		candidate = NULL;
+	}
 	if (candidate) {
 		if (scanout->debounce < DEBOUNCE_FRAMES) {
 			scanout->debounce++;
@@ -147,17 +159,33 @@ bool scanout_try(struct flame_scanout *scanout, const struct flame_element *cand
 	pending.buffer_dst_box = dst;
 
 	// the client's own buffer rather than our wrapper around it
-	struct wlr_client_buffer *client = wlr_client_buffer_get(buffer);
+	struct wlr_client_buffer *client = candidate->surface ? wlr_client_buffer_get(buffer) : NULL;
 	if (client && client->source && client->source->n_locks > 0) {
 		buffer = client->source;
 	}
 	wlr_output_state_set_buffer(&pending, buffer);
 
 	// KMS waits for the client's rendering, then says when it let go
-	struct wlr_linux_drm_syncobj_surface_v1_state *sync =
-		wlr_linux_drm_syncobj_v1_get_surface_state(candidate->surface);
+	struct wlr_linux_drm_syncobj_surface_v1_state *sync = candidate->surface
+		? wlr_linux_drm_syncobj_v1_get_surface_state(candidate->surface) : NULL;
 	if (sync && sync->acquire_timeline) {
 		wlr_output_state_set_wait_timeline(&pending, sync->acquire_timeline, sync->acquire_point);
+	} else if (!candidate->surface && candidate->wait_timeline) {
+		// a picture still being made (an X copy in flight): KMS waits for it if
+		// it can, else it's drawn this time. never shown before it's done
+		bool done = false;
+		if (!wlr_drm_syncobj_timeline_check(candidate->wait_timeline, candidate->wait_point, 0,
+				&done)) {
+			done = false;
+		}
+		if (!done && !output->backend->features.timeline) {
+			wlr_output_state_finish(&pending);
+			return false;
+		}
+		if (!done) {
+			wlr_output_state_set_wait_timeline(&pending, candidate->wait_timeline,
+				candidate->wait_point);
+		}
 	}
 	uint64_t point = *out_point + 1;
 	if (out_timeline) {
@@ -172,7 +200,9 @@ bool scanout_try(struct flame_scanout *scanout, const struct flame_element *cand
 	wlr_output_state_finish(&pending);
 
 	*out_point = point;
-	wlr_presentation_surface_scanned_out_on_output(candidate->surface, output);
+	if (candidate->surface) {
+		wlr_presentation_surface_scanned_out_on_output(candidate->surface, output);
+	}
 	if (sync && out_timeline) {
 		wlr_linux_drm_syncobj_v1_state_add_release_point(sync, out_timeline, point,
 			output->event_loop);

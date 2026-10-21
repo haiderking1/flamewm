@@ -209,12 +209,41 @@ static struct wlr_xcursor *pixels_copy(const struct flame_cursor_pixels *frames,
 	return xcursor;
 }
 
+// every pixel of every frame clear
+static bool blank(const struct flame_cursor_pixels *frames, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		size_t n = (size_t)frames[i].width * (size_t)frames[i].height;
+		for (size_t p = 0; p < n; p++) {
+			if (frames[i].pixels[p] >> 24) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 void cursor_image_set_pixels(struct flame_cursor_image *image, uint64_t key,
 		const struct flame_cursor_pixels *frames, size_t len, float scale) {
-	if (image->kind == FLAME_CURSOR_PIXELS && image->pixels_key == key
-			&& image->pixels_scale == scale) {
+	bool same_look = image->pixels_key == key && image->pixels_scale == scale;
+	if (same_look && (image->kind == FLAME_CURSOR_PIXELS
+			|| (image->kind == FLAME_CURSOR_HIDDEN && image->pixels_blank))) {
 		return;
 	}
+	if (len && blank(frames, len)) {
+		// wine hides the pointer with a cursor of clear pixels: no pointer,
+		// nothing drawn and nothing on the cursor plane (direct scanout stays)
+		drop_surface(image);
+		drop_pixels(image);
+		wl_event_source_timer_update(image->animate, 0);
+		image->kind = FLAME_CURSOR_HIDDEN;
+		image->pixels_key = key;
+		image->pixels_scale = scale;
+		image->pixels_blank = true;
+		image->generation++;
+		changed(image);
+		return;
+	}
+	image->pixels_blank = false;
 	drop_surface(image);
 	drop_pixels(image);
 	image->pixels = len ? pixels_copy(frames, len) : NULL;
