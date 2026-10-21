@@ -804,9 +804,18 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case 25:
 		send_event(client, in);
 		break;
-	case 26: // GrabPointer
-	case 31: // GrabKeyboard
-		reply_empty(client, 0); // Success, nobody else is grabbing anything
+	case 26: // GrabPointer: owner events, window, event mask, modes, confine, cursor, time
+		reply_empty(client, xs_grab(xserver, client, false, xin32(in, 4), xin8(in, 1), false,
+			xin16(in, 8)));
+		break;
+	case 27: // UngrabPointer
+		xs_ungrab(xserver, client, false);
+		break;
+	case 31: // GrabKeyboard: owner events, window, time, modes
+		reply_empty(client, xs_grab(xserver, client, true, xin32(in, 4), xin8(in, 1), false, 0));
+		break;
+	case 32: // UngrabKeyboard
+		xs_ungrab(xserver, client, true);
 		break;
 	case 38:
 		query_pointer(client, in);
@@ -990,7 +999,7 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	// accepted, nothing to do: grabs letting go, cursors, colormaps,
 	// keyboard and pointer settings, server grabs
-	case 6: case 13: case 27: case 28: case 29: case 30: case 32: case 33: case 34:
+	case 6: case 13: case 28: case 29: case 30: case 33: case 34:
 	case 35: case 36: case 37: case 41: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
 	case 90: case 93: case 94: case 95: case 96: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:
