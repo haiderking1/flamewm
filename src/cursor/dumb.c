@@ -57,6 +57,8 @@ static struct flame_dumb_buffer *from_buffer(struct wlr_buffer *buffer);
 
 static void buffer_destroy(struct wlr_buffer *wlr_buffer) {
 	struct flame_dumb_buffer *buffer = from_buffer(wlr_buffer);
+	// its destroy event and addons (a renderer's import) go first
+	wlr_buffer_finish(wlr_buffer);
 	if (buffer->dmabuf_fd >= 0) {
 		close(buffer->dmabuf_fd);
 	}

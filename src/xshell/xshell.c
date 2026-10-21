@@ -61,6 +61,8 @@ struct xdmabuf {
 
 static void xdmabuf_destroy(struct wlr_buffer *buffer) {
 	struct xdmabuf *xdmabuf = wl_container_of(buffer, xdmabuf, base);
+	// the renderer's import of it goes with it, every buffer must say so
+	wlr_buffer_finish(buffer);
 	wlr_dmabuf_attributes_finish(&xdmabuf->attribs);
 	free(xdmabuf);
 }
@@ -1457,6 +1459,7 @@ struct xcore {
 
 static void xcore_destroy(struct wlr_buffer *buffer) {
 	struct xcore *core = wl_container_of(buffer, core, base);
+	wlr_buffer_finish(buffer);
 	pixman_image_unref(core->image);
 	free(core);
 }
