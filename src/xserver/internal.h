@@ -179,6 +179,13 @@ void xs_window_delete_property(struct flame_xserver *xserver, struct xs_window *
 	uint32_t name);
 
 // focus moved, FocusOut and FocusIn go out
+// window is strictly inside ancestor
+bool xs_window_inferior(const struct xs_window *window, const struct xs_window *ancestor);
+// the closest window both are in or are, NULL for none
+struct xs_window *xs_window_common(struct xs_window *a, struct xs_window *b);
+// the keyboard focus is window or something it's in (or PointerRoot): the
+// focus flag of its crossing events
+bool xs_focus_within(struct flame_xserver *xserver, const struct xs_window *window);
 void xs_focus_set(struct flame_xserver *xserver, uint32_t focus, uint8_t revert);
 // the focused window went away or out of sight: where focus goes instead
 void xs_focus_lost(struct flame_xserver *xserver, struct xs_window *window);
@@ -322,9 +329,11 @@ bool xs_xi_client_selected(struct xs_client *client, struct xs_window *window, i
 void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receiver,
 	struct xs_window *source, const struct xs_input *input);
 // XI_Enter and XI_Leave, detail as in core crossing events
+// child: the window inside window on the way to the pointer, NULL for none
 void xs_xi_crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-	uint8_t detail, uint16_t state, uint32_t time);
-void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window);
+	uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time);
+void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window,
+	uint8_t detail);
 // raw events go to whoever selected them on the root. motion: accelerated
 // and raw deltas
 void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,

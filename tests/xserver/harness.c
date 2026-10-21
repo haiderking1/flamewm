@@ -153,6 +153,11 @@ static void command(struct harness *h, char *line) {
 		xserver_key_repeat(x, (uint8_t)a, h->state, now_ms());
 	} else if (sscanf(line, "focus %x", &window) == 1) {
 		xserver_set_focus(x, window);
+	} else if (sscanf(line, "wmfocus %x", &window) == 1) {
+		struct xs_window *w = xserver_window(x, window);
+		if (w) {
+			xserver_focus_window(x, w);
+		}
 	} else if (sscanf(line, "monitors %d", &a) == 1) {
 		struct xs_monitor monitors[8] = {0};
 		for (int i = 0; i < a && i < 8; i++) {
