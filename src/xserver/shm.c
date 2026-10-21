@@ -37,6 +37,13 @@ static struct xs_shm_segment *get_segment(struct xs_client *client, uint32_t id,
 	return segment;
 }
 
+struct xs_shm_segment *xs_shm_ref(struct xs_shm_segment *segment) {
+	if (segment) {
+		segment->refs++;
+	}
+	return segment;
+}
+
 void xs_shm_unref(struct xs_shm_segment *segment) {
 	if (--segment->refs > 0) {
 		return;

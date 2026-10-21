@@ -56,6 +56,11 @@ struct picture {
 	uint32_t id;
 	struct xs_client *owner;
 	uint32_t drawable; // 0: a fill or gradient, source is its image
+	// a pixmap's pixels (and the shared memory they're in), kept like X
+	// keeps them: apps free the pixmap right after making the picture
+	// (Xcursor does, then makes the cursor from the picture)
+	pixman_image_t *kept;
+	struct xs_shm_segment *kept_shm;
 	const struct format *format;
 	pixman_image_t *source;
 	uint8_t repeat;
@@ -120,6 +125,12 @@ static void picture_free(struct picture *picture) {
 	wl_list_remove(&picture->link);
 	if (picture->source) {
 		pixman_image_unref(picture->source);
+	}
+	if (picture->kept) {
+		pixman_image_unref(picture->kept);
+	}
+	if (picture->kept_shm) {
+		xs_shm_unref(picture->kept_shm);
 	}
 	pixman_region32_fini(&picture->clip);
 	free(picture->filter_params);
@@ -237,13 +248,21 @@ static bool view_get(struct flame_xserver *xserver, struct picture *picture, str
 			pixman_region32_fini(&clip);
 		} else {
 			struct xs_pixmap *pixmap = xs_pixmap_find(xserver, picture->drawable);
-			if (!pixmap || !pixmap->image) {
+			if (picture->kept && (!pixmap || pixmap->image != picture->kept)) {
+				// freed (its id maybe someone else's now): the pixels live on,
+				// nobody can ask for damage on it anymore
+				pixmap = NULL;
+				pixels = picture->kept;
+				w = pixman_image_get_width(pixels);
+				h = pixman_image_get_height(pixels);
+			} else if (!pixmap || !pixmap->image) {
 				return false;
+			} else {
+				pixels = pixmap->image;
+				w = pixmap->width;
+				h = pixmap->height;
 			}
-			pixels = pixmap->image;
 			v->pixmap = pixmap;
-			w = pixmap->width;
-			h = pixmap->height;
 			pixman_region32_init_rect(&v->shows, 0, 0, (unsigned)w, (unsigned)h);
 		}
 		if (PIXMAN_FORMAT_BPP(picture->format->code)
@@ -358,6 +377,10 @@ static void create_picture(struct xs_client *client, const struct xin *in) {
 	}
 	picture->drawable = drawable;
 	picture->format = format;
+	if (pixmap && pixmap->image) {
+		picture->kept = pixman_image_ref(pixmap->image);
+		picture->kept_shm = xs_shm_ref(pixmap->shm);
+	}
 	change_picture(client, picture, xin32(in, 16), in, 20);
 }
 
@@ -1152,6 +1175,45 @@ static void query_pict_formats(struct xs_client *client) {
 
 // ---- the rest ----
 
+// CreateCursor: id, picture, hotspot. the picture's pixels as they are now,
+// ARGB: Xcursor's themed cursors, what gtk, qt and wine show
+static void create_cursor(struct xs_client *client, const struct xin *in) {
+	struct picture *picture = get_picture(client, xin32(in, 8), 27);
+	if (!picture) {
+		return;
+	}
+	struct view v;
+	if (!picture->drawable || !view_get(client->xserver, picture, &v)) {
+		if (picture->drawable) {
+			view_finish(&v);
+		}
+		xs_error(client, XS_ERROR_MATCH, picture->id, XS_RENDER_OPCODE, 27);
+		return;
+	}
+	int width = pixman_image_get_width(v.image), height = pixman_image_get_height(v.image);
+	int hot_x = xin16(in, 12), hot_y = xin16(in, 14);
+	if (hot_x >= width || hot_y >= height) {
+		view_finish(&v);
+		xs_error(client, XS_ERROR_MATCH, picture->id, XS_RENDER_OPCODE, 27);
+		return;
+	}
+	uint32_t *pixels = calloc((size_t)width * (size_t)height, 4);
+	pixman_image_t *argb = pixels ? pixman_image_create_bits(PIXMAN_a8r8g8b8, width, height,
+		pixels, width * 4) : NULL;
+	if (!argb) {
+		view_finish(&v);
+		free(pixels);
+		xs_error(client, XS_ERROR_ALLOC, 0, XS_RENDER_OPCODE, 27);
+		return;
+	}
+	pixman_image_composite32(PIXMAN_OP_SRC, v.image, NULL, argb, 0, 0, 0, 0, 0, 0, width,
+		height);
+	pixman_image_unref(argb);
+	view_finish(&v);
+	xs_cursor_create_argb(client, xin32(in, 4), pixels, width, height, hot_x, hot_y,
+		XS_RENDER_OPCODE, 27);
+}
+
 void xs_render_request(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint8_t minor = xin8(in, 1);
@@ -1227,9 +1289,12 @@ void xs_render_request(struct xs_client *client, const struct xin *in) {
 	case 26:
 		fill_rectangles(client, in);
 		break;
-	case 27: // CreateCursor
+	case 27:
+		create_cursor(client, in);
+		break;
 	case 31: // CreateAnimCursor
-		break; // flame draws the pointer, X cursors don't show
+		xs_cursor_create_animated(client, in, XS_RENDER_OPCODE, minor);
+		break;
 	case 28:
 		set_transform(client, in);
 		break;

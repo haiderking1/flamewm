@@ -688,6 +688,15 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 41:
 		warp_pointer(client, in);
 		break;
+	case 42: { // XIChangeCursor: window, cursor, device. one pointer: the window's
+		struct xs_window *window = xserver_window(xserver, xin32(in, 4));
+		if (!window) {
+			xs_error(client, XS_ERROR_WINDOW, xin32(in, 4), XS_XI_OPCODE, minor);
+			break;
+		}
+		xs_cursor_set(client, &window->cursor, xin32(in, 8), XS_XI_OPCODE, minor);
+		break;
+	}
 	case 45: // XIGetClientPointer
 		xs_reply_begin(client, &out, 0);
 		xout8(&out, 1); // set
@@ -732,7 +741,16 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 			break;
 		}
 		bool keyboard = device == MASTER_KEYBOARD || device == SLAVE_KEYBOARD;
+		uint32_t cursor_id = keyboard ? 0 : xin32(in, 12);
+		struct xs_cursor *cursor = cursor_id ? xs_cursor_find(xserver, cursor_id) : NULL;
+		if (cursor_id && !cursor) {
+			xs_error(client, XS_ERROR_CURSOR, cursor_id, XS_XI_OPCODE, minor);
+			break;
+		}
 		status = xs_grab(xserver, client, keyboard, xin32(in, 4), xin8(in, 20), true, mask, 0);
+		if (status == 0 && !keyboard) {
+			xs_grab_cursor(xserver, cursor);
+		}
 		xs_reply_begin(client, &out, 0);
 		xout8(&out, status);
 		xs_reply_send(client, &out);
@@ -785,10 +803,9 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 60:
 		get_selected_events(client, in);
 		break;
-	// accepted, nothing changes: XI1's event selection, cursors, the
-	// hierarchy, the client pointer, ungrabs, allowing events, device
-	// properties, barriers
-	case 6: case 37: case 38: case 42: case 43: case 44: case 53: case 55:
+	// accepted, nothing changes: XI1's event selection, the hierarchy, the
+	// client pointer, ungrabs, allowing events, device properties, barriers
+	case 6: case 37: case 38: case 43: case 44: case 53: case 55:
 	case 57: case 58:
 	case 61:
 		break;

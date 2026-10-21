@@ -302,25 +302,41 @@ static void set_picture_clip(struct xs_client *client, const struct xin *in) {
 
 // ---- cursors ----
 
+// the cursor X shows where the pointer is. a theme one is flame's to draw,
+// it comes out as one clear pixel (and its name)
 static void get_cursor_image(struct xs_client *client, bool with_name) {
-	// an empty one, flame draws the pointer
+	struct flame_xserver *xserver = client->xserver;
+	const struct xs_cursor *cursor = xserver_pointer_cursor(xserver);
+	const struct xs_cursor_image *image = cursor && cursor->len ? &cursor->images[0] : NULL;
+	static const uint32_t clear = 0;
+	int x, y;
+	xs_pointer_position(xserver, &x, &y);
 	struct xout out;
 	xs_reply_begin(client, &out, 0);
-	xout16(&out, 0); // x, y
-	xout16(&out, 0);
-	xout16(&out, 1); // width, height
-	xout16(&out, 1);
-	xout16(&out, 0); // hotspot
-	xout16(&out, 0);
-	xout32(&out, 1); // serial
+	xout16(&out, (uint16_t)x);
+	xout16(&out, (uint16_t)y);
+	xout16(&out, image ? image->width : 1);
+	xout16(&out, image ? image->height : 1);
+	xout16(&out, image ? image->hot_x : 0);
+	xout16(&out, image ? image->hot_y : 0);
+	xout32(&out, cursor ? cursor->serial : 0);
+	const char *name = cursor && cursor->name ? cursor->name : "";
 	if (with_name) {
-		xout32(&out, 0); // cursor atom
-		xout16(&out, 0); // name length
+		xout32(&out, *name ? xserver_atom(xserver, name) : 0);
+		xout16(&out, (uint16_t)strlen(name));
 		xout_zero(&out, 2);
 	} else {
 		xout_zero(&out, 8);
 	}
-	xout32(&out, 0); // the one pixel, transparent
+	size_t n = image ? (size_t)image->width * image->height : 1;
+	const uint32_t *pixels = image ? image->pixels : &clear;
+	for (size_t i = 0; i < n; i++) {
+		xout32(&out, pixels[i]);
+	}
+	if (with_name) {
+		xout_bytes(&out, name, strlen(name));
+		xout_zero(&out, (4 - strlen(name) % 4) % 4);
+	}
 	xs_reply_send(client, &out);
 }
 
@@ -422,10 +438,32 @@ void xs_xfixes_request(struct xs_client *client, const struct xin *in) {
 		xout32(&out, 0);
 		xs_reply_send(client, &out);
 		break;
+	case 29: // HideCursor: window. while the client wants it, no pointer over X
+		if (!xserver_window(client->xserver, xin32(in, 4))) {
+			xs_error(client, XS_ERROR_WINDOW, xin32(in, 4), XS_XFIXES_OPCODE, minor);
+			break;
+		}
+		if (client->cursor_hides++ == 0) {
+			xs_cursor_changed(client->xserver);
+		}
+		break;
+	case 30: // ShowCursor: window
+		if (!xserver_window(client->xserver, xin32(in, 4))) {
+			xs_error(client, XS_ERROR_WINDOW, xin32(in, 4), XS_XFIXES_OPCODE, minor);
+			break;
+		}
+		if (client->cursor_hides == 0) {
+			xs_error(client, XS_ERROR_MATCH, xin32(in, 4), XS_XFIXES_OPCODE, minor);
+			break;
+		}
+		if (--client->cursor_hides == 0) {
+			xs_cursor_changed(client->xserver);
+		}
+		break;
 	// accepted, nothing to keep: the save set (flame doesn't reparent),
-	// cursor input and names, changing and hiding cursors, barriers, the
-	// disconnect mode
-	case 1: case 3: case 23: case 26: case 27: case 29: case 30: case 31: case 32: case 33:
+	// cursor input and names, changing cursors, barriers, the disconnect
+	// mode
+	case 1: case 3: case 23: case 26: case 27: case 31: case 32: case 33:
 		break;
 	default:
 		xs_error(client, XS_ERROR_REQUEST, 0, XS_XFIXES_OPCODE, minor);

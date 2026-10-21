@@ -135,6 +135,8 @@ int xshell_pointer_to_x(const struct flame_xshell *xshell, double v);
 // layout box it stays in, x1, y1 the furthest it goes
 bool xshell_pointer_confine(const struct flame_xshell *xshell, double *x0, double *y0,
 	double *x1, double *y1);
+// X's cursor changed (a window's, a grab's, hidden): shown if the pointer's X's
+void xshell_cursor_changed(struct flame_xshell *xshell);
 // the screen's scale or x_zero_scaling changed: X's coordinates follow,
 // every X window moves to where it is in them
 void xshell_rescale(struct flame_xshell *xshell);

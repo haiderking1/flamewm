@@ -10,7 +10,7 @@ struct wlr_xcursor_image;
 struct wlr_xcursor_manager;
 
 // what the pointer looks like: a theme cursor by name (animated ones keep
-// going), a client's own cursor surface, or nothing. flame owns this now,
+// going), a client's own cursor surface, an X client's pixels, or nothing. flame owns this now,
 // wlroots never gets an image, so its cursor code never draws or blocks
 // direct scanout. outputs pick it up per frame and show it on the cursor
 // plane or draw it themselves
@@ -19,6 +19,14 @@ enum flame_cursor_kind {
 	FLAME_CURSOR_HIDDEN,
 	FLAME_CURSOR_NAMED,
 	FLAME_CURSOR_SURFACE,
+	FLAME_CURSOR_PIXELS,
+};
+
+// a frame of a cursor in pixels
+struct flame_cursor_pixels {
+	const uint32_t *pixels; // ARGB premultiplied, width a row
+	int width, height, hotspot_x, hotspot_y;
+	uint32_t delay; // ms on it, animated ones
 };
 
 struct flame_cursor_image {
@@ -38,6 +46,11 @@ struct flame_cursor_image {
 	struct wl_listener surface_commit;
 	struct wl_listener surface_destroy;
 
+	// pixels: frames like a theme cursor's, at scale (pixels a layout unit)
+	struct wlr_xcursor *pixels;
+	float pixels_scale;
+	uint64_t pixels_key;
+
 	struct {
 		struct wl_signal changed;
 	} events;
@@ -46,8 +59,10 @@ struct flame_cursor_image {
 // what to show on an output with this scale, right now
 struct flame_cursor_frame {
 	enum flame_cursor_kind kind;
-	// named: pixels at the output's scale, hotspot in its pixels
+	// named, pixels: the image, hotspot in its pixels, scale its pixels a
+	// layout unit (a theme loads at the output's)
 	const struct wlr_xcursor_image *xcursor;
+	float scale;
 	// surface: the client's cursor, hotspot in surface coords
 	struct wlr_surface *surface;
 	int hotspot_x, hotspot_y;
@@ -61,6 +76,11 @@ void cursor_image_set_name(struct flame_cursor_image *image, const char *name);
 // NULL hides it, like wl_pointer.set_cursor
 void cursor_image_set_surface(struct flame_cursor_image *image, struct wlr_surface *surface,
 	int hotspot_x, int hotspot_y);
+
+// frames of pixels at scale. the same key again is the same look: nothing
+// changes, an animation keeps its phase
+void cursor_image_set_pixels(struct flame_cursor_image *image, uint64_t key,
+	const struct flame_cursor_pixels *frames, size_t len, float scale);
 
 void cursor_image_get(struct flame_cursor_image *image, float scale,
 	struct flame_cursor_frame *frame);

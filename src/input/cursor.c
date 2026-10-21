@@ -307,10 +307,11 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data) {
 }
 
 static void handle_pointer_focus_change(struct wl_listener *listener, void *data) {
-	// pointer left every client, nobody's going to set an image for us
+	// pointer left every client, nobody's going to set an image for us.
+	// over X, X says what it looks like
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, pointer_focus_change);
 	struct wlr_seat_pointer_focus_change_event *event = data;
-	if (!event->new_surface) {
+	if (!event->new_surface && !xshell_has_pointer(&cursor->server->xshell)) {
 		cursor_set_name(cursor, "default");
 	}
 }
@@ -421,6 +422,15 @@ void cursor_test_scroll(struct flame_cursor *cursor, double delta) {
 	};
 	axis_event(cursor, &event);
 	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
+}
+
+void cursor_set_pixels(struct flame_cursor *cursor, uint64_t key,
+		const struct flame_cursor_pixels *frames, size_t len, float scale) {
+	cursor_image_set_pixels(&cursor->image, key, frames, len, scale);
+}
+
+void cursor_hide(struct flame_cursor *cursor) {
+	cursor_image_set_surface(&cursor->image, NULL, 0, 0);
 }
 
 void cursor_set_name(struct flame_cursor *cursor, const char *name) {

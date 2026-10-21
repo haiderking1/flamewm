@@ -127,6 +127,10 @@ const struct xs_font *xs_font_find(struct flame_xserver *xserver, uint32_t id) {
 	return ref ? ref->font : NULL;
 }
 
+bool xs_font_is_cursor(const struct xs_font *font) {
+	return font == &fonts[1];
+}
+
 const struct xs_font *xs_font_default(void) {
 	return FIXED;
 }

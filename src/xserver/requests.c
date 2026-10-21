@@ -26,6 +26,22 @@ static void reply_empty(struct xs_client *client, uint8_t data) {
 
 // ---- windows ----
 
+#define XS_CW_CURSOR (1u << 14)
+
+// the cursor in the value list exists: else BadCursor and nothing changes
+static bool attributes_valid(struct xs_client *client, uint32_t mask, const struct xin *in,
+		size_t at, uint8_t major) {
+	if (!(mask & XS_CW_CURSOR)) {
+		return true;
+	}
+	uint32_t id = xin32(in, at + 4 * (size_t)__builtin_popcount(mask & (XS_CW_CURSOR - 1)));
+	if (id && !xs_cursor_find(client->xserver, id)) {
+		xs_error(client, XS_ERROR_CURSOR, id, major, 0);
+		return false;
+	}
+	return true;
+}
+
 // CreateWindow and ChangeWindowAttributes share their value list
 static void apply_attributes(struct xs_client *client, struct xs_window *window,
 		uint32_t mask, const struct xin *in, size_t at) {
@@ -57,8 +73,11 @@ static void apply_attributes(struct xs_client *client, struct xs_window *window,
 		case 13:
 			window->colormap = value;
 			break;
+		case 14:
+			xs_cursor_set(client, &window->cursor, value, 2, 0);
+			break;
 		default:
-			break; // borders, gravity, backing store, cursors
+			break; // borders, gravity, backing store
 		}
 	}
 }
@@ -72,6 +91,9 @@ static void create_window(struct xs_client *client, const struct xin *in) {
 	}
 	if (!xs_id_available(client, id)) {
 		xs_error(client, XS_ERROR_ID_CHOICE, id, 1, 0);
+		return;
+	}
+	if (!attributes_valid(client, xin32(in, 28), in, 32, 1)) {
 		return;
 	}
 	struct xs_window *window = xs_window_create(xserver, client, id, parent);
@@ -466,6 +488,41 @@ static void warp_pointer(struct xs_client *client, const struct xin *in) {
 		dst, xin16s(in, 20), xin16s(in, 22));
 }
 
+// GrabPointer: owner events, window, event mask, modes, confine, cursor, time
+static void grab_pointer(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	uint32_t cursor_id = xin32(in, 16);
+	struct xs_cursor *cursor = cursor_id ? xs_cursor_find(xserver, cursor_id) : NULL;
+	if (cursor_id && !cursor) {
+		xs_error(client, XS_ERROR_CURSOR, cursor_id, 26, 0);
+		return;
+	}
+	uint8_t status = xs_grab(xserver, client, false, xin32(in, 4), xin8(in, 1), false,
+		xin16(in, 8), xin32(in, 12));
+	if (status == 0) {
+		xs_grab_cursor(xserver, cursor);
+	}
+	reply_empty(client, status);
+}
+
+// ChangeActivePointerGrab: cursor, time, event mask. the client's own core
+// grab only
+static void change_pointer_grab(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	struct xs_grab *grab = &xserver->pointer_grab;
+	uint32_t cursor_id = xin32(in, 4);
+	struct xs_cursor *cursor = cursor_id ? xs_cursor_find(xserver, cursor_id) : NULL;
+	if (cursor_id && !cursor) {
+		xs_error(client, XS_ERROR_CURSOR, cursor_id, 30, 0);
+		return;
+	}
+	if (grab->client != client || grab->xi) {
+		return;
+	}
+	grab->mask = xin16(in, 12);
+	xs_grab_cursor(xserver, cursor);
+}
+
 static void set_input_focus(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	uint32_t focus = xin32(in, 4);
@@ -712,7 +769,8 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		create_window(client, in);
 		break;
 	case 2: // ChangeWindowAttributes
-		if ((window = get_window(client, in, 4, 2))) {
+		if ((window = get_window(client, in, 4, 2))
+				&& attributes_valid(client, xin32(in, 8), in, 12, 2)) {
 			bool was = window->override_redirect;
 			apply_attributes(client, window, xin32(in, 8), in, 12);
 			if (was != window->override_redirect) {
@@ -827,9 +885,8 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case 25:
 		send_event(client, in);
 		break;
-	case 26: // GrabPointer: owner events, window, event mask, modes, confine, cursor, time
-		reply_empty(client, xs_grab(xserver, client, false, xin32(in, 4), xin8(in, 1), false,
-			xin16(in, 8), xin32(in, 12)));
+	case 26:
+		grab_pointer(client, in);
 		break;
 	case 27: // UngrabPointer
 		xs_ungrab(xserver, client, false);
@@ -852,8 +909,14 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case 40:
 		translate_coordinates(client, in);
 		break;
+	case 30:
+		change_pointer_grab(client, in);
+		break;
 	case 41:
 		warp_pointer(client, in);
+		break;
+	case 93: case 94: case 95: case 96:
+		xs_cursor_request(client, in);
 		break;
 	case 42:
 		set_input_focus(client, in);
@@ -1024,11 +1087,11 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case XS_COMPOSITE_OPCODE:
 		xs_composite_request(client, in);
 		break;
-	// accepted, nothing to do: grabs letting go, cursors, colormaps,
-	// keyboard and pointer settings, server grabs
-	case 6: case 13: case 28: case 29: case 30: case 33: case 34:
+	// accepted, nothing to do: grabs letting go, colormaps, keyboard and
+	// pointer settings, server grabs
+	case 6: case 13: case 28: case 29: case 33: case 34:
 	case 35: case 36: case 37: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
-	case 90: case 93: case 94: case 95: case 96: case 100: case 102: case 104: case 105:
+	case 90: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:
 		break;
 	default:

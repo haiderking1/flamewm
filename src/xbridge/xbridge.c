@@ -605,6 +605,11 @@ static void hook_warp_pointer(void *data, int x, int y) {
 		xshell_from_x(xshell, y + 0.5));
 }
 
+static void hook_cursor_changed(void *data) {
+	struct flame_xbridge *xbridge = data;
+	xshell_cursor_changed(&xbridge->server->xshell);
+}
+
 // X sees flame's outputs where the layout has them, in its coordinates. the
 // one at the origin is primary, else the first
 static void update_screen(struct flame_xbridge *xbridge) {
@@ -675,6 +680,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.configure_request = hook_configure_request,
 		.pointer = hook_pointer,
 		.warp_pointer = hook_warp_pointer,
+		.cursor_changed = hook_cursor_changed,
 		.open_device = hook_open_device,
 		.modifiers = hook_modifiers,
 		.present = hook_present,

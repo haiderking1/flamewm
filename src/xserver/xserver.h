@@ -63,6 +63,7 @@ struct xs_window {
 	bool override_redirect;
 	bool mapped;
 	uint32_t colormap;
+	struct xs_cursor *cursor; // what the pointer looks like in it, NULL: the parent's
 	uint16_t do_not_propagate;
 	struct wl_list properties; // xs_property.link
 	struct wl_list interests; // xs_interest.link
@@ -108,6 +109,28 @@ struct xs_pixmap {
 	// cpu pixmaps: its pixels, maybe in a shared memory segment it keeps alive
 	pixman_image_t *image;
 	struct xs_shm_segment *shm;
+};
+
+// a frame of a cursor's look
+struct xs_cursor_image {
+	uint32_t *pixels; // ARGB, premultiplied
+	uint16_t width, height, hot_x, hot_y;
+	uint32_t delay; // ms on this frame, animated ones
+};
+
+// a cursor (cursor.c): a theme one by name or frames of pixels
+struct xs_cursor {
+	struct wl_list link; // flame_xserver.cursors
+	uint32_t id; // 0 once freed, windows and grabs may still show it
+	struct xs_client *owner; // NULL once it's gone
+	int refs; // the id, windows, grabs
+	uint32_t serial; // a new one whenever it looks different
+	const char *name; // the cursor font's shape as a theme cursor, else images
+	struct xs_cursor_image *images;
+	size_t len;
+	// a bitmap one keeps its bits (a byte a pixel) to recolor
+	uint8_t *source, *mask;
+	uint16_t fore[3], back[3];
 };
 
 // a graphics context: how drawing requests draw
@@ -255,6 +278,7 @@ struct xs_client {
 	// autorepeat without the releases, the XKB events it selected and
 	// StateNotify's details
 	bool xkb, detectable_repeat;
+	int cursor_hides; // XFixes HideCursor, less ShowCursor
 	uint16_t xkb_events, xkb_state_details;
 };
 
@@ -290,6 +314,9 @@ struct xs_hooks {
 	// flame's cursor goes there, and the motion comes back through
 	// xserver_pointer_motion like the mouse's would
 	void (*warp_pointer)(void *data, int x, int y);
+	// what the pointer looks like over X may be different: a window's or a
+	// grab's cursor, XFixes hiding it. xserver_pointer_cursor says what
+	void (*cursor_changed)(void *data);
 	// DRI3: a render node for the client to allocate on, -1 for none
 	int (*open_device)(void *data);
 	// DRI3: the modifiers flame can show format with
@@ -351,6 +378,7 @@ struct flame_xserver {
 	struct wl_list transfers, selection_requests, selection_selects;
 	uint32_t flame_window_ids;
 	struct wl_list gcs; // xs_gc.link
+	struct wl_list cursors; // xs_cursor.link
 	struct wl_list fonts; // font.c's, the fonts clients opened
 	struct wl_list shm_segments; // xs_shm_segment.link
 	// RENDER, see render.c: pictures, glyph set ids, and pixman's glyph cache
@@ -398,6 +426,7 @@ struct flame_xserver {
 		bool owner_events, xi;
 		uint32_t mask;
 		uint32_t confine; // the pointer's: a window it stays in, 0 for none
+		struct xs_cursor *cursor; // the pointer's look meanwhile, NULL: the windows'
 	} pointer_grab, keyboard_grab;
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
@@ -490,6 +519,11 @@ bool xserver_pointer_grabbed(const struct flame_xserver *xserver);
 // cursor to a game): to this rectangle, root coords
 bool xserver_pointer_confine(const struct flame_xserver *xserver, int *x, int *y, int *width,
 	int *height);
+// the cursor X shows where the pointer is: the grab's, else the deepest
+// window's that has one. NULL: none set anywhere, flame's default pointer
+const struct xs_cursor *xserver_pointer_cursor(struct flame_xserver *xserver);
+// a client hid the cursor (XFixes HideCursor, games): no pointer over X
+bool xserver_cursor_hidden(const struct flame_xserver *xserver);
 // flame as the window manager gives a top-level the keyboard, ICCCM's way:
 // SetInputFocus unless WM_HINTS says it takes no input, WM_TAKE_FOCUS when
 // it's in WM_PROTOCOLS (it sets the focus itself, wine does). nothing when
