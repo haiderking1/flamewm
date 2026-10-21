@@ -27,6 +27,8 @@ void window_anim_closed(struct flame_view *view);
 void window_anim_focus(struct flame_view *view, bool focused);
 // a mouse drag or resize has it: whatever's playing jumps to the end
 void window_anim_stop(struct flame_view *view);
+// on its way to a new box (going fullscreen, say): not where it'll be yet
+bool window_anim_moving(struct flame_view *view);
 // a snapshot taken for a close that isn't coming
 void window_anim_discard(struct flame_view *view);
 void window_anim_free(struct flame_view *view);

@@ -56,7 +56,8 @@ void view_reparent(struct flame_view *view) {
 	if (view->grabbed || !view->workspace) {
 		return; // a drag or the staging tree owns it
 	}
-	struct flame_tree *parent = view->fullscreen_shown ? view->workspace->fullscreen_tree
+	struct flame_tree *parent = view->fullscreen_shown || view->leaving_fullscreen
+		? view->workspace->fullscreen_tree
 		: view->floating ? view->workspace->float_tree : view->workspace->tree;
 	if (view->tree->node.parent != parent) {
 		scene_node_reparent(&view->tree->node, parent);
@@ -88,6 +89,7 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 
 	struct wlr_box was = view->geometry;
 	bool first = !view->shown;
+	view->leaving_fullscreen = (view->fullscreen_shown || view->leaving_fullscreen) && !fullscreen;
 	view->geometry = box;
 	view->fullscreen_shown = fullscreen;
 	view_reparent(view);
@@ -113,6 +115,14 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen) {
 		view->impl->placed(view, (struct wlr_box){box.x + bw, box.y + bw, width, height});
 	}
 	window_anim_placed(view, was, first);
+	if (view->leaving_fullscreen && !window_anim_moving(view)) {
+		view_left_fullscreen(view); // nothing to watch, it goes down now
+	}
+}
+
+void view_left_fullscreen(struct flame_view *view) {
+	view->leaving_fullscreen = false;
+	view_reparent(view);
 }
 
 void view_hide(struct flame_view *view) {
