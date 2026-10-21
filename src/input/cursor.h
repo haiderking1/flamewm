@@ -45,5 +45,11 @@ void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool press
 void cursor_test_scroll(struct flame_cursor *cursor, double delta);
 // a theme cursor by name, "default", "grabbing", "nw-resize"...
 void cursor_set_name(struct flame_cursor *cursor, const char *name);
+// an X client's cursor: frames of pixels at scale, the same key is the same
+// look (see cursor_image_set_pixels)
+void cursor_set_pixels(struct flame_cursor *cursor, uint64_t key,
+	const struct flame_cursor_pixels *frames, size_t len, float scale);
+// no pointer at all, an app hid it
+void cursor_hide(struct flame_cursor *cursor);
 
 #endif

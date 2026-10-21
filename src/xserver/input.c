@@ -292,6 +292,7 @@ uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool ke
 		.xi = xi,
 		.mask = mask,
 		.confine = confine,
+		.cursor = grab->cursor, // grabbing again: the caller sets the new one
 	};
 	// as if the pointer or the focus moved to the grab window, mode Grab
 	if (keyboard) {
@@ -304,6 +305,7 @@ uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool ke
 		cross_chain(xserver, from ? from : pointer_at(xserver), window, xserver->state,
 			xs_now(xserver));
 		cross_mode = XS_NOTIFY_NORMAL;
+		xs_cursor_changed(xserver); // out of the grab window: its cursor
 		if (confine_to) {
 			// outside it: moved to its nearest point, like X does
 			int x, y;
@@ -319,7 +321,11 @@ static void let_go(struct flame_xserver *xserver, bool keyboard) {
 	struct xs_window *window = xserver_window(xserver, grab->window);
 	wlr_log(WLR_DEBUG, "xserver: %s lets go of the %s", grab->client->comm,
 		keyboard ? "keyboard" : "pointer");
+	xs_cursor_unref(grab->cursor);
 	*grab = (struct xs_grab){0};
+	if (!keyboard) {
+		xs_cursor_changed(xserver);
+	}
 	if (!window) {
 		return;
 	}
@@ -333,6 +339,48 @@ static void let_go(struct flame_xserver *xserver, bool keyboard) {
 		cross_chain(xserver, window, pointer_at(xserver), xserver->state, xs_now(xserver));
 		cross_mode = XS_NOTIFY_NORMAL;
 	}
+}
+
+void xs_grab_cursor(struct flame_xserver *xserver, struct xs_cursor *cursor) {
+	struct xs_grab *grab = &xserver->pointer_grab;
+	if (cursor != grab->cursor) {
+		xs_cursor_ref(cursor);
+		xs_cursor_unref(grab->cursor);
+		grab->cursor = cursor;
+		xs_cursor_changed(xserver);
+	}
+}
+
+static bool within(const struct xs_window *window, const struct xs_window *ancestor) {
+	for (; window; window = window->parent) {
+		if (window == ancestor) {
+			return true;
+		}
+	}
+	return false;
+}
+
+const struct xs_cursor *xserver_pointer_cursor(struct flame_xserver *xserver) {
+	struct xs_window *window = alive(xserver, xserver->pointer_window)
+		? xserver_window(xserver, xserver->pointer_window) : NULL;
+	const struct xs_grab *grab = &xserver->pointer_grab;
+	if (grab_on(xserver, grab)) {
+		// the grab's, else the windows' while it's in the grab window,
+		// else the grab window's
+		if (grab->cursor) {
+			return grab->cursor;
+		}
+		struct xs_window *grab_window = xserver_window(xserver, grab->window);
+		if (!within(window, grab_window)) {
+			window = grab_window;
+		}
+	}
+	for (; window; window = window->parent) {
+		if (window->cursor) {
+			return window->cursor;
+		}
+	}
+	return NULL;
 }
 
 void xs_ungrab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard) {

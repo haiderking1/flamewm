@@ -123,6 +123,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 	xs_composite_window_gone(xserver, window->id);
 	xs_glx_drawable_gone(xserver, window->id);
 	xs_draw_window_freed(window);
+	xs_cursor_unref(window->cursor);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
 	free(window);
@@ -762,6 +763,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	xs_randr_client_gone(xserver, client);
 	xs_xi_client_gone(xserver, client);
 	xs_shape_client_gone(xserver, client);
+	xs_cursor_client_gone(xserver, client);
 	xs_damage_client_gone(xserver, client);
 	xs_font_client_gone(xserver, client);
 	xs_composite_client_gone(xserver, client);

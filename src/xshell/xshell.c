@@ -2250,6 +2250,44 @@ uint32_t xshell_window_at(struct flame_xshell *xshell, double lx, double ly) {
 	return window ? window->id : 0;
 }
 
+// over X (or X holding the pointer) it looks how X says: the cursor of the
+// window it's in or of the grab, a theme one, none when a game hid it
+static void show_x_cursor(struct flame_xshell *xshell) {
+	struct flame_cursor *cursor = &xshell->server->input.cursor;
+	if (xserver_cursor_hidden(xshell->xserver)) {
+		cursor_hide(cursor);
+		return;
+	}
+	const struct xs_cursor *x = xserver_pointer_cursor(xshell->xserver);
+	if (!x || x->name) {
+		cursor_set_name(cursor, x ? x->name : "default");
+		return;
+	}
+	struct flame_cursor_pixels *frames = calloc(x->len, sizeof(*frames));
+	if (!frames) {
+		return;
+	}
+	for (size_t i = 0; i < x->len; i++) {
+		const struct xs_cursor_image *image = &x->images[i];
+		frames[i] = (struct flame_cursor_pixels){
+			.pixels = image->pixels,
+			.width = image->width,
+			.height = image->height,
+			.hotspot_x = image->hot_x,
+			.hotspot_y = image->hot_y,
+			.delay = image->delay,
+		};
+	}
+	cursor_set_pixels(cursor, x->serial, frames, x->len, (float)xshell->scale);
+	free(frames);
+}
+
+void xshell_cursor_changed(struct flame_xshell *xshell) {
+	if (xshell_has_pointer(xshell)) {
+		show_x_cursor(xshell);
+	}
+}
+
 bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, uint32_t time,
 		struct flame_view **view) {
 	struct flame_xserver *xserver = xshell->xserver;
@@ -2266,17 +2304,21 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 		xshell->pointer_window = window ? window->id : 0;
 		xserver_pointer_motion(xserver, window ? x_of(window) : NULL, x, y, x_state(xshell),
 			time);
+		show_x_cursor(xshell);
 		return true;
 	}
 	if (!window) {
 		if (xshell->pointer_window) {
 			xserver_pointer_leave(xserver, time);
 			xshell->pointer_window = 0;
+			// off X: flame's pointer till a wayland client sets its own
+			cursor_set_name(&xshell->server->input.cursor, "default");
 		}
 		return false;
 	}
 	xshell->pointer_window = window->id;
 	xserver_pointer_motion(xserver, x_of(window), x, y, x_state(xshell), time);
+	show_x_cursor(xshell);
 	if (xserver->pointer_window != xshell->pointer_logged) {
 		// where X apps' hovers and clicks go, for when they go somewhere odd
 		xshell->pointer_logged = xserver->pointer_window;

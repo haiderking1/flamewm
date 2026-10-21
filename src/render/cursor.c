@@ -61,9 +61,15 @@ static bool show_on_plane(struct flame_frame_cursor *cursor,
 		// a recorder asking for the cursor in its frames locks it to software
 		return false;
 	}
-	if (frame->kind == FLAME_CURSOR_NAMED) {
+	if (frame->kind != FLAME_CURSOR_SURFACE) {
+		// the plane shows buffer pixels 1:1
 		const struct wlr_xcursor_image *image = frame->xcursor;
-		return cursor_plane_show_pixels(plane, image, 0, image->buffer, (int)image->width,
+		if (frame->scale != output->scale) {
+			return false;
+		}
+		// an X client's pixels can come back at a freed one's address
+		uint64_t seq = frame->kind == FLAME_CURSOR_PIXELS ? generation : 0;
+		return cursor_plane_show_pixels(plane, image, seq, image->buffer, (int)image->width,
 			(int)image->height, (int)image->width * 4, frame->hotspot_x, frame->hotspot_y);
 	}
 	struct wlr_texture *texture = wlr_surface_get_texture(frame->surface);
@@ -78,31 +84,36 @@ static bool show_on_plane(struct flame_frame_cursor *cursor,
 }
 
 static bool push_software(struct flame_frame_cursor *cursor,
-		const struct flame_cursor_frame *frame, double x, double y,
+		const struct flame_cursor_frame *frame, uint32_t generation, double x, double y,
 		struct wlr_box area, struct flame_element_list *list) {
 	if (frame->kind == FLAME_CURSOR_SURFACE) {
 		return elements_push_surface(list, frame->surface,
 			(int)floor(x) - frame->hotspot_x, (int)floor(y) - frame->hotspot_y, area);
 	}
 	const struct wlr_xcursor_image *image = frame->xcursor;
-	if (cursor->texture_image != image) {
-		drop_texture(cursor);
-		cursor->texture = wlr_texture_from_pixels(cursor->render->renderer,
+	// an X client's pixels can come back at a freed one's address
+	uint32_t texture_generation = frame->kind == FLAME_CURSOR_PIXELS ? generation : 0;
+	if (cursor->texture_image != image || cursor->texture_generation != texture_generation) {
+		// made before the old one goes: a new address, damage sees it change
+		struct wlr_texture *texture = wlr_texture_from_pixels(cursor->render->renderer,
 			DRM_FORMAT_ARGB8888, image->width * 4, image->width, image->height, image->buffer);
-		if (!cursor->texture) {
+		drop_texture(cursor);
+		if (!texture) {
 			return true; // no pointer this frame, nothing else breaks
 		}
+		cursor->texture = texture;
 		cursor->texture_image = image;
+		cursor->texture_generation = texture_generation;
 	}
-	// the theme loaded it at the output's scale, its pixels are buffer pixels
-	float scale = cursor->output->scale;
+	// its pixels a layout unit: a theme's at the output's scale, X's at X's
+	float scale = frame->scale;
 	struct wlr_box box = {
 		.x = (int)floor(x - frame->hotspot_x / scale),
 		.y = (int)floor(y - frame->hotspot_y / scale),
 		.width = (int)ceilf(image->width / scale),
 		.height = (int)ceilf(image->height / scale),
 	};
-	return elements_push_texture(list, cursor, cursor->texture, image, box, area);
+	return elements_push_texture(list, cursor, cursor->texture, cursor->texture, box, area);
 }
 
 bool frame_cursor_build(struct flame_frame_cursor *cursor,
@@ -133,7 +144,8 @@ bool frame_cursor_build(struct flame_frame_cursor *cursor,
 		return true;
 	}
 	cursor_plane_hide(&cursor->plane);
-	return push_software(cursor, &frame, pointer->x, pointer->y, area, list);
+	return push_software(cursor, &frame, pointer->image->generation, pointer->x, pointer->y, area,
+		list);
 }
 
 struct wlr_surface *frame_cursor_surface(struct flame_frame_cursor *cursor) {

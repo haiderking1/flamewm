@@ -127,12 +127,16 @@ $(E2E)/gtkcsd: tests/e2e/gtkcsd.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -o $@ $< $(shell pkg-config --cflags --libs gtk+-3.0)
 
+$(E2E)/xcursor: tests/e2e/xcursor.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xfixes xcb-render)
+
 $(E2E)/%: tests/e2e/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

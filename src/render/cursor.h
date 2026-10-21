@@ -21,9 +21,10 @@ struct flame_frame_cursor {
 	struct wlr_output *output;
 	struct flame_cursor_plane plane;
 
-	// the theme cursor as a texture, for drawing it ourselves
+	// the theme's or X's cursor as a texture, for drawing it ourselves
 	struct wlr_texture *texture;
 	const struct wlr_xcursor_image *texture_image;
+	uint32_t texture_generation;
 
 	// a client's cursor surface on the plane: it's not in the element list
 	// but still gets enter and frame callbacks, see frame_cursor_surface

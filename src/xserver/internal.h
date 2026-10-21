@@ -12,6 +12,7 @@ enum {
 	XS_ERROR_WINDOW = 3,
 	XS_ERROR_PIXMAP = 4,
 	XS_ERROR_ATOM = 5,
+	XS_ERROR_CURSOR = 6,
 	XS_ERROR_FONT = 7,
 	XS_ERROR_MATCH = 8,
 	XS_ERROR_DRAWABLE = 9,
@@ -222,6 +223,30 @@ void xs_grabs_check(struct flame_xserver *xserver, struct xs_client *gone);
 // the focused window went away or out of sight: where focus goes instead
 void xs_focus_lost(struct flame_xserver *xserver, struct xs_window *window);
 
+// cursors (cursor.c): core ones (CreateCursor, CreateGlyphCursor,
+// FreeCursor, RecolorCursor), RENDER's made here too
+void xs_cursor_request(struct xs_client *client, const struct xin *in);
+struct xs_cursor *xs_cursor_find(struct flame_xserver *xserver, uint32_t id);
+struct xs_cursor *xs_cursor_ref(struct xs_cursor *cursor);
+void xs_cursor_unref(struct xs_cursor *cursor);
+// a window's or a grab's cursor to id (None: 0). false: no such cursor, the
+// client heard
+bool xs_cursor_set(struct xs_client *client, struct xs_cursor **slot, uint32_t id,
+	uint8_t major, uint8_t minor);
+// RENDER's CreateCursor: pixels (ARGB premultiplied) are the cursor's now,
+// even when it fails
+bool xs_cursor_create_argb(struct xs_client *client, uint32_t id, uint32_t *pixels, int width,
+	int height, int hot_x, int hot_y, uint8_t major, uint8_t minor);
+void xs_cursor_create_animated(struct xs_client *client, const struct xin *in, uint8_t major,
+	uint8_t minor);
+// what the pointer shows may have changed, flame hears
+void xs_cursor_changed(struct flame_xserver *xserver);
+void xs_cursor_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+bool xs_cursor_id_in_use(struct flame_xserver *xserver, uint32_t id);
+size_t xs_cursor_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
+// the pointer grab's cursor, the grab held
+void xs_grab_cursor(struct flame_xserver *xserver, struct xs_cursor *cursor);
+
 // everything a client made goes when it does
 void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *client);
 
@@ -282,6 +307,8 @@ void xs_font_request(struct xs_client *client, const struct xin *request);
 const struct xs_font *xs_font_find(struct flame_xserver *xserver, uint32_t id);
 // what GCs draw text with until told otherwise: fixed
 const struct xs_font *xs_font_default(void);
+// the cursor font: its glyphs are shapes, not pixels
+bool xs_font_is_cursor(const struct xs_font *font);
 // a char's glyph (byte1 0 for 8 bit text): its rows, NULL for a blank cell.
 // a char the font doesn't have draws its default char, false: neither there
 bool xs_font_glyph(const struct xs_font *font, uint8_t byte1, uint8_t byte2,
@@ -483,6 +510,7 @@ void xs_shape_client_gone(struct flame_xserver *xserver, struct xs_client *clien
 void xs_shm_request(struct xs_client *client, const struct xin *request);
 // a pixmap or the id let go of a segment, the last one unmaps it
 void xs_shm_unref(struct xs_shm_segment *segment);
+struct xs_shm_segment *xs_shm_ref(struct xs_shm_segment *segment);
 void xs_shm_detach_all(struct flame_xserver *xserver, struct xs_client *client);
 
 // ---- requests (requests.c) ----

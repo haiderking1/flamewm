@@ -179,6 +179,10 @@ $BIN/xewmh warp" "pointer in window 50,60" "motion 50,60" "after another app tri
 case_run "an X grab confining the pointer to a window keeps flame's cursor in it" "
 $BIN/xewmh confine $CTL" "grabbed: yes" "moved inside: yes" "mouse pushed out: 100,100" \
 	"let go: 2,3"
+case_run "X cursors: a window's shows, hides, theme shapes by name, a grab's wins" "
+$BIN/xcursor $CTL" "window's: 16x16 name []" "shown: red" "hidden: white" "again: red" \
+	"font's: 1x1 name [text]" "grab's: 1x1 name [crosshair]" "after the grab: 1x1 name [text]" \
+	"argb: 24x20 name []" "argb shot: green"
 case_run "ICCCM WM_STATE: Normal while managed, Withdrawn once unmapped" "
 $BIN/xewmh wmstate" "mapped: 1" "unmapped: 0, type is WM_STATE: yes"
 
