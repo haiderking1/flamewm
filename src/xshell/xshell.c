@@ -1186,14 +1186,40 @@ static struct wlr_box xview_window_geometry(struct flame_view *view, bool pendin
 	return (struct wlr_box){0};
 }
 
+// flame's focus went from an X window to something else: X's focus leaves
+// it once this round of focus changes is done. another X window taking it
+// takes it straight over, apps don't see a detour through None
+static void handle_unfocus_idle(void *data) {
+	struct flame_xshell *xshell = data;
+	xshell->unfocus_idle = NULL;
+	struct xs_window *x = xshell->unfocus ? xserver_window(xshell->xserver, xshell->unfocus)
+		: NULL;
+	xshell->unfocus = 0;
+	if (x && xserver_focus_in(xshell->xserver, x)) {
+		xserver_set_focus(xshell->xserver, XS_FOCUS_NONE);
+	}
+}
+
 static void xview_set_activated(struct flame_view *view, bool activated) {
 	struct flame_xwindow *window = from_view(view);
-	struct flame_xserver *xserver = window->xshell->xserver;
+	struct flame_xshell *xshell = window->xshell;
+	struct xs_window *x = x_of(window);
 	if (activated) {
-		xserver_set_focus(xserver, window->id);
-		x_stack_update(window->xshell);
-	} else if (xserver->focus == window->id) {
-		xserver_set_focus(xserver, XS_FOCUS_NONE);
+		if (xshell->unfocus == window->id) {
+			xshell->unfocus = 0;
+		}
+		// the window manager's part, ICCCM's way. focus the app moved onto
+		// one of its own windows in there stays where it put it
+		if (x) {
+			xserver_focus_window(xshell->xserver, x);
+		}
+		x_stack_update(xshell);
+	} else if (x && xserver_focus_in(xshell->xserver, x)) {
+		xshell->unfocus = window->id;
+		if (!xshell->unfocus_idle) {
+			xshell->unfocus_idle = wl_event_loop_add_idle(xshell->server->loop,
+				handle_unfocus_idle, xshell);
+		}
 	}
 }
 
@@ -1823,6 +1849,14 @@ static uint8_t x_button(uint32_t button) {
 	}
 }
 
+bool xshell_has_pointer(const struct flame_xshell *xshell) {
+	return xshell->pointer_window != 0;
+}
+
+bool xshell_buttons_held(const struct flame_xshell *xshell) {
+	return xshell->buttons != 0;
+}
+
 bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pressed,
 		uint32_t time) {
 	if (!xshell->pointer_window) {
@@ -1989,6 +2023,9 @@ void xshell_finish(struct flame_xshell *xshell) {
 	wl_list_for_each_safe(notify, ntmp, &xshell->notifies, link) {
 		wl_list_remove(&notify->link);
 		free(notify);
+	}
+	if (xshell->unfocus_idle) {
+		wl_event_source_remove(xshell->unfocus_idle);
 	}
 	timer_finish(&xshell->msc_timer);
 	timer_finish(&xshell->repeat_timer);

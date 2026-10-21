@@ -41,6 +41,9 @@ struct flame_xshell {
 	// repeats next. X apps get their repeats from the server
 	uint8_t repeat_key;
 	struct flame_timer repeat_timer;
+	// an X window flame's focus just left, X's focus comes off it when idle
+	uint32_t unfocus;
+	struct wl_event_source *unfocus_idle;
 
 	// the msc X apps see, Present paces them on it. NVIDIA flips carry no
 	// vblank counter, so it's counted here: the clock output's flips move it
@@ -149,6 +152,10 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 	struct flame_view **view);
 bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pressed,
 	uint32_t time);
+// an X window has the pointer: buttons and the wheel go there
+bool xshell_has_pointer(const struct flame_xshell *xshell);
+// a button is down on an X window, its implicit grab
+bool xshell_buttons_held(const struct flame_xshell *xshell);
 bool xshell_pointer_axis(struct flame_xshell *xshell, bool vertical, double delta,
 	uint32_t time);
 // the mouse moved, before acceleration too: games over X read it raw. only
