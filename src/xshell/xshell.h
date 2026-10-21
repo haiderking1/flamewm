@@ -8,6 +8,7 @@
 
 #include "desktop/view.h"
 #include "util/timer.h"
+#include "xshell/ewmh.h"
 
 struct flame_buffer_node;
 struct flame_frame;
@@ -52,6 +53,17 @@ struct flame_xshell {
 	struct wl_list notifies; // xnotify.link, NotifyMSCs waiting for their msc
 	// the next queued present or NotifyMSC comes due
 	struct flame_timer msc_timer;
+
+	// EWMH (ewmh.c): its atoms, the check window, what the root says now
+	struct {
+		bool started;
+		uint32_t atoms[EWMH_ATOMS];
+		uint32_t check;
+		uint32_t active;
+		bool active_set;
+		uint32_t clients[512];
+		uint32_t clients_len;
+	} ewmh;
 };
 
 struct flame_xwindow {
@@ -80,6 +92,9 @@ struct flame_xwindow {
 	int64_t draw_time;
 	int64_t woken; // when the last complete went out, while drawing
 	bool drawing;
+	// _NET_WM_STATE as last told, see ewmh.c
+	uint32_t ewmh_state;
+	bool ewmh_state_set;
 };
 
 bool xshell_init(struct flame_xshell *xshell, struct flame_server *server,
@@ -89,6 +104,11 @@ void xshell_finish(struct flame_xshell *xshell);
 // the X side changed, see which top-levels are on screen
 void xshell_windows_changed(struct flame_xshell *xshell);
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *window);
+// the X server listens: flame says it's the window manager
+void xshell_started(struct flame_xshell *xshell);
+// a client message for the window manager (EWMH)
+void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
+	const uint32_t data[5]);
 
 // xserver hooks, xbridge hands them over
 struct xs_present;

@@ -1011,6 +1011,7 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 		return NULL;
 	}
 	wl_list_insert(xshell->windows.prev, &window->link);
+	ewmh_window_new(xshell, window, x);
 	if (!window->floating) {
 		window->view.float_wanted = x_wants_float(xshell, x);
 		desktop_map_view(&server->desktop, &window->view);
@@ -1142,6 +1143,7 @@ static void window_destroy(struct flame_xwindow *window) {
 	} else {
 		desktop_unmap_view(&xshell->server->desktop, &window->view);
 		view_finish(&window->view);
+		ewmh_window_gone(xshell, window->id);
 	}
 	wl_list_remove(&window->link);
 	free(window);
@@ -1285,6 +1287,7 @@ static void handle_desktop_changed(struct wl_listener *listener, void *data) {
 	struct flame_xshell *xshell = wl_container_of(listener, xshell, desktop_changed);
 	floats_update(xshell);
 	x_stack_update(xshell);
+	ewmh_update(xshell);
 }
 
 void xshell_windows_changed(struct flame_xshell *xshell) {
@@ -1311,7 +1314,18 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 	}
 	floats_update(xshell);
 	x_stack_update(xshell);
+	ewmh_update(xshell);
 	desktop_notify(&xshell->server->desktop); // titles
+}
+
+void xshell_started(struct flame_xshell *xshell) {
+	ewmh_start(xshell);
+	ewmh_update(xshell);
+}
+
+void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
+		const uint32_t data[5]) {
+	ewmh_message(xshell, window, type, data);
 }
 
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *x) {

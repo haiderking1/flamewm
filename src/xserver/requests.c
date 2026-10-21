@@ -401,7 +401,17 @@ static void send_event(struct xs_client *client, const struct xin *in) {
 		}
 		return;
 	}
-	// messages for the window manager land here, flame manages windows itself
+	// messages for the window manager: flame is it. anyone else listening
+	// (a pager) hears them too
+	if (window == xserver->root && (event.bytes[0] & 0x7f) == 33 && event.bytes[1] == 32
+			&& (mask & (XS_MASK_SUBSTRUCTURE | XS_MASK_SUBSTRUCTURE_REDIRECT))
+			&& xserver->hooks.wm_message) {
+		uint32_t about, type, data[5];
+		memcpy(&about, event.bytes + 4, 4);
+		memcpy(&type, event.bytes + 8, 4);
+		memcpy(data, event.bytes + 12, 20);
+		xserver->hooks.wm_message(xserver->hooks.data, about, type, data);
+	}
 	xs_event_deliver(xserver, window, mask, &event);
 }
 
