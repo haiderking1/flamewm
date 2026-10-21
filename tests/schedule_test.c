@@ -336,6 +336,50 @@ static void test_pause_resume(void) {
 	CHECK(s.pending == &c);
 }
 
+// tearing, vrr: a frame goes the moment something changed, no repaint
+// window, and nothing renders ahead of the pending flip whatever the policy
+static void test_asap(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_DEADLINE, PERIOD);
+	schedule_submitted(&s, &a, -MS, -MS);
+	CHECK(schedule_presented(&s, 0, 0) == &a);
+	schedule_set_asap(&s, true);
+	schedule_request_redraw(&s);
+	CHECK(schedule_render_due(&s, 1 * MS)); // not at the window before the vblank
+	CHECK(schedule_render_at(&s, 1 * MS) == 0);
+	schedule_submitted(&s, &b, 1 * MS, 1 * MS);
+	schedule_request_redraw(&s);
+	CHECK(!schedule_overlapping(&s));
+	CHECK(!schedule_render_due(&s, PERIOD - MS)); // waits for the flip, deadline or not
+	CHECK(schedule_presented(&s, 2 * MS, 2 * MS) == &b);
+	CHECK(schedule_render_due(&s, 2 * MS));
+	// back to vsync: the repaint window again
+	schedule_set_asap(&s, false);
+	CHECK(!schedule_render_due(&s, 2 * MS + 1));
+}
+
+// a tearing flip lands whenever: the grid stays put, nothing counts as missed
+static void test_off_grid_flip(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, PERIOD);
+	schedule_submitted(&s, &a, -MS, -MS);
+	CHECK(schedule_presented(&s, 0, 0) == &a);
+	int64_t margin = s.margin;
+	schedule_submitted(&s, &b, 1 * MS, 1 * MS);
+	schedule_mark_off_grid(&s);
+	// a whole refresh and a half after: a miss for a vsync'd flip, not for this one
+	CHECK(schedule_presented(&s, PERIOD + PERIOD / 2 + MS, PERIOD + PERIOD / 2 + MS) == &b);
+	CHECK(!s.last_missed);
+	CHECK(s.margin == margin);
+	CHECK(s.vblank == 0); // the grid didn't move
+	CHECK(schedule_next_vblank(&s, 3 * MS) == PERIOD);
+	CHECK(s.cycle == SCHEDULE_CYCLE_NEW); // clients still wake on it
+	// the next real flip anchors again
+	schedule_submitted(&s, &c, 2 * PERIOD + MS, 2 * PERIOD + MS);
+	CHECK(schedule_presented(&s, 3 * PERIOD, 3 * PERIOD) == &c);
+	CHECK(s.vblank == 3 * PERIOD);
+}
+
 int main(void) {
 	test_policy_parse();
 	test_immediate_waits_for_the_slot();
@@ -355,6 +399,8 @@ int main(void) {
 	test_adaptive_hysteresis();
 	test_watchdog();
 	test_pause_resume();
+	test_asap();
+	test_off_grid_flip();
 	if (failures) {
 		fprintf(stderr, "%d failed\n", failures);
 		return 1;

@@ -40,11 +40,14 @@ enum flame_layer {
 // flame decides what to draw and when (frame.c), the wlroots renderer only
 // gets told "this texture here" and "this rect there"
 struct flame_render {
+	struct flame_server *server;
 	struct wlr_renderer *renderer;
 	struct wlr_allocator *allocator;
 	// client buffers turn into textures for our renderer here
 	struct wlr_compositor *compositor;
 	struct wlr_linux_dmabuf_v1 *dmabuf; // NULL without dmabuf support
+	// apps saying a frame may tear (wp_tearing_control_v1)
+	struct wlr_tearing_control_manager_v1 *tearing;
 
 	struct flame_scene scene;
 	struct flame_scene_surfaces surfaces;

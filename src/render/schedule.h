@@ -68,6 +68,12 @@ struct schedule {
 	// the vblank the pending frame was rendered for, 0 when there was no grid
 	int64_t pending_target;
 	bool last_missed; // the newest flip landed a refresh or more late
+	// frames go out the moment they're ready (tearing, vrr): no repaint
+	// window, nothing rendered ahead. the display follows the frames
+	bool asap;
+	// the pending flip isn't on the vblank grid (a tearing one): it doesn't
+	// move the grid and isn't late for anything
+	bool pending_off_grid;
 
 	// frame callbacks: a cycle due right now, and a wake on the refresh grid
 	enum schedule_cycle cycle;
@@ -84,6 +90,10 @@ void schedule_init(struct schedule *schedule, enum schedule_policy policy, int64
 void schedule_set_period(struct schedule *schedule, int64_t period);
 
 void schedule_request_redraw(struct schedule *schedule);
+// frames out the moment they're ready, or back to the repaint window
+void schedule_set_asap(struct schedule *schedule, bool asap);
+// the frame just submitted flips whenever it's ready, off the grid (tearing)
+void schedule_mark_off_grid(struct schedule *schedule);
 // a redraw was asked for and the window to render it is open
 bool schedule_render_due(const struct schedule *schedule, int64_t now);
 // when flame will render the frame a client drawing right now can still make:

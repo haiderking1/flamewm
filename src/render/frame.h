@@ -17,6 +17,7 @@
 #include "render/hiccup.h"
 #include "render/scanout.h"
 #include "render/schedule.h"
+#include "render/sync.h"
 #include "render/timing.h"
 #include "util/timer.h"
 
@@ -86,6 +87,10 @@ struct flame_frame {
 
 	struct flame_scanout scanout;
 	struct flame_frame_cursor cursor;
+	// tearing and vrr, see render/sync.h. tearing: the fullscreen app wants
+	// it and gets it (or would, KMS willing): frames go out asap
+	struct sync sync;
+	bool tearing_logged; // KMS refusing it was said once
 
 	struct wlr_damage_ring ring; // buffer coords, per swapchain buffer
 	pixman_region32_t pending; // layout coords, from client commits

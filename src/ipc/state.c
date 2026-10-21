@@ -35,7 +35,9 @@ static void write_outputs(struct flame_server *server, struct strbuf *out) {
 	wl_list_for_each(output, &server->outputs.list, link) {
 		strbuf_printf(out, "%s{\"name\":", first ? "" : ",");
 		strbuf_json_string(out, output->wlr->name);
-		strbuf_printf(out, ",\"scanout\":%s}", output->frames.scanout.active ? "true" : "false");
+		strbuf_printf(out, ",\"scanout\":%s,\"tearing\":%s}",
+			output->frames.scanout.active ? "true" : "false",
+			output->frames.sync.tearing ? "true" : "false");
 		first = false;
 	}
 	strbuf_printf(out, "]");

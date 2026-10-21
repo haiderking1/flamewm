@@ -54,7 +54,7 @@ not linked, flame works without them, these features don't.
 | --- | --- | --- |
 | libxcb and its extension libs (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` `xcb-xkb` `xcb-xfixes` `xcb-xinerama` `xcb-screensaver` `xcb-dpms` `xcb-xtest` `xcb-shape` `xcb-render` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c`, and `make e2e`'s X cursors |
 | libxkbcommon-x11 (comes with `libxkbcommon`) | `xkbcommon-x11` | the XKB test reads the keymap back the way kitty and alacritty do |
-| wayland (client side) | `wayland-client` | `make e2e`: the wayland drag and drop client |
+| wayland (client side) | `wayland-client` | `make e2e`: the wayland clients (drag and drop, window sharing, a fullscreen game asking to tear) |
 | gbm (mesa or the nvidia driver), libdrm | `gbm` `libdrm` | `make e2e`: window sharing into gpu buffers, the way the portal takes frames |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |

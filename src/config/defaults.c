@@ -59,6 +59,8 @@ const struct flame_config flame_default_config = {
 	.focus_follows_mouse = true,
 	.x_zero_scaling = false,
 	.x_global_keys = FLAME_X_KEYS_ALWAYS,
+	.allow_tearing = true,
+	.vrr = SYNC_VRR_FULLSCREEN,
 
 	.cursor_theme = NULL,
 	.cursor_size = 24,
