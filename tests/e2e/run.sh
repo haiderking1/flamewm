@@ -183,6 +183,15 @@ case_run "X cursors: a window's shows, hides, theme shapes by name, a grab's win
 $BIN/xcursor $CTL" "window's: 16x16 name []" "shown: red" "hidden: white" "again: red" \
 	"font's: 1x1 name [text]" "grab's: 1x1 name [crosshair]" "after the grab: 1x1 name [text]" \
 	"argb: 24x20 name []" "argb shot: green"
+case_run "keys typed in a wayland window: X apps see them like on Xorg, push to talk, hotkeys" "
+foot sh -c 'cat > typed' > /dev/null 2>&1 &
+sleep 1.5
+$BIN/xkeys $CTL
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+echo \"foot got: \$(head -c1 typed), F9 \$(grep -o '\\[20~' typed | wc -l) time\"" \
+	"hotkey grabbed: yes" "taken twice: no" "held while typed in wayland: yes" "up after: yes" \
+	"raw events: 2" "hotkey presses: 1" "hotkey presses after ungrab: 0" "foot got: a, F9 1 time"
 case_run "an X grab breaks when the user leaves the app: the mouse is theirs again" "
 $BIN/xewmh grabaway $CTL" "grabbed: yes" "away, the mouse goes: 2,3" "another app can grab: yes"
 case_run "WM_TAKE_FOCUS windows (wine's): WM_STATE first, a click offers focus again" "

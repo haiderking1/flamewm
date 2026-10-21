@@ -51,6 +51,15 @@ struct flame_output_config {
 
 // read only while it's in use. the compiled in defaults, with the user's
 // init.lua on top (config/lua.c): a reload builds a new one and swaps it in
+// which keys typed in wayland windows X apps see, like Xorg shows them every
+// key: push to talk (discord, mumble), obs hotkeys, hotkey daemons
+enum flame_x_global_keys {
+	FLAME_X_KEYS_NEVER,
+	FLAME_X_KEYS_MODIFIERS, // shift, ctrl, alt, super on their own
+	FLAME_X_KEYS_COMBOS, // those, and any key while ctrl, alt or super is held
+	FLAME_X_KEYS_ALWAYS, // every key, mouse buttons too
+};
+
 struct flame_config {
 	int border_width;
 	int gap;
@@ -74,6 +83,8 @@ struct flame_config {
 	// (they scale themselves, sharp), not stretched up (blurry). apps that
 	// ignore dpi come out small. hyprland's force_zero_scaling
 	bool x_zero_scaling;
+
+	enum flame_x_global_keys x_global_keys;
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;

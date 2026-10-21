@@ -59,8 +59,16 @@ static void handle_key(struct wl_listener *listener, void *data) {
 	}
 
 	// an X11 window has the keyboard: through flame's X server
-	if (!handled && xshell_key(&keyboard->input->server->xshell, keyboard->wlr,
-			event->keycode, event->state == WL_KEYBOARD_KEY_STATE_PRESSED, event->time_msec)) {
+	struct flame_xshell *xshell = &keyboard->input->server->xshell;
+	bool pressed = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+	if (!handled && xshell_key(xshell, keyboard->wlr, event->keycode, pressed,
+			event->time_msec)) {
+		return;
+	}
+	// a wayland window has it: X apps may see it too (push to talk), an X
+	// app's global hotkey takes it
+	if (!handled && xshell_key_elsewhere(xshell, keyboard->wlr, event->keycode, pressed,
+			event->time_msec)) {
 		return;
 	}
 	if (!handled) {

@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <wlr/util/log.h>
@@ -654,15 +655,177 @@ void xserver_pointer_leave(struct flame_xserver *xserver, uint32_t time) {
 	}
 }
 
-static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
-		uint32_t time, uint32_t flags, bool core_only) {
+// ---- passive key grabs ----
+
+#define ANY_MODIFIER 0x8000
+#define ANY_KEY 0
+
+struct key_grab {
+	struct wl_list link; // flame_xserver.key_grabs
+	struct xs_client *client;
+	uint32_t window;
+	uint16_t modifiers; // exactly these held, or AnyModifier
+	uint8_t key; // or AnyKey
+	bool owner_events;
+};
+
+static bool key_grab_matches(const struct key_grab *grab, uint8_t keycode, uint16_t state) {
+	return (grab->key == ANY_KEY || grab->key == keycode)
+		&& (grab->modifiers == ANY_MODIFIER || grab->modifiers == (state & 0xff));
+}
+
+// two grabs a press could set off both
+static bool key_grabs_overlap(const struct key_grab *a, uint8_t key, uint16_t modifiers) {
+	return (a->key == ANY_KEY || key == ANY_KEY || a->key == key)
+		&& (a->modifiers == ANY_MODIFIER || modifiers == ANY_MODIFIER
+			|| a->modifiers == modifiers);
+}
+
+// GrabKey: owner events, window, modifiers, key, pointer mode, keyboard mode
+void xs_grab_key_request(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	uint32_t window = xin32(in, 4);
+	uint16_t modifiers = xin16(in, 8);
+	uint8_t key = xin8(in, 10);
+	if (!xserver_window(xserver, window)) {
+		xs_error(client, XS_ERROR_WINDOW, window, 33, 0);
+		return;
+	}
+	if (key != ANY_KEY && key < 8) {
+		xs_error(client, XS_ERROR_VALUE, key, 33, 0);
+		return;
+	}
+	if (modifiers != ANY_MODIFIER && (modifiers & ~0xffu)) {
+		xs_error(client, XS_ERROR_VALUE, modifiers, 33, 0);
+		return;
+	}
+	struct key_grab *grab, *tmp;
+	wl_list_for_each(grab, &xserver->key_grabs, link) {
+		if (grab->window == window && grab->client != client
+				&& key_grabs_overlap(grab, key, modifiers)) {
+			xs_error(client, XS_ERROR_ACCESS, window, 33, 0); // someone else has it
+			return;
+		}
+	}
+	// the client's own on the same key and modifiers: this one replaces it
+	wl_list_for_each_safe(grab, tmp, &xserver->key_grabs, link) {
+		if (grab->window == window && grab->client == client && grab->key == key
+				&& grab->modifiers == modifiers) {
+			wl_list_remove(&grab->link);
+			free(grab);
+		}
+	}
+	grab = calloc(1, sizeof(*grab));
+	if (!grab) {
+		xs_error(client, XS_ERROR_ALLOC, 0, 33, 0);
+		return;
+	}
+	*grab = (struct key_grab){
+		.client = client,
+		.window = window,
+		.modifiers = modifiers,
+		.key = key,
+		.owner_events = xin8(in, 1),
+	};
+	wl_list_insert(xserver->key_grabs.prev, &grab->link);
+}
+
+// UngrabKey: key, window, modifiers. AnyKey and AnyModifier let go of all
+// the client's grabs they cover
+void xs_ungrab_key_request(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	uint8_t key = xin8(in, 1);
+	uint32_t window = xin32(in, 4);
+	uint16_t modifiers = xin16(in, 8);
+	if (!xserver_window(xserver, window)) {
+		xs_error(client, XS_ERROR_WINDOW, window, 34, 0);
+		return;
+	}
+	struct key_grab *grab, *tmp;
+	wl_list_for_each_safe(grab, tmp, &xserver->key_grabs, link) {
+		if (grab->client == client && grab->window == window
+				&& (key == ANY_KEY || grab->key == key)
+				&& (modifiers == ANY_MODIFIER || grab->modifiers == modifiers)) {
+			wl_list_remove(&grab->link);
+			free(grab);
+		}
+	}
+}
+
+void xs_key_grabs_gone(struct flame_xserver *xserver, struct xs_client *client,
+		uint32_t window) {
+	struct key_grab *grab, *tmp;
+	wl_list_for_each_safe(grab, tmp, &xserver->key_grabs, link) {
+		if ((!client || grab->client == client) && (!window || grab->window == window)) {
+			wl_list_remove(&grab->link);
+			free(grab);
+		}
+	}
+}
+
+// the passive grab a press sets off: on the windows from the root down to
+// from, the outermost first, like X looks
+static struct key_grab *key_grab_for(struct flame_xserver *xserver, struct xs_window *from,
+		uint8_t keycode, uint16_t state) {
+	struct xs_window *chain[64];
+	int n = 0;
+	for (struct xs_window *w = from; w && n < 64; w = w->parent) {
+		chain[n++] = w;
+	}
+	for (int i = n - 1; i >= 0; i--) {
+		if (!xs_window_viewable(chain[i]) && chain[i] != xserver->root) {
+			continue;
+		}
+		struct key_grab *grab;
+		wl_list_for_each(grab, &xserver->key_grabs, link) {
+			if (grab->window == chain[i]->id && key_grab_matches(grab, keycode, state)) {
+				return grab;
+			}
+		}
+	}
+	return NULL;
+}
+
+static void key_state(struct flame_xserver *xserver, uint8_t keycode, bool pressed) {
+	if (pressed) {
+		xserver->keys_down[keycode / 8] |= (uint8_t)(1u << (keycode % 8));
+	} else {
+		xserver->keys_down[keycode / 8] &= (uint8_t)~(1u << (keycode % 8));
+	}
+}
+
+bool xserver_key_down(const struct flame_xserver *xserver, uint8_t keycode) {
+	return xserver->keys_down[keycode / 8] >> (keycode % 8) & 1;
+}
+
+// a key event for X. passive_from: where a passive grab is looked for, the
+// focus normally, the root for keys typed in wayland windows (they reach X
+// only through a grab). true: a grab got it
+static bool key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
+		uint32_t time, uint32_t flags, bool core_only, bool elsewhere) {
 	struct xs_window *under = alive(xserver, xserver->pointer_window)
 		? xserver_window(xserver, xserver->pointer_window) : NULL;
 	// PointerRoot: keys follow the pointer, whatever window it's over
-	struct xs_window *focus = xserver->focus == XS_FOCUS_POINTER_ROOT ? xserver->root
+	struct xs_window *focus = elsewhere ? NULL
+		: xserver->focus == XS_FOCUS_POINTER_ROOT ? xserver->root
 		: alive(xserver, xserver->focus) ? xserver_window(xserver, xserver->focus) : NULL;
-	if (!focus && !grab_on(xserver, &xserver->keyboard_grab)) {
-		return;
+	// a press that matches a passive grab takes the keyboard for its client
+	// till the key comes up (repeats don't, the grab has it already)
+	if (pressed && !(flags & XS_XI_KEY_REPEAT) && !grab_on(xserver, &xserver->keyboard_grab)) {
+		struct key_grab *passive = key_grab_for(xserver, elsewhere ? xserver->root : focus,
+			keycode, state);
+		if (passive && xs_grab(xserver, passive->client, true, passive->window,
+				passive->owner_events, false, 0, 0) == 0) {
+			xserver->passive_key = keycode;
+		}
+	}
+	bool grabbed_now = grab_on(xserver, &xserver->keyboard_grab);
+	// typed in a wayland window: only a grab a hotkey set off hears it
+	if (elsewhere && (!grabbed_now || !xserver->passive_key)) {
+		return false;
+	}
+	if (!focus && !grabbed_now) {
+		return false;
 	}
 	// to the window under the pointer when it's inside the focus window
 	struct xs_window *source = focus;
@@ -682,27 +845,50 @@ static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, ui
 	};
 	uint32_t mask = pressed ? MASK_KEY_PRESS : MASK_KEY_RELEASE;
 	uint8_t type = pressed ? EVENT_KEY_PRESS : EVENT_KEY_RELEASE;
-	if (grab_on(xserver, &xserver->keyboard_grab)) {
-		grabbed(xserver, &xserver->keyboard_grab, source, mask, type, &input);
-		return;
+	if (!grabbed_now) {
+		propagate(xserver, source, mask, type, &input);
+		return false;
 	}
-	propagate(xserver, source, mask, type, &input);
+	grabbed(xserver, &xserver->keyboard_grab, source, mask, type, &input);
+	if (!pressed && !core_only && xserver->passive_key == keycode) {
+		// the key that set the passive grab off is up: so is the grab (a
+		// repeat's core release isn't it coming up)
+		xserver->passive_key = 0;
+		let_go(xserver, true);
+	}
+	return true;
 }
 
 void xserver_key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,
 		uint32_t time) {
 	xserver->state = (uint16_t)((xserver->state & STATE_BUTTONS) | (state & ~STATE_BUTTONS));
+	key_state(xserver, keycode, pressed);
 	xs_xi_raw(xserver, pressed ? XS_XI_RAW_KEY_PRESS : XS_XI_RAW_KEY_RELEASE, keycode,
 		0, 0, 0, 0, time);
-	key(xserver, keycode, pressed, state, time, 0, false);
+	key(xserver, keycode, pressed, state, time, 0, false, false);
+}
+
+bool xserver_key_elsewhere(struct flame_xserver *xserver, uint8_t keycode, bool pressed,
+		uint16_t state, uint32_t time) {
+	xserver->state = (uint16_t)((xserver->state & STATE_BUTTONS) | (state & ~STATE_BUTTONS));
+	key_state(xserver, keycode, pressed);
+	xs_xi_raw(xserver, pressed ? XS_XI_RAW_KEY_PRESS : XS_XI_RAW_KEY_RELEASE, keycode,
+		0, 0, 0, 0, time);
+	return key(xserver, keycode, pressed, state, time, 0, false, true);
+}
+
+void xserver_button_elsewhere(struct flame_xserver *xserver, uint8_t button, bool pressed,
+		uint32_t time) {
+	xs_xi_raw(xserver, pressed ? XS_XI_RAW_BUTTON_PRESS : XS_XI_RAW_BUTTON_RELEASE, button,
+		0, 0, 0, 0, time);
 }
 
 void xserver_key_repeat(struct flame_xserver *xserver, uint8_t keycode, uint16_t state,
 		uint32_t time) {
 	// core clients see a release and a press, like Xorg sends them. XI2
 	// clients only a press, marked as a repeat
-	key(xserver, keycode, false, state, time, 0, true);
-	key(xserver, keycode, true, state, time, XS_XI_KEY_REPEAT, false);
+	key(xserver, keycode, false, state, time, 0, true, false);
+	key(xserver, keycode, true, state, time, XS_XI_KEY_REPEAT, false, false);
 }
 
 bool xserver_close_window(struct flame_xserver *xserver, struct xs_window *window) {

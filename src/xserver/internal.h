@@ -218,6 +218,14 @@ void xs_warp_request(struct xs_client *client, struct xs_window *src, int src_x,
 	int src_width, int src_height, struct xs_window *dst, int x, int y);
 // lets go when client holds it
 void xs_ungrab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard);
+// GrabKey and UngrabKey, passive grabs: a key (and modifiers) pressed with
+// focus in window or below it gets the keyboard grabbed for the client
+void xs_grab_key_request(struct xs_client *client, const struct xin *in);
+void xs_ungrab_key_request(struct xs_client *client, const struct xin *in);
+// a client's passive grabs go when it does, a window's when it's destroyed:
+// client NULL for any client's on window, window 0 for every window of client
+void xs_key_grabs_gone(struct flame_xserver *xserver, struct xs_client *client,
+	uint32_t window);
 // grabs whose window went out of sight or whose client left let go
 void xs_grabs_check(struct flame_xserver *xserver, struct xs_client *gone);
 // the focused window went away or out of sight: where focus goes instead

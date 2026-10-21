@@ -714,11 +714,11 @@ static void query_device_state(struct xs_client *client, uint8_t device) {
 			xout32(&out, (uint32_t)(axis == 0 ? x : axis == 1 ? y : 0));
 		}
 	} else {
-		xout8(&out, 0); // KeyState: none held, as QueryKeymap says
+		xout8(&out, 0); // KeyState: what's held, as QueryKeymap says
 		xout8(&out, 36);
 		xout8(&out, 248);
 		xout8(&out, 0);
-		xout_zero(&out, 32);
+		xout_bytes(&out, xserver->keys_down, sizeof(xserver->keys_down));
 	}
 	xs_reply_send(client, &out);
 }

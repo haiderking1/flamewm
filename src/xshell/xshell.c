@@ -2508,6 +2508,59 @@ bool xshell_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard, uint
 	return true;
 }
 
+// a modifier key itself: shift, ctrl, alt, super, altgr
+static bool modifier_key(struct wlr_keyboard *keyboard, uint32_t xkb_keycode) {
+	const xkb_keysym_t *syms;
+	int n = xkb_keymap_key_get_syms_by_level(keyboard->keymap, xkb_keycode, 0, 0, &syms);
+	for (int i = 0; i < n; i++) {
+		if ((syms[i] >= XKB_KEY_Shift_L && syms[i] <= XKB_KEY_Hyper_R)
+				|| syms[i] == XKB_KEY_ISO_Level3_Shift) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// what x_global_keys lets X apps see of a key typed in a wayland window
+static bool x_sees_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard,
+		uint32_t xkb_keycode) {
+	switch (xshell->server->config->x_global_keys) {
+	case FLAME_X_KEYS_NEVER:
+		return false;
+	case FLAME_X_KEYS_MODIFIERS:
+		return modifier_key(keyboard, xkb_keycode);
+	case FLAME_X_KEYS_COMBOS:
+		return modifier_key(keyboard, xkb_keycode) || (wlr_keyboard_get_modifiers(keyboard)
+			& (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO));
+	case FLAME_X_KEYS_ALWAYS:
+		return true;
+	}
+	return false;
+}
+
+bool xshell_key_elsewhere(struct flame_xshell *xshell, struct wlr_keyboard *keyboard,
+		uint32_t keycode, bool pressed, uint32_t time) {
+	uint8_t x = (uint8_t)(keycode + 8);
+	// a press as the setting says. a release when X saw the key go down,
+	// whatever the setting says now: nothing stays held in obs or a push to
+	// talk, and no release for a key X never had (a flame bind's)
+	if (pressed ? !x_sees_key(xshell, keyboard, x) : !xserver_key_down(xshell->xserver, x)) {
+		return false;
+	}
+	xshell_keyboard(xshell, keyboard);
+	uint16_t state = (uint16_t)wlr_keyboard_get_modifiers(keyboard)
+		| (uint16_t)((keyboard->modifiers.group & 3) << 13) | xshell->buttons;
+	return xserver_key_elsewhere(xshell->xserver, x, pressed, state, time);
+}
+
+void xshell_button_elsewhere(struct flame_xshell *xshell, uint32_t button, bool pressed,
+		uint32_t time) {
+	uint8_t xbutton = x_button(button);
+	if (xbutton && xshell->server->config->x_global_keys == FLAME_X_KEYS_ALWAYS) {
+		xserver_button_elsewhere(xshell->xserver, xbutton, pressed, time);
+	}
+}
+
 void xshell_keyboard(struct flame_xshell *xshell, struct wlr_keyboard *keyboard) {
 	struct flame_xserver *xserver = xshell->xserver;
 	if (keyboard->keymap) {

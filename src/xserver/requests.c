@@ -946,10 +946,16 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case 43:
 		get_input_focus(client);
 		break;
-	case 44: // QueryKeymap: nothing held
+	case 44: // QueryKeymap: what's held (obs and discord poll it for hotkeys)
 		xs_reply_begin(client, &out, 0);
-		xout_zero(&out, 32);
+		xout_bytes(&out, xserver->keys_down, sizeof(xserver->keys_down));
 		xs_reply_send(client, &out);
+		break;
+	case 33:
+		xs_grab_key_request(client, in);
+		break;
+	case 34:
+		xs_ungrab_key_request(client, in);
 		break;
 	case 45: case 46: case 47: case 48: case 49: case 50: case 51: case 52:
 		xs_font_request(client, in);
@@ -1112,7 +1118,7 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	// accepted, nothing to do: grabs letting go, colormaps, keyboard and
 	// pointer settings, server grabs
-	case 6: case 13: case 28: case 29: case 33: case 34:
+	case 6: case 13: case 28: case 29:
 	case 35: case 36: case 37: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
 	case 90: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:

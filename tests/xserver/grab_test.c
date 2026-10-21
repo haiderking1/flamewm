@@ -183,6 +183,44 @@ int main(void) {
 	CHECK(sb.len == 0);
 	xcb_ungrab_keyboard(a, XCB_CURRENT_TIME);
 
+	// a passive grab: A wants key 38 on B's window W. pressed with focus on
+	// W it's A's, while it's down the keyboard is A's, once it's up B types
+	// again. QueryKeymap knows what's held
+	CHECK(!xcb_request_check(a, xcb_grab_key_checked(a, 0, w, 0, 38, XCB_GRAB_MODE_ASYNC,
+		XCB_GRAB_MODE_ASYNC)));
+	xcb_generic_error_t *taken = xcb_request_check(b, xcb_grab_key_checked(b, 0, w,
+		XCB_MOD_MASK_ANY, 38, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC));
+	CHECK(taken && taken->error_code == XCB_ACCESS);
+	free(taken);
+	collect(a, &sa, xi_opcode);
+	collect(b, &sb, xi_opcode);
+	harness("key 38 1");
+	xcb_query_keymap_reply_t *keymap = xcb_query_keymap_reply(b, xcb_query_keymap(b), NULL);
+	CHECK(keymap && (keymap->keys[38 / 8] >> (38 % 8) & 1));
+	free(keymap);
+	harness("key 39 1");
+	harness("key 39 0");
+	harness("key 38 0");
+	collect(a, &sa, xi_opcode);
+	collect(b, &sb, xi_opcode);
+	CHECK(sa.len == 2 && has(&sa, "key")); // 38 and 39 while it held the keyboard
+	CHECK(sb.len == 0);
+	harness("key 39 1");
+	harness("key 39 0");
+	collect(a, &sa, xi_opcode);
+	collect(b, &sb, xi_opcode);
+	CHECK(sa.len == 0 && has(&sb, "key"));
+	keymap = xcb_query_keymap_reply(b, xcb_query_keymap(b), NULL);
+	CHECK(keymap && !(keymap->keys[38 / 8] >> (38 % 8) & 1));
+	free(keymap);
+	xcb_ungrab_key(a, 38, w, 0);
+	free(xcb_get_input_focus_reply(a, xcb_get_input_focus(a), NULL)); // it's through
+	harness("key 38 1");
+	harness("key 38 0");
+	collect(a, &sa, xi_opcode);
+	collect(b, &sb, xi_opcode);
+	CHECK(sa.len == 0 && has(&sb, "key"));
+
 	// XI2: the master pointer, ButtonPress in the mask
 	uint32_t mask = XCB_INPUT_XI_EVENT_MASK_BUTTON_PRESS;
 	xcb_input_xi_grab_device_reply_t *x = xcb_input_xi_grab_device_reply(a,

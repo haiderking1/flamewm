@@ -428,6 +428,11 @@ struct flame_xserver {
 		uint32_t confine; // the pointer's: a window it stays in, 0 for none
 		struct xs_cursor *cursor; // the pointer's look meanwhile, NULL: the windows'
 	} pointer_grab, keyboard_grab;
+	// passive key grabs (GrabKey): input.c's. a key that set one off holds
+	// the keyboard till it comes up
+	struct wl_list key_grabs;
+	uint8_t passive_key;
+	uint8_t keys_down[32]; // what QueryKeymap tells, a bit a keycode
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
 	bool trace; // FLAME_X_TRACE=1: every request in the log
@@ -524,6 +529,19 @@ void xserver_break_grabs(struct flame_xserver *xserver, pid_t pid);
 // cursor to a game): to this rectangle, root coords
 bool xserver_pointer_confine(const struct flame_xserver *xserver, int *x, int *y, int *width,
 	int *height);
+// a key typed in a wayland window that X apps may see, like Xorg lets them
+// see every key: held in QueryKeymap (obs, discord poll it), a raw event
+// (mumble), and a global hotkey (GrabKey on the root) goes to its app. true:
+// an X app's hotkey took it, the window doesn't get it
+bool xserver_key_elsewhere(struct flame_xserver *xserver, uint8_t keycode, bool pressed,
+	uint16_t state, uint32_t time);
+// a key X saw go down came up while the user isn't letting X see keys: X
+// hears it anyway, nothing stays held
+bool xserver_key_down(const struct flame_xserver *xserver, uint8_t keycode);
+// a mouse button on a wayland window, as a raw event (push to talk on a side
+// button)
+void xserver_button_elsewhere(struct flame_xserver *xserver, uint8_t button, bool pressed,
+	uint32_t time);
 // the cursor X shows where the pointer is: the grab's, else the deepest
 // window's that has one. NULL: none set anywhere, flame's default pointer
 const struct xs_cursor *xserver_pointer_cursor(struct flame_xserver *xserver);
