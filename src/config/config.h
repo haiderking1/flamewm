@@ -70,6 +70,11 @@ struct flame_config {
 	// the window under the mouse gets the keyboard as soon as you move onto it
 	bool focus_follows_mouse;
 
+	// X apps at the screen's scale draw at its pixels and are told its dpi
+	// (they scale themselves, sharp), not stretched up (blurry). apps that
+	// ignore dpi come out small. hyprland's force_zero_scaling
+	bool x_zero_scaling;
+
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;
 

@@ -102,6 +102,7 @@ static void server_apply_config(struct flame_server *server) {
 	keyboards_apply_config(&server->input);
 	server_keymap_names(server);
 	outputs_apply_config(&server->outputs);
+	xbridge_config_changed(&server->xbridge);
 	desktop_arrange(desktop);
 }
 

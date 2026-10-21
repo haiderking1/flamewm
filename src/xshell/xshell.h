@@ -54,6 +54,12 @@ struct flame_xshell {
 	// the next queued present or NotifyMSC comes due
 	struct flame_timer msc_timer;
 
+	// X's coordinates are flame's times this: the screen's scale with
+	// x_zero_scaling, else 1 (X apps stretched to the screen's scale)
+	double scale;
+	bool xsettings_on; // xsettings.c's
+	uint32_t xsettings_serial;
+
 	// EWMH (ewmh.c): its atoms, the check window, what the root says now
 	struct {
 		bool started;
@@ -110,6 +116,12 @@ void xshell_windows_changed(struct flame_xshell *xshell);
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *window);
 // the X server listens: flame says it's the window manager
 void xshell_started(struct flame_xshell *xshell);
+// flame's layout coords to X's and back, see flame_xshell.scale
+int xshell_to_x(const struct flame_xshell *xshell, double v);
+double xshell_from_x(const struct flame_xshell *xshell, double v);
+// the screen's scale or x_zero_scaling changed: X's coordinates follow,
+// every X window moves to where it is in them
+void xshell_rescale(struct flame_xshell *xshell);
 // a client message for the window manager (EWMH)
 void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
 	const uint32_t data[5]);

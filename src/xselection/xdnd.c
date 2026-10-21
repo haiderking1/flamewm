@@ -293,7 +293,10 @@ static void x_enter(struct xsel_dnd *dnd, const uint32_t data[5]) {
 
 static void x_position(struct xsel_dnd *dnd, const uint32_t data[5]) {
 	struct flame_server *server = dnd->owner->server;
-	double x = data[2] >> 16, y = data[2] & 0xffff;
+	// X's root coords, flame's layout ones from them (x_zero_scaling)
+	struct flame_xshell *xshell = &server->xshell;
+	double x = xshell_from_x(xshell, (int16_t)(data[2] >> 16));
+	double y = xshell_from_x(xshell, (int16_t)(data[2] & 0xffff));
 	dnd->x_action = data[4];
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
@@ -539,8 +542,9 @@ bool xselection_dnd_over_x(struct flame_xselection *xselection, double lx, doubl
 		x_target_leave(dnd);
 		x_target_enter(dnd, window, version, source);
 	}
-	dnd->last_x = (uint32_t)lx & 0xffff;
-	dnd->last_y = (uint32_t)ly & 0xffff;
+	struct flame_xshell *xshell = &xselection->server->xshell;
+	dnd->last_x = (uint32_t)xshell_to_x(xshell, lx) & 0xffff;
+	dnd->last_y = (uint32_t)xshell_to_x(xshell, ly) & 0xffff;
 	send_position(dnd, time);
 	return true;
 }

@@ -1,5 +1,5 @@
 // flame as X's window manager, the EWMH way an app sees it
-// usage: xewmh check | fullscreen | startfull | activate | close
+// usage: xewmh check | fullscreen | startfull | activate | close | dpi
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,6 +163,16 @@ int main(int argc, char **argv) {
 		xcb_get_property_reply_t *list = prop(s->root, "_NET_CLIENT_LIST");
 		printf("clients: %d\n", list ? xcb_get_property_value_length(list) / 4 : -1);
 		free(list);
+	} else if (!strcmp(mode, "dpi")) {
+		xcb_get_property_reply_t *rm = prop(s->root, "RESOURCE_MANAGER");
+		printf("resources: %.*s", rm ? xcb_get_property_value_length(rm) : 0,
+			rm ? (char *)xcb_get_property_value(rm) : "");
+		free(rm);
+		xcb_get_selection_owner_reply_t *xs = xcb_get_selection_owner_reply(c,
+			xcb_get_selection_owner(c, atom("_XSETTINGS_S0")), NULL);
+		printf("\nxsettings: %s\nscreen %dx%d\n", xs && xs->owner ? "yes" : "no",
+			s->width_in_pixels, s->height_in_pixels);
+		free(xs);
 	} else if (!strcmp(mode, "close")) {
 		xcb_window_t w = window(false);
 		settle();
