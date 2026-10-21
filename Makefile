@@ -111,6 +111,27 @@ $(E2E)/xdg-shell-protocol.c: $(XDG_SHELL_XML)
 	@mkdir -p $(dir $@)
 	$(WAYLAND_SCANNER) private-code $< $@
 
+# staging protocols the screen sharing test speaks
+STAGING_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/staging
+CAPTURE_PROTOCOLS := ext-foreign-toplevel-list ext-image-capture-source ext-image-copy-capture
+CAPTURE_HEADERS := $(CAPTURE_PROTOCOLS:%=$(E2E)/%-v1-client-protocol.h)
+CAPTURE_CODE := $(CAPTURE_PROTOCOLS:%=$(E2E)/%-v1-protocol.c)
+
+define capture_protocol
+$(E2E)/$(1)-v1-client-protocol.h: $(STAGING_XML)/$(1)/$(1)-v1.xml
+	@mkdir -p $$(dir $$@)
+	$(WAYLAND_SCANNER) client-header $$< $$@
+
+$(E2E)/$(1)-v1-protocol.c: $(STAGING_XML)/$(1)/$(1)-v1.xml
+	@mkdir -p $$(dir $$@)
+	$(WAYLAND_SCANNER) private-code $$< $$@
+endef
+$(foreach p,$(CAPTURE_PROTOCOLS),$(eval $(call capture_protocol,$(p))))
+
+$(E2E)/wlcapture: tests/e2e/wlcapture.c $(CAPTURE_HEADERS) $(CAPTURE_CODE)
+	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlcapture.c $(CAPTURE_CODE) \
+		$(shell pkg-config --cflags --libs wayland-client xcb)
+
 $(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client)
@@ -140,7 +161,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -166,6 +187,8 @@ install: release
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
 	install -Dm644 data/flamewm-portals.conf \
 		$(DESTDIR)$(PREFIX)/share/xdg-desktop-portal/flamewm-portals.conf
+	install -Dm644 data/xdg-desktop-portal-wlr-flamewm \
+		$(DESTDIR)/etc/xdg/xdg-desktop-portal-wlr/flamewm
 
 clean:
 	rm -rf build build-asan build-release

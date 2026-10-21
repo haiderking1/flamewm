@@ -6,6 +6,7 @@
 
 #include "anim/anim.h"
 #include "backend/backend.h"
+#include "capture/capture.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
 #include "input/input.h"
@@ -44,6 +45,7 @@ struct flame_server {
 	struct flame_ipc ipc;
 	struct flame_xbridge xbridge;
 	struct flame_xshell xshell;
+	struct flame_capture capture;
 	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;
 };

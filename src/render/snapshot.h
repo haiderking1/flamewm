@@ -17,4 +17,14 @@ struct wlr_texture *render_snapshot(struct flame_frame *frame, struct flame_node
 // changed size): no close pays for setting one up
 void render_snapshot_warm(struct flame_frame *frame);
 
+struct flame_element_list;
+struct flame_render;
+struct wlr_buffer;
+// list (collected for area, layout coords) drawn into buffer at scale, all of
+// buffer cleared first: a window captured on its own (screen sharing one
+// window). false when the gpu said no
+bool render_elements_to_buffer(struct flame_render *render,
+	const struct flame_element_list *list, struct wlr_box area, float scale,
+	struct wlr_buffer *buffer);
+
 #endif
