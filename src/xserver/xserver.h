@@ -374,6 +374,16 @@ struct flame_xserver {
 	int pointer_x, pointer_y;
 	uint32_t pointer_window; // the deepest window it's in, 0 for none
 	uint32_t grab; // the window a held button grabbed, 0 for none
+	// active grabs a client took of the pointer and the keyboard (GrabPointer,
+	// GrabKeyboard, XIGrabDevice): a menu holding on while it's open. NULL
+	// client: none. the grab's mask says what it gets, XI2 event bits for
+	// XI2 grabs, a core event mask else
+	struct xs_grab {
+		struct xs_client *client;
+		uint32_t window;
+		bool owner_events, xi;
+		uint32_t mask;
+	} pointer_grab, keyboard_grab;
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
 	bool trace; // FLAME_X_TRACE=1: every request in the log
@@ -458,6 +468,9 @@ void xserver_move_window(struct flame_xserver *xserver, struct xs_window *window
 	int x, int y, int width, int height);
 // flame moved focus, the X side follows. focus is a window id or XS_FOCUS_NONE
 void xserver_set_focus(struct flame_xserver *xserver, uint32_t focus);
+// an X client holds the pointer (a menu open): it gets every pointer event
+// wherever the pointer is, and the pointer moves no focus meanwhile
+bool xserver_pointer_grabbed(const struct flame_xserver *xserver);
 // flame as the window manager gives a top-level the keyboard, ICCCM's way:
 // SetInputFocus unless WM_HINTS says it takes no input, WM_TAKE_FOCUS when
 // it's in WM_PROTOCOLS (it sets the focus itself, wine does). nothing when

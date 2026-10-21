@@ -1,5 +1,6 @@
 #include <string.h>
 #include <sys/socket.h>
+#include <wlr/util/log.h>
 
 #include "xserver/internal.h"
 
@@ -74,9 +75,14 @@ static void fill(struct flame_xserver *xserver, struct xs_event *event, uint8_t 
 // got it, NULL for nobody
 static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_window *source,
 		uint32_t core_mask, uint8_t type, const struct xs_input *input) {
+	struct xs_client *only = input->only;
 	for (struct xs_window *w = source; w; w = w->parent) {
-		bool xi2 = !input->core_only && xs_xi_selected(xserver, w, input->evtype);
-		bool core = core_mask && xs_event_wanted_input(w, core_mask, input->evtype);
+		bool xi2 = !input->core_only && (only ? xs_xi_client_selected(only, w, input->evtype)
+			: xs_xi_selected(xserver, w, input->evtype));
+		bool core = core_mask && (only
+			? (xs_window_mask(w, only) & core_mask) && !xs_xi_client_selected(only, w,
+				input->evtype)
+			: xs_event_wanted_input(w, core_mask, input->evtype));
 		if (xi2 || core) {
 			if (xi2) {
 				xs_xi_device_event(xserver, w, source, input);
@@ -86,7 +92,7 @@ static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_wind
 				fill(xserver, &event, type, (uint8_t)input->detail, w, source, input->state,
 					input->time);
 				xs_event_deliver_input(xserver, w, core_mask, input->evtype, &event,
-					input->core_only);
+					input->core_only, only);
 			}
 			return w;
 		}
@@ -97,6 +103,54 @@ static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_wind
 	return NULL;
 }
 
+// ---- active grabs ----
+
+static bool grab_on(struct flame_xserver *xserver, const struct xs_grab *grab) {
+	return grab->client && xserver_window(xserver, grab->window);
+}
+
+bool xserver_pointer_grabbed(const struct flame_xserver *xserver) {
+	return grab_on((struct flame_xserver *)xserver, &xserver->pointer_grab);
+}
+
+// a device event while a client holds the device: to its own windows the
+// usual way with owner events, else (or when none of them wants it) to the
+// grab window by the grab's mask, nobody else hears it
+static struct xs_window *grabbed(struct flame_xserver *xserver, const struct xs_grab *grab,
+		struct xs_window *source, uint32_t core_mask, uint8_t type, struct xs_input *input) {
+	input->only = grab->client;
+	if (grab->owner_events && source) {
+		struct xs_window *got = propagate(xserver, source, core_mask, type, input);
+		if (got) {
+			return got;
+		}
+	}
+	struct xs_window *window = xserver_window(xserver, grab->window);
+	bool key = type == EVENT_KEY_PRESS || type == EVENT_KEY_RELEASE;
+	if (grab->xi) {
+		if (!input->core_only && grab->mask >> input->evtype & 1) {
+			input->forced = true;
+			xs_xi_device_event(xserver, window, source, input);
+			input->forced = false;
+		}
+	} else if (key || (grab->mask & core_mask)) {
+		struct xs_event event;
+		fill(xserver, &event, type, (uint8_t)input->detail, window, source, input->state,
+			input->time);
+		xs_event_send_input(grab->client, &event);
+	}
+	return window;
+}
+
+// a pointer event: to whoever holds the pointer, else from source up
+static struct xs_window *pointer_event(struct flame_xserver *xserver, struct xs_window *source,
+		uint32_t core_mask, uint8_t type, struct xs_input *input) {
+	if (grab_on(xserver, &xserver->pointer_grab)) {
+		return grabbed(xserver, &xserver->pointer_grab, source, core_mask, type, input);
+	}
+	return source ? propagate(xserver, source, core_mask, type, input) : NULL;
+}
+
 #define NOTIFY_ANCESTOR 0
 #define NOTIFY_VIRTUAL 1
 #define NOTIFY_INFERIOR 2
@@ -105,19 +159,44 @@ static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_wind
 
 // one EnterNotify or LeaveNotify. child: the window inside window on the
 // pointer's way, NULL for none
+static uint8_t cross_mode;
+
 static void crossing(struct flame_xserver *xserver, uint8_t type, struct xs_window *window,
 		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time) {
 	struct xs_event event;
 	fill(xserver, &event, type, detail, window, child, state, time);
-	xs_event_put8(&event, 30, 0); // mode: normal
+	xs_event_put8(&event, 30, cross_mode);
 	// same screen, and focus: the keyboard's on this window or one it's in
 	xs_event_put8(&event, 31, 2 | (xs_focus_within(xserver, window) ? 1 : 0));
 	bool enter = type == EVENT_ENTER;
 	int evtype = enter ? XS_XI_ENTER : XS_XI_LEAVE;
-	xs_event_deliver_input(xserver, window, enter ? MASK_ENTER : MASK_LEAVE, evtype, &event,
-		false);
-	xs_xi_crossing(xserver, evtype, window, detail, child, state, time);
+	uint32_t mask = enter ? MASK_ENTER : MASK_LEAVE;
+	struct xs_input how = {0};
+	const struct xs_grab *grab = &xserver->pointer_grab;
+	if (grab_on(xserver, grab)) {
+		// a client holds the pointer: only it hears crossings, the grab
+		// window's by the grab's mask, its own windows' with owner events
+		how.only = grab->client;
+		if (window->id == grab->window) {
+			if (grab->xi && grab->mask >> evtype & 1) {
+				how.forced = true;
+				xs_xi_crossing(xserver, evtype, window, detail, child, state, time, cross_mode,
+					&how);
+			} else if (!grab->xi && grab->mask & mask) {
+				xs_event_send_input(grab->client, &event);
+			}
+			return;
+		}
+		if (!grab->owner_events) {
+			return;
+		}
+	}
+	xs_event_deliver_input(xserver, window, mask, evtype, &event, false, how.only);
+	xs_xi_crossing(xserver, evtype, window, detail, child, state, time, cross_mode, &how);
 }
+
+static void cross(struct flame_xserver *xserver, struct xs_window *a, struct xs_window *b,
+		uint16_t state, uint32_t time);
 
 // LeaveNotify up from below from (not included) to stop (not included),
 // each with the window it came out of
@@ -148,8 +227,8 @@ static void enter_down(struct flame_xserver *xserver, struct xs_window *stop,
 // the pointer went from a to b (NULL: out of X's windows, onto the root):
 // the protocol's crossing events, Xorg's way. a toolkit whose window the
 // pointer goes into a child of hears NotifyInferior, not that it left
-static void cross(struct flame_xserver *xserver, struct xs_window *a, struct xs_window *b,
-		uint16_t state, uint32_t time) {
+static void cross_chain(struct flame_xserver *xserver, struct xs_window *a,
+		struct xs_window *b, uint16_t state, uint32_t time) {
 	a = a ? a : xserver->root;
 	b = b ? b : xserver->root;
 	if (a == b) {
@@ -172,8 +251,97 @@ static void cross(struct flame_xserver *xserver, struct xs_window *a, struct xs_
 	}
 }
 
+static void cross(struct flame_xserver *xserver, struct xs_window *a, struct xs_window *b,
+		uint16_t state, uint32_t time) {
+	cross_chain(xserver, a, b, state, time);
+}
+
 static bool alive(struct flame_xserver *xserver, uint32_t id) {
 	return id && xserver_window(xserver, id);
+}
+
+// where the pointer is, the root when it's over none of X's windows
+static struct xs_window *pointer_at(struct flame_xserver *xserver) {
+	struct xs_window *w = alive(xserver, xserver->pointer_window)
+		? xserver_window(xserver, xserver->pointer_window) : NULL;
+	return w ? w : xserver->root;
+}
+
+uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard,
+		uint32_t window_id, bool owner_events, bool xi, uint32_t mask) {
+	struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
+	struct xs_window *window = xserver_window(xserver, window_id);
+	bool held = grab_on(xserver, grab);
+	if (held && grab->client != client) {
+		return 1; // AlreadyGrabbed
+	}
+	if (!window || !xs_window_viewable(window)) {
+		return 3; // NotViewable
+	}
+	struct xs_window *from = held ? xserver_window(xserver, grab->window) : NULL;
+	wlr_log(WLR_DEBUG, "xserver: %s holds the %s on 0x%x%s", client->comm,
+		keyboard ? "keyboard" : "pointer", window_id, xi ? " (XI2)" : "");
+	*grab = (struct xs_grab){
+		.client = client,
+		.window = window_id,
+		.owner_events = owner_events,
+		.xi = xi,
+		.mask = mask,
+	};
+	// as if the pointer or the focus moved to the grab window, mode Grab
+	if (keyboard) {
+		uint32_t old = from ? from->id : xserver->focus;
+		if (old != window_id) {
+			xs_focus_events(xserver, old, window_id, XS_NOTIFY_GRAB);
+		}
+	} else {
+		cross_mode = XS_NOTIFY_GRAB;
+		cross_chain(xserver, from ? from : pointer_at(xserver), window, xserver->state,
+			xs_now(xserver));
+		cross_mode = XS_NOTIFY_NORMAL;
+	}
+	return 0;
+}
+
+static void let_go(struct flame_xserver *xserver, bool keyboard) {
+	struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
+	struct xs_window *window = xserver_window(xserver, grab->window);
+	wlr_log(WLR_DEBUG, "xserver: %s lets go of the %s", grab->client->comm,
+		keyboard ? "keyboard" : "pointer");
+	*grab = (struct xs_grab){0};
+	if (!window) {
+		return;
+	}
+	// back from the grab window, mode Ungrab
+	if (keyboard) {
+		if (window->id != xserver->focus) {
+			xs_focus_events(xserver, window->id, xserver->focus, XS_NOTIFY_UNGRAB);
+		}
+	} else {
+		cross_mode = XS_NOTIFY_UNGRAB;
+		cross_chain(xserver, window, pointer_at(xserver), xserver->state, xs_now(xserver));
+		cross_mode = XS_NOTIFY_NORMAL;
+	}
+}
+
+void xs_ungrab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard) {
+	struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
+	if (grab->client && grab->client == client) {
+		let_go(xserver, keyboard);
+	}
+}
+
+void xs_grabs_check(struct flame_xserver *xserver, struct xs_client *gone) {
+	for (int keyboard = 0; keyboard < 2; keyboard++) {
+		struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
+		if (!grab->client) {
+			continue;
+		}
+		struct xs_window *window = xserver_window(xserver, grab->window);
+		if (grab->client == gone || !window || !xs_window_viewable(window)) {
+			let_go(xserver, keyboard);
+		}
+	}
 }
 
 void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top, int x,
@@ -181,8 +349,10 @@ void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top
 	xserver->pointer_x = x;
 	xserver->pointer_y = y;
 	xserver->state = state;
-	// a held button keeps everything going where it went down
-	struct xs_window *grab = alive(xserver, xserver->grab) && (state & STATE_BUTTONS)
+	// a held button keeps everything going where it went down. a client
+	// holding the pointer gets it all anyway
+	bool held = grab_on(xserver, &xserver->pointer_grab);
+	struct xs_window *grab = !held && alive(xserver, xserver->grab) && (state & STATE_BUTTONS)
 		? xserver_window(xserver, xserver->grab) : NULL;
 	struct xs_window *under = grab ? NULL : top ? deepest(top, x, y) : NULL;
 
@@ -196,7 +366,7 @@ void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top
 	}
 
 	struct xs_window *source = grab ? grab : under;
-	if (!source) {
+	if (!source && !held) {
 		return;
 	}
 	uint32_t mask = MASK_POINTER_MOTION;
@@ -209,7 +379,7 @@ void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top
 		}
 	}
 	struct xs_input input = {.evtype = XS_XI_MOTION, .time = time, .state = state};
-	propagate(xserver, source, mask, EVENT_MOTION, &input);
+	pointer_event(xserver, source, mask, EVENT_MOTION, &input);
 }
 
 void xserver_pointer_raw_motion(struct flame_xserver *xserver, double dx, double dy,
@@ -219,7 +389,7 @@ void xserver_pointer_raw_motion(struct flame_xserver *xserver, double dx, double
 
 // where button events go: the grab, else what's under the pointer
 static struct xs_window *button_source(struct flame_xserver *xserver) {
-	if (alive(xserver, xserver->grab)) {
+	if (!grab_on(xserver, &xserver->pointer_grab) && alive(xserver, xserver->grab)) {
 		return xserver_window(xserver, xserver->grab);
 	}
 	if (alive(xserver, xserver->pointer_window)) {
@@ -231,7 +401,8 @@ static struct xs_window *button_source(struct flame_xserver *xserver) {
 static void button(struct flame_xserver *xserver, uint8_t button, bool pressed,
 		uint16_t state, uint32_t time, uint32_t flags) {
 	struct xs_window *source = button_source(xserver);
-	if (!source) {
+	bool taken = grab_on(xserver, &xserver->pointer_grab);
+	if (!source && !taken) {
 		return;
 	}
 	struct xs_input input = {
@@ -241,10 +412,10 @@ static void button(struct flame_xserver *xserver, uint8_t button, bool pressed,
 		.state = state,
 		.flags = flags,
 	};
-	struct xs_window *got = propagate(xserver, source,
+	struct xs_window *got = pointer_event(xserver, source,
 		pressed ? MASK_BUTTON_PRESS : MASK_BUTTON_RELEASE,
 		pressed ? EVENT_BUTTON_PRESS : EVENT_BUTTON_RELEASE, &input);
-	if (pressed && got && !xserver->grab) {
+	if (pressed && got && !xserver->grab && !taken) {
 		xserver->grab = got->id; // the implicit grab, until the last button lets go
 	}
 	uint16_t held = state & STATE_BUTTONS & (uint16_t)~(1u << (7 + button));
@@ -265,7 +436,7 @@ void xserver_pointer_scroll(struct flame_xserver *xserver, bool vertical, double
 		uint16_t state, uint32_t time) {
 	xserver->state = state;
 	struct xs_window *source = button_source(xserver);
-	if (!source) {
+	if (!source && !grab_on(xserver, &xserver->pointer_grab)) {
 		return;
 	}
 	int axis = vertical ? 0 : 1;
@@ -279,12 +450,12 @@ void xserver_pointer_scroll(struct flame_xserver *xserver, bool vertical, double
 		.scroll = 3,
 	};
 	if (!xserver->scroll_primed) {
-		propagate(xserver, source, 0, EVENT_MOTION, &input);
+		pointer_event(xserver, source, 0, EVENT_MOTION, &input);
 		xserver->scroll_primed = true;
 	}
 	xserver->scroll[axis] += delta;
 	input.scroll = vertical ? 1 : 2;
-	propagate(xserver, source, 0, EVENT_MOTION, &input);
+	pointer_event(xserver, source, 0, EVENT_MOTION, &input);
 	// everyone else: buttons 4 to 7, a click per wheel notch. touchpads send
 	// small steps, they add up. XI2 clients get them marked as emulated
 	double *notches = &xserver->scroll_notches[axis];
@@ -314,12 +485,12 @@ static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, ui
 	// PointerRoot: keys follow the pointer, whatever window it's over
 	struct xs_window *focus = xserver->focus == XS_FOCUS_POINTER_ROOT ? xserver->root
 		: alive(xserver, xserver->focus) ? xserver_window(xserver, xserver->focus) : NULL;
-	if (!focus) {
+	if (!focus && !grab_on(xserver, &xserver->keyboard_grab)) {
 		return;
 	}
 	// to the window under the pointer when it's inside the focus window
 	struct xs_window *source = focus;
-	for (struct xs_window *w = under; w; w = w->parent) {
+	for (struct xs_window *w = under; focus && w; w = w->parent) {
 		if (w == focus) {
 			source = under;
 			break;
@@ -333,8 +504,13 @@ static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, ui
 		.flags = flags,
 		.core_only = core_only,
 	};
-	propagate(xserver, source, pressed ? MASK_KEY_PRESS : MASK_KEY_RELEASE,
-		pressed ? EVENT_KEY_PRESS : EVENT_KEY_RELEASE, &input);
+	uint32_t mask = pressed ? MASK_KEY_PRESS : MASK_KEY_RELEASE;
+	uint8_t type = pressed ? EVENT_KEY_PRESS : EVENT_KEY_RELEASE;
+	if (grab_on(xserver, &xserver->keyboard_grab)) {
+		grabbed(xserver, &xserver->keyboard_grab, source, mask, type, &input);
+		return;
+	}
+	propagate(xserver, source, mask, type, &input);
 }
 
 void xserver_key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,

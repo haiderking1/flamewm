@@ -117,10 +117,10 @@ static void send(struct xs_client *client, uint8_t *event, size_t len) {
 // to every client selecting evtype on window: the master's version to those
 // who want masters, the slave's to those who want slaves. device sits at 10
 static void deliver(struct flame_xserver *xserver, uint32_t window, int evtype,
-		uint8_t *event, size_t len, uint16_t master, uint16_t slave) {
+		uint8_t *event, size_t len, uint16_t master, uint16_t slave, struct xs_client *only) {
 	struct select *select;
 	wl_list_for_each(select, &xserver->xi_selects, link) {
-		if (select->window != window) {
+		if (select->window != window || (only && select->client != only)) {
 			continue;
 		}
 		if (select->master >> evtype & 1) {
@@ -152,6 +152,21 @@ static void put_mods(uint8_t *at, uint16_t state) {
 // the buttons held, a mask of BUTTONS bits from the core state's 1 to 5
 static uint32_t buttons_of(uint16_t state) {
 	return (uint32_t)((state >> 8) & 0x1f) << 1;
+}
+
+// an event to who should get it: a grab's client on the grab window as the
+// master device whatever it selected (forced), or the selections, maybe
+// just one client's
+static void to(struct flame_xserver *xserver, uint32_t window, int evtype, uint8_t *event,
+		size_t len, bool key, const struct xs_input *how) {
+	uint16_t master = key ? MASTER_KEYBOARD : MASTER_POINTER;
+	uint16_t slave = key ? SLAVE_KEYBOARD : SLAVE_POINTER;
+	if (how && how->forced) {
+		put16(event + 10, master);
+		send(how->only, event, len);
+		return;
+	}
+	deliver(xserver, window, evtype, event, len, master, slave, how ? how->only : NULL);
 }
 
 void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receiver,
@@ -204,20 +219,20 @@ void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receive
 	for (int i = 0; i < count; i++) {
 		put_fp3232(event + 88 + i * 8, values[i]);
 	}
-	deliver(xserver, receiver->id, input->evtype, event, len,
-		key ? MASTER_KEYBOARD : MASTER_POINTER, key ? SLAVE_KEYBOARD : SLAVE_POINTER);
+	to(xserver, receiver->id, input->evtype, event, len, key, input);
 }
 
 // Enter, Leave, FocusIn and FocusOut share a layout
 static void crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time, bool focus) {
+		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time, bool focus,
+		uint8_t mode, const struct xs_input *how) {
 	int rx = xserver->pointer_x, ry = xserver->pointer_y;
 	int ox, oy;
 	xs_window_origin(window, &ox, &oy);
 	uint8_t event[76];
 	header(event, sizeof(event), (uint16_t)evtype, 0, time);
 	put16(event + 16, focus ? SLAVE_KEYBOARD : SLAVE_POINTER);
-	event[18] = 0; // mode: normal
+	event[18] = mode; // Normal, Grab, Ungrab, WhileGrabbed: core's numbers
 	event[19] = detail;
 	put32(event + 20, XS_ROOT);
 	put32(event + 24, window->id);
@@ -231,18 +246,19 @@ static void crossing(struct flame_xserver *xserver, int evtype, struct xs_window
 	put16(event + 50, 1); // buttons, in units
 	put_mods(event + 52, state);
 	put32(event + 72, buttons_of(state));
-	deliver(xserver, window->id, evtype, event, sizeof(event),
-		focus ? MASTER_KEYBOARD : MASTER_POINTER, focus ? SLAVE_KEYBOARD : SLAVE_POINTER);
+	to(xserver, window->id, evtype, event, sizeof(event), focus, how);
 }
 
 void xs_xi_crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time) {
-	crossing(xserver, evtype, window, detail, child, state, time, false);
+		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time, uint8_t mode,
+		const struct xs_input *how) {
+	crossing(xserver, evtype, window, detail, child, state, time, false, mode, how);
 }
 
 void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-		uint8_t detail) {
-	crossing(xserver, evtype, window, detail, NULL, xserver->state, xs_now(xserver), true);
+		uint8_t detail, uint8_t mode) {
+	crossing(xserver, evtype, window, detail, NULL, xserver->state, xs_now(xserver), true,
+		mode, NULL);
 }
 
 void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,
@@ -265,7 +281,7 @@ void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, doubl
 	}
 	// raw events go to whoever asked on the root
 	deliver(xserver, XS_ROOT, evtype, event, len, key ? MASTER_KEYBOARD : MASTER_POINTER,
-		key ? SLAVE_KEYBOARD : SLAVE_POINTER);
+		key ? SLAVE_KEYBOARD : SLAVE_POINTER, NULL);
 }
 
 // ---- devices ----
@@ -682,11 +698,28 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 		xout32(&out, xserver->focus);
 		xs_reply_send(client, &out);
 		break;
-	case 51: // XIGrabDevice: Success, nobody else is grabbing anything
+	case 51: { // XIGrabDevice: a master, the pointer or the keyboard
+		// grab window, time, cursor, device, modes, owner events, mask
+		uint16_t device = xin16(in, 16);
+		uint16_t mask_len = xin16(in, 22);
+		uint32_t mask = mask_len && in->len >= 28 ? xin32(in, 24) : 0;
+		uint8_t status = 0;
+		if (!device_exists(device)) {
+			xs_error(client, BAD_DEVICE, device, XS_XI_OPCODE, minor);
+			break;
+		}
+		bool keyboard = device == MASTER_KEYBOARD || device == SLAVE_KEYBOARD;
+		status = xs_grab(xserver, client, keyboard, xin32(in, 4), xin8(in, 20), true, mask);
 		xs_reply_begin(client, &out, 0);
-		xout8(&out, 0);
+		xout8(&out, status);
 		xs_reply_send(client, &out);
 		break;
+	}
+	case 52: { // XIUngrabDevice: time, device
+		uint16_t device = xin16(in, 8);
+		xs_ungrab(xserver, client, device == MASTER_KEYBOARD || device == SLAVE_KEYBOARD);
+		break;
+	}
 	case 54: // XIPassiveGrabDevice: none of the modifiers failed
 		xs_reply_begin(client, &out, 0);
 		xout16(&out, 0);
@@ -732,7 +765,7 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	// accepted, nothing changes: XI1's event selection, warping, cursors,
 	// the hierarchy, the client pointer, ungrabs, allowing events, device
 	// properties, barriers
-	case 6: case 37: case 38: case 41: case 42: case 43: case 44: case 52: case 53: case 55:
+	case 6: case 37: case 38: case 41: case 42: case 43: case 44: case 53: case 55:
 	case 57: case 58:
 	case 61:
 		break;

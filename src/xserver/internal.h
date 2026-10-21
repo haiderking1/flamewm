@@ -132,9 +132,12 @@ void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, u
 // event evtype on window gets that instead and is skipped here
 // repeat_release: an autorepeat's release, clients that asked for detectable
 // autorepeat don't get it. clients that never set up XKB don't see the
-// layout in the state
+// layout in the state. only: just that client (a grab's), NULL for all
 void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
-	uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release);
+	uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release,
+	struct xs_client *only);
+// one input event to one client, whatever it selected (a grab's)
+void xs_event_send_input(struct xs_client *client, const struct xs_event *event);
 // anyone xs_event_deliver_input would send it to
 bool xs_event_wanted_input(struct xs_window *window, uint32_t mask, int evtype);
 
@@ -187,6 +190,23 @@ struct xs_window *xs_window_common(struct xs_window *a, struct xs_window *b);
 // focus flag of its crossing events
 bool xs_focus_within(struct flame_xserver *xserver, const struct xs_window *window);
 void xs_focus_set(struct flame_xserver *xserver, uint32_t focus, uint8_t revert);
+// the focus events for focus going from to to (window ids, None,
+// PointerRoot) with mode: grabs send them as if it moved to the grab window
+void xs_focus_events(struct flame_xserver *xserver, uint32_t from, uint32_t to, uint8_t mode);
+
+// active grabs (input.c). take one of the pointer or the keyboard for client
+// on window: the X status, 0 Success, 1 AlreadyGrabbed, 3 NotViewable. xi:
+// mask is XI2 event bits, else a core event mask
+#define XS_NOTIFY_NORMAL 0
+#define XS_NOTIFY_GRAB 1
+#define XS_NOTIFY_UNGRAB 2
+#define XS_NOTIFY_WHILE_GRABBED 3
+uint8_t xs_grab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard,
+	uint32_t window, bool owner_events, bool xi, uint32_t mask);
+// lets go when client holds it
+void xs_ungrab(struct flame_xserver *xserver, struct xs_client *client, bool keyboard);
+// grabs whose window went out of sight or whose client left let go
+void xs_grabs_check(struct flame_xserver *xserver, struct xs_client *gone);
 // the focused window went away or out of sight: where focus goes instead
 void xs_focus_lost(struct flame_xserver *xserver, struct xs_window *window);
 
@@ -316,6 +336,11 @@ struct xs_input {
 	uint32_t flags; // XS_XI_KEY_REPEAT, XS_XI_POINTER_EMULATED
 	uint8_t scroll; // the scroll valuators that moved: 1 vertical, 2 horizontal
 	bool core_only; // XI2 has no such event (an autorepeat's release)
+	// a grab's: only this client hears it. forced: on the grab window by
+	// the grab's mask, whatever the window selected
+	struct xs_client *only;
+	bool forced;
+	uint32_t forced_mask; // XI2 event bits, for forced
 };
 
 void xs_xi_request(struct xs_client *client, const struct xin *request);
@@ -330,10 +355,13 @@ void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receive
 	struct xs_window *source, const struct xs_input *input);
 // XI_Enter and XI_Leave, detail as in core crossing events
 // child: the window inside window on the way to the pointer, NULL for none
+// mode: Normal, Grab, Ungrab as in core. how: NULL, or a grab's delivery
+// (xs_input.only and .forced)
 void xs_xi_crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-	uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time);
+	uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time, uint8_t mode,
+	const struct xs_input *how);
 void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-	uint8_t detail);
+	uint8_t detail, uint8_t mode);
 // raw events go to whoever selected them on the root. motion: accelerated
 // and raw deltas
 void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,

@@ -93,6 +93,7 @@ void xs_window_unmap(struct flame_xserver *xserver, struct xs_window *window) {
 	if (focus_inside(xserver, window)) {
 		xs_focus_lost(xserver, window);
 	}
+	xs_grabs_check(xserver, NULL);
 	xs_changed(xserver);
 }
 
@@ -451,16 +452,18 @@ bool xs_focus_within(struct flame_xserver *xserver, const struct xs_window *wind
 	return focus && (focus == window || xs_window_inferior(window, focus));
 }
 
+static uint8_t focus_mode;
+
 static void focus_event(struct flame_xserver *xserver, uint8_t type, struct xs_window *window,
 		uint8_t detail) {
 	struct xs_event event = {0};
 	xs_event_put8(&event, 0, type);
 	xs_event_put8(&event, 1, detail);
 	xs_event_put32(&event, 4, window->id);
-	xs_event_put8(&event, 8, 0); // NotifyNormal
+	xs_event_put8(&event, 8, focus_mode);
 	int evtype = type == XS_EVENT_FOCUS_IN ? XS_XI_FOCUS_IN : XS_XI_FOCUS_OUT;
-	xs_event_deliver_input(xserver, window, XS_MASK_FOCUS, evtype, &event, false);
-	xs_xi_focus(xserver, evtype, window, detail);
+	xs_event_deliver_input(xserver, window, XS_MASK_FOCUS, evtype, &event, false, NULL);
+	xs_xi_focus(xserver, evtype, window, detail, focus_mode);
 }
 
 // from (included) up to stop (not included, NULL: through the root)
@@ -490,7 +493,7 @@ static void focus_down(struct flame_xserver *xserver, uint8_t type, struct xs_wi
 // toolkits (chromium most of all) work out whether they're active from
 // these, a window that sees focus go to its own child mustn't hear it as
 // lost
-static void focus_events(struct flame_xserver *xserver, uint32_t old, uint32_t new) {
+static void focus_chain(struct flame_xserver *xserver, uint32_t old, uint32_t new) {
 	struct xs_window *root = xserver->root;
 	struct xs_window *a = old > XS_FOCUS_POINTER_ROOT ? xserver_window(xserver, old) : NULL;
 	struct xs_window *b = new > XS_FOCUS_POINTER_ROOT ? xserver_window(xserver, new) : NULL;
@@ -562,6 +565,12 @@ static void focus_events(struct flame_xserver *xserver, uint32_t old, uint32_t n
 	}
 }
 
+void xs_focus_events(struct flame_xserver *xserver, uint32_t from, uint32_t to, uint8_t mode) {
+	focus_mode = mode;
+	focus_chain(xserver, from, to);
+	focus_mode = XS_NOTIFY_NORMAL;
+}
+
 void xs_focus_set(struct flame_xserver *xserver, uint32_t focus, uint8_t revert) {
 	uint32_t old = xserver->focus;
 	xserver->focus_revert = revert;
@@ -571,7 +580,9 @@ void xs_focus_set(struct flame_xserver *xserver, uint32_t focus, uint8_t revert)
 	// the new focus is in place while the events go out: what a client asks
 	// back while handling them, and the focus flag on crossings, see it
 	xserver->focus = focus;
-	focus_events(xserver, old, focus);
+	// a client holding the keyboard sees focus move WhileGrabbed
+	xs_focus_events(xserver, old, focus, xserver->keyboard_grab.client
+		? XS_NOTIFY_WHILE_GRABBED : XS_NOTIFY_NORMAL);
 }
 
 // does a 32 bit list property hold atom
@@ -672,6 +683,8 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	// its selections first, like Xorg: listeners hear the client closed, not
 	// that its window went
 	xs_selection_client_gone(xserver, client);
+	xs_grabs_check(xserver, client); // what it held lets go
+
 	// its windows, each from the highest one it owns down
 	bool again = true;
 	while (again) {

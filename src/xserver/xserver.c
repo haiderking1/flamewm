@@ -191,28 +191,34 @@ void xs_event_deliver(struct flame_xserver *xserver, struct xs_window *window, u
 	}
 }
 
-void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
-		uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release) {
-	// key, button, motion and crossing events carry the state at 28
+void xs_event_send_input(struct xs_client *client, const struct xs_event *event) {
+	// key, button, motion and crossing events carry the state at 28, the
+	// layout group in it only for clients that know XKB
 	uint8_t type = event->bytes[0] & 0x7f;
-	bool stateful = type >= 2 && type <= 8;
+	if (type >= 2 && type <= 8 && !client->xkb) {
+		struct xs_event copy = *event;
+		uint16_t state;
+		memcpy(&state, copy.bytes + 28, 2);
+		state &= (uint16_t)~0x6000;
+		memcpy(copy.bytes + 28, &state, 2);
+		xs_event_send(client, &copy);
+	} else {
+		xs_event_send(client, event);
+	}
+}
+
+void xs_event_deliver_input(struct flame_xserver *xserver, struct xs_window *window,
+		uint32_t mask, int evtype, const struct xs_event *event, bool repeat_release,
+		struct xs_client *only) {
 	struct xs_interest *interest;
 	wl_list_for_each(interest, &window->interests, link) {
 		struct xs_client *client = interest->client;
 		if (!(interest->mask & mask) || xs_xi_client_selected(client, window, evtype)
-				|| (repeat_release && client->detectable_repeat)) {
+				|| (repeat_release && client->detectable_repeat)
+				|| (only && client != only)) {
 			continue;
 		}
-		if (stateful && !client->xkb) {
-			struct xs_event copy = *event;
-			uint16_t state;
-			memcpy(&state, copy.bytes + 28, 2);
-			state &= (uint16_t)~0x6000;
-			memcpy(copy.bytes + 28, &state, 2);
-			xs_event_send(client, &copy);
-		} else {
-			xs_event_send(client, event);
-		}
+		xs_event_send_input(client, event);
 	}
 }
 
