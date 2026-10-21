@@ -47,6 +47,7 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland drag and drop client |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: an X GL app, multisampled, swapping frames |
+| gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
 
 ## runtime

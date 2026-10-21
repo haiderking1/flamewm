@@ -358,9 +358,12 @@ void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
 }
 
+// each one a whole event, the way a mouse frames them: clients hold pointer
+// events until the frame that ends them
 void cursor_test_move(struct flame_cursor *cursor, double x, double y) {
 	wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
 	process_motion(cursor, now_msec(), true);
+	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
 }
 
 void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool pressed) {
@@ -370,6 +373,7 @@ void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool press
 		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED,
 	};
 	button_event(cursor, &event);
+	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
 }
 
 void cursor_set_name(struct flame_cursor *cursor, const char *name) {

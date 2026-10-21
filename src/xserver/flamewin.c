@@ -98,3 +98,7 @@ struct xs_window *xserver_top_level_at(struct flame_xserver *xserver, int x, int
 void xserver_window_root_position(struct xs_window *window, int *x, int *y) {
 	xs_window_origin(window, x, y);
 }
+
+bool xserver_window_accepts_input(const struct xs_window *window, int x, int y) {
+	return xs_shape_contains(window, x, y);
+}

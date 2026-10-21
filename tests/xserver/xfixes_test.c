@@ -227,6 +227,59 @@ static void test_picture_clip(void) {
 	xcb_free_pixmap(c, p);
 }
 
+// RENDER trapezoids line their source up with the first trapezoid's first
+// point (Xorg's fbTrapezoids): cairo's shadows draw their edges that way
+static void test_trapezoid_source(void) {
+	xcb_render_query_pict_formats_reply_t *formats = xcb_render_query_pict_formats_reply(c,
+		xcb_render_query_pict_formats(c), NULL);
+	xcb_render_pictformat_t rgb = 0;
+	for (xcb_render_pictforminfo_iterator_t it =
+			xcb_render_query_pict_formats_formats_iterator(formats);
+			formats && it.rem; xcb_render_pictforminfo_next(&it)) {
+		if (it.data->depth == 24 && it.data->type == XCB_RENDER_PICT_TYPE_DIRECT) {
+			rgb = it.data->id;
+		}
+	}
+	free(formats);
+	// a 4x1 source, repeating: 1 2 3 4 in blue
+	xcb_pixmap_t sp = xcb_generate_id(c), dp = xcb_generate_id(c);
+	xcb_create_pixmap(c, 24, sp, s->root, 4, 1);
+	xcb_create_pixmap(c, 24, dp, s->root, 12, 1);
+	xcb_gcontext_t gc = xcb_generate_id(c);
+	uint32_t zero = 0;
+	xcb_create_gc(c, gc, sp, XCB_GC_FOREGROUND, &zero);
+	for (uint32_t i = 0; i < 4; i++) {
+		uint32_t color = i + 1;
+		xcb_change_gc(c, gc, XCB_GC_FOREGROUND, &color);
+		xcb_poly_fill_rectangle(c, sp, gc, 1, &(xcb_rectangle_t){(int16_t)i, 0, 1, 1});
+	}
+	xcb_render_picture_t src = xcb_generate_id(c), dst = xcb_generate_id(c);
+	uint32_t repeat = XCB_RENDER_REPEAT_NORMAL;
+	xcb_render_create_picture(c, src, sp, rgb, XCB_RENDER_CP_REPEAT, &repeat);
+	xcb_render_create_picture(c, dst, dp, rgb, 0, NULL);
+	// a rectangle x 5..9, y 0..1, its left edge starting above it
+	xcb_render_trapezoid_t trap = {
+		.top = 0, .bottom = 1 << 16,
+		.left = {{5 * 65536, -5 * 65536}, {5 * 65536, 6 * 65536}},
+		.right = {{9 * 65536, -5 * 65536}, {9 * 65536, 6 * 65536}},
+	};
+	xcb_render_trapezoids(c, XCB_RENDER_PICT_OP_SRC, src, dst, 0, 0, 0, 1, &trap);
+	xcb_get_image_reply_t *img = xcb_get_image_reply(c,
+		xcb_get_image(c, XCB_IMAGE_FORMAT_Z_PIXMAP, dp, 5, 0, 4, 1, ~0u), NULL);
+	CHECK(img != NULL);
+	if (img) {
+		const uint32_t *px = (const uint32_t *)xcb_get_image_data(img);
+		CHECK((px[0] & 0xff) == 1 && (px[1] & 0xff) == 2 && (px[2] & 0xff) == 3
+			&& (px[3] & 0xff) == 4);
+	}
+	free(img);
+	xcb_render_free_picture(c, src);
+	xcb_render_free_picture(c, dst);
+	xcb_free_gc(c, gc);
+	xcb_free_pixmap(c, sp);
+	xcb_free_pixmap(c, dp);
+}
+
 // replies that used to be missing: a client waiting on them would hang or die
 static void test_cursor_names(void) {
 	xcb_xfixes_get_cursor_name_reply_t *name = xcb_xfixes_get_cursor_name_reply(c,
@@ -261,6 +314,7 @@ int main(void) {
 	test_window_shape();
 	test_gc_clip();
 	test_picture_clip();
+	test_trapezoid_source();
 	test_cursor_names();
 	xcb_disconnect(c);
 	if (failures) {

@@ -692,6 +692,12 @@ static void shapes(struct xs_client *client, const struct xin *in, uint8_t minor
 	if (minor == 10) {
 		size_t n = body / sizeof(pixman_trapezoid_t);
 		const pixman_trapezoid_t *traps = (const pixman_trapezoid_t *)data;
+		// the source lines up with the first trapezoid's first point, not
+		// the destination's origin (Xorg's fbTrapezoids)
+		if (n > 0) {
+			sx -= pixman_fixed_to_int(traps[0].left.p1.x);
+			sy -= pixman_fixed_to_int(traps[0].left.p1.y);
+		}
 		for (size_t i = 0; i < n; i++) {
 			grow(box, traps[i].left.p1.x < traps[i].left.p2.x ? traps[i].left.p1.x
 				: traps[i].left.p2.x, traps[i].top);
@@ -720,6 +726,11 @@ static void shapes(struct xs_client *client, const struct xin *in, uint8_t minor
 					? (pixman_triangle_t){p[i], p[i + 1], p[i + 2]}
 					: (pixman_triangle_t){p[0], p[i + 1], p[i + 2]};
 			}
+		}
+		// the source lines up with the first point (Xorg's fbTriangles)
+		if (tris && n > 0) {
+			sx -= pixman_fixed_to_int(tris[0].p1.x);
+			sy -= pixman_fixed_to_int(tris[0].p1.y);
 		}
 		for (size_t i = 0; tris && i < n; i++) {
 			grow(box, tris[i].p1.x, tris[i].p1.y);

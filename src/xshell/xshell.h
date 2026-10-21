@@ -75,6 +75,10 @@ struct flame_xwindow {
 	struct flame_tree *float_tree; // floating ones
 	struct flame_buffer_node *content;
 	int width, height; // what X thinks its size is
+	// _GTK_FRAME_EXTENTS: its shadow, drawn inside it around the window
+	// itself. flame tiles, floats and borders what's inside, X has all of it
+	int ext_left, ext_right, ext_top, ext_bottom;
+	int content_x, content_y; // where its picture starts in it (Present's offset)
 	struct wlr_box placed; // where flame put it last, layout coords
 	bool parked; // on a workspace that doesn't show: X has it out of sight
 

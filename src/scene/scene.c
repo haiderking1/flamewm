@@ -330,6 +330,10 @@ static struct flame_node *node_at(struct flame_node *node, int x, int y, double 
 		if (!buffer->texture || !wlr_box_contains_point(&area, lx, ly)) {
 			return NULL;
 		}
+		if (buffer->impl && buffer->impl->accepts_input
+				&& !buffer->impl->accepts_input(buffer, lx - x, ly - y)) {
+			return NULL;
+		}
 		*surface = NULL;
 		*sx = lx - x;
 		*sy = ly - y;

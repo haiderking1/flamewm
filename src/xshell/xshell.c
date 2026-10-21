@@ -404,11 +404,24 @@ static void retire(struct flame_xwindow *window, struct xpresent *xp) {
 	release_when_idle(window->xshell, xp);
 }
 
+// the picture where it goes in the view: X's window starts left and top of
+// what flame shows by its shadow
+static void place_content(struct flame_xwindow *window) {
+	int x = window->content_x, y = window->content_y;
+	if (!window->floating) {
+		x -= window->ext_left;
+		y -= window->ext_top;
+	}
+	scene_node_set_position(&window->content->node, x, y);
+}
+
 static void show(struct flame_xwindow *window, struct xpresent *xp) {
 	struct xpresent *old = window->shown;
 	window->shown = xp;
 	wl_list_init(&xp->link);
-	scene_node_set_position(&window->content->node, xp->x_off, xp->y_off);
+	window->content_x = xp->x_off;
+	window->content_y = xp->y_off;
+	place_content(window);
 	scene_buffer_set(window->content, xp->pixmap->texture, xp, xp->pixmap->width,
 		xp->pixmap->height, xp->pixmap->opaque, xp->acquire, xp->acquire_point);
 	if (old) {
@@ -812,8 +825,18 @@ static void buffer_sampled(struct flame_buffer_node *node, struct flame_frame *f
 	xp->render_point = render_point;
 }
 
+// what the window cut out of its input shape (a toolkit's shadow) goes to
+// whatever is below it
+static bool buffer_accepts_input(struct flame_buffer_node *node, double x, double y) {
+	struct flame_xwindow *window = node->data;
+	struct xs_window *xw = xserver_window(window->xshell->xserver, window->id);
+	return !xw || xserver_window_accepts_input(xw, (int)x + window->content_x,
+		(int)y + window->content_y);
+}
+
 static const struct flame_buffer_node_impl buffer_impl = {
 	.sampled = buffer_sampled,
+	.accepts_input = buffer_accepts_input,
 };
 
 // ---- X top-levels as flame views ----
@@ -829,10 +852,21 @@ static struct xs_window *x_of(struct flame_xwindow *window) {
 	return xserver_window(window->xshell->xserver, window->id);
 }
 
+// what flame shows of it (inside the shadow) to X's size and back
+static int x_width(const struct flame_xwindow *window, int width) {
+	return width + window->ext_left + window->ext_right;
+}
+
+static int x_height(const struct flame_xwindow *window, int height) {
+	return height + window->ext_top + window->ext_bottom;
+}
+
 static uint32_t xview_configure(struct flame_view *view, int width, int height,
 		bool fullscreen) {
 	struct flame_xwindow *window = from_view(view);
 	struct xs_window *x = x_of(window);
+	width = x_width(window, width);
+	height = x_height(window, height);
 	if (x && width > 0 && height > 0 && (x->width != width || x->height != height)) {
 		xserver_move_window(window->xshell->xserver, x, x->x, x->y, width, height);
 	}
@@ -851,8 +885,8 @@ static void xview_set_display_size(struct flame_view *view, int width, int heigh
 
 static void xview_content_size(struct flame_view *view, int *width, int *height) {
 	struct flame_xwindow *window = from_view(view);
-	*width = window->width;
-	*height = window->height;
+	*width = window->width - window->ext_left - window->ext_right;
+	*height = window->height - window->ext_top - window->ext_bottom;
 }
 
 static struct wlr_box xview_window_geometry(struct flame_view *view, bool pending) {
@@ -914,12 +948,14 @@ static void xview_placed(struct flame_view *view, struct wlr_box content) {
 	struct xs_window *x = x_of(window);
 	window->placed = content;
 	window->parked = false; // placed: it's on the workspace that shows
+	// X's window around it, its shadow outside what flame shows
+	int width = x_width(window, content.width), height = x_height(window, content.height);
 	if (x) {
-		xserver_move_window(window->xshell->xserver, x, content.x, content.y,
-			content.width > 0 ? content.width : 1, content.height > 0 ? content.height : 1);
+		xserver_move_window(window->xshell->xserver, x, content.x - window->ext_left,
+			content.y - window->ext_top, width > 0 ? width : 1, height > 0 ? height : 1);
 	}
-	window->width = content.width;
-	window->height = content.height;
+	window->width = width;
+	window->height = height;
 }
 
 static const struct flame_view_impl xview_impl = {
@@ -939,6 +975,33 @@ static const struct flame_view_impl xview_impl = {
 
 static bool is_xview(struct flame_view *view) {
 	return view && view->impl == &xview_impl;
+}
+
+// _GTK_FRAME_EXTENTS: left, right, top, bottom. true when they changed.
+// menus and tooltips place themselves, shadow and all
+static bool read_extents(struct flame_xshell *xshell, struct flame_xwindow *window,
+		struct xs_window *x) {
+	int e[4] = {0, 0, 0, 0};
+	struct xs_property *p = window->floating ? NULL
+		: xserver_property(xshell->xserver, x, "_GTK_FRAME_EXTENTS");
+	if (p && p->format == 32 && p->units >= 4) {
+		uint32_t v[4];
+		memcpy(v, p->data, sizeof(v));
+		for (int i = 0; i < 4; i++) {
+			// a shadow, not most of the window
+			e[i] = v[i] < 256 ? (int)v[i] : 0;
+		}
+	}
+	if (2 * (e[0] + e[1]) >= x->width || 2 * (e[2] + e[3]) >= x->height) {
+		e[0] = e[1] = e[2] = e[3] = 0;
+	}
+	bool changed = e[0] != window->ext_left || e[1] != window->ext_right
+		|| e[2] != window->ext_top || e[3] != window->ext_bottom;
+	window->ext_left = e[0];
+	window->ext_right = e[1];
+	window->ext_top = e[2];
+	window->ext_bottom = e[3];
+	return changed;
 }
 
 // managed windows that float instead of tiling: dialogs, utility windows,
@@ -1012,6 +1075,7 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	}
 	wl_list_insert(xshell->windows.prev, &window->link);
 	ewmh_window_new(xshell, window, x);
+	read_extents(xshell, window, x);
 	if (!window->floating) {
 		window->view.float_wanted = x_wants_float(xshell, x);
 		desktop_map_view(&server->desktop, &window->view);
@@ -1105,7 +1169,8 @@ void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 		}
 	}
 	// a new key every time: the frame repaints the window
-	scene_node_set_position(&window->content->node, 0, 0);
+	window->content_x = window->content_y = 0;
+	place_content(window);
 	scene_buffer_set(window->content, window->core_texture,
 		(const void *)++window->core_serial, pixman_image_get_width(image),
 		pixman_image_get_height(image), pixman_image_get_format(image) != PIXMAN_a8r8g8b8,
@@ -1229,8 +1294,8 @@ static void x_stack_update(struct flame_xshell *xshell) {
 			xserver_move_window(xserver, x, PARKED, PARKED, x->width, x->height);
 		} else if (shown && window->parked && window->placed.width > 0) {
 			window->parked = false;
-			xserver_move_window(xserver, x, window->placed.x, window->placed.y, x->width,
-				x->height);
+			xserver_move_window(xserver, x, window->placed.x - window->ext_left,
+				window->placed.y - window->ext_top, x->width, x->height);
 		}
 	}
 	// only what's out of place moves: this runs on every change, and moving
@@ -1300,13 +1365,23 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 				window_create(xshell, x);
 			} else if (window->floating) {
 				scene_node_set_position(&window->float_tree->node, x->x, x->y);
-			} else if (window->view.floating && (x->width != window->width
-					|| x->height != window->height)) {
-				// a floating dialog resized itself: it gets that size
-				window->width = x->width;
-				window->height = x->height;
-				floating_content_resized(&xshell->server->desktop, &window->view, x->width,
-					x->height);
+			} else {
+				if (read_extents(xshell, window, x) && window->placed.width > 0
+						&& !window->parked) {
+					// its shadow changed (a tile has none): X's window moves
+					// around what shows, which stays where it is
+					xview_placed(&window->view, window->placed);
+					place_content(window);
+				}
+				if (window->view.floating && (x->width != window->width
+						|| x->height != window->height)) {
+					// a floating dialog resized itself: it gets that size
+					window->width = x->width;
+					window->height = x->height;
+					floating_content_resized(&xshell->server->desktop, &window->view,
+						x->width - window->ext_left - window->ext_right,
+						x->height - window->ext_top - window->ext_bottom);
+				}
 			}
 		} else if (window) {
 			window_destroy(window);
