@@ -348,6 +348,7 @@ struct flame_xserver {
 	// clients have seen the valuators since the pointer came in
 	struct wl_list xi_selects;
 	struct wl_list shape_selects; // shape.c's
+	struct wl_list damages; // damage.c's
 	double scroll[2], scroll_notches[2];
 	bool scroll_primed;
 	// XKB, see xkb.c: flame's keymap worked out for X, the keyboard's state,

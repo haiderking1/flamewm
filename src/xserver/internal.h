@@ -95,6 +95,10 @@ enum {
 // windows that aren't rectangles, see shape.c
 #define XS_SHAPE_OPCODE 146
 #define XS_SHAPE_FIRST_EVENT 92
+// which pixels changed, see damage.c
+#define XS_DAMAGE_OPCODE 147
+#define XS_DAMAGE_FIRST_EVENT 93
+#define XS_DAMAGE_FIRST_ERROR 161
 
 // ---- talking back (xserver.c) ----
 
@@ -363,6 +367,27 @@ bool xs_shape_contains(const struct xs_window *window, int x, int y);
 void xs_shape_get(struct xs_window *window, int kind, pixman_region32_t *out);
 void xs_shape_set(struct flame_xserver *xserver, struct xs_window *window, int kind,
 	pixman_region32_t *src);
+
+// ---- DAMAGE (damage.c) ----
+
+void xs_damage_request(struct xs_client *client, const struct xin *request);
+// pixels of top's backing changed (backing coords): its windows and the
+// root hear
+void xs_damage_backing(struct flame_xserver *xserver, struct xs_window *top,
+	const pixman_region32_t *region);
+// pixmap coords
+void xs_damage_pixmap(struct flame_xserver *xserver, struct xs_pixmap *pixmap,
+	const pixman_region32_t *region);
+// all of it, a gpu drawn frame came in (Present)
+void xs_damage_window_whole(struct flame_xserver *xserver, struct xs_window *window);
+// what the screen shows changed there, root coords: a top-level went or moved
+void xs_damage_root(struct flame_xserver *xserver, int x, int y, int width, int height);
+// the damages on it go with it
+void xs_damage_drawable_gone(struct flame_xserver *xserver, uint32_t drawable);
+void xs_damage_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+// the ids of damages from base's client, how many (out NULL: just count)
+size_t xs_damage_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
+bool xs_damage_id_in_use(struct flame_xserver *xserver, uint32_t id);
 void xs_shape_window_gone(struct flame_xserver *xserver, struct xs_window *window);
 void xs_shape_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 

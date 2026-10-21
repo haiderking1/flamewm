@@ -637,6 +637,7 @@ static const struct extension {
 	{"DPMS", XS_DPMS_OPCODE, 0, 0},
 	{"XTEST", XS_XTEST_OPCODE, 0, 0},
 	{"SHAPE", XS_SHAPE_OPCODE, XS_SHAPE_FIRST_EVENT, 0},
+	{"DAMAGE", XS_DAMAGE_OPCODE, XS_DAMAGE_FIRST_EVENT, XS_DAMAGE_FIRST_ERROR},
 };
 
 static void query_extension(struct xs_client *client, const struct xin *in) {
@@ -1018,6 +1019,9 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		break;
 	case XS_SHAPE_OPCODE:
 		xs_shape_request(client, in);
+		break;
+	case XS_DAMAGE_OPCODE:
+		xs_damage_request(client, in);
 		break;
 	// accepted, nothing to do: grabs letting go, fonts and text (no core
 	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs

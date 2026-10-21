@@ -191,6 +191,11 @@ static void present_pixmap(struct xs_client *client, const struct xin *in, bool 
 	if (xserver->hooks.present) {
 		xserver->hooks.present(xserver->hooks.data, &present);
 	}
+	// drawn on the gpu, it's all new as far as anyone can tell
+	struct xs_window *shown = xserver_window(xserver, present.window);
+	if (shown) {
+		xs_damage_window_whole(xserver, shown);
+	}
 }
 
 void xs_present_request(struct xs_client *client, const struct xin *in) {

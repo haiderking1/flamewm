@@ -192,6 +192,7 @@ static void change_picture(struct xs_client *client, struct picture *picture, ui
 struct view {
 	pixman_image_t *image;
 	struct xs_window *top; // windows: where damage goes
+	struct xs_pixmap *pixmap; // pixmaps: DAMAGE hears
 	int dx, dy; // the drawable in the backing
 	pixman_region32_t shows; // drawable coords, what may be drawn on
 };
@@ -240,6 +241,7 @@ static bool view_get(struct flame_xserver *xserver, struct picture *picture, str
 				return false;
 			}
 			pixels = pixmap->image;
+			v->pixmap = pixmap;
 			w = pixmap->width;
 			h = pixmap->height;
 			pixman_region32_init_rect(&v->shows, 0, 0, (unsigned)w, (unsigned)h);
@@ -289,12 +291,17 @@ static bool dest_get(struct flame_xserver *xserver, struct picture *picture, str
 // pixels changed in box (drawable coords): flame hears about windows
 static void dest_damage(struct flame_xserver *xserver, struct view *v, int x1, int y1, int x2,
 		int y2) {
-	if (!v->top || x2 <= x1 || y2 <= y1) {
+	if ((!v->top && !v->pixmap) || x2 <= x1 || y2 <= y1) {
 		return;
 	}
 	pixman_region32_t region;
 	pixman_region32_init_rect(&region, x1, y1, (unsigned)(x2 - x1), (unsigned)(y2 - y1));
 	pixman_region32_intersect(&region, &region, &v->shows);
+	if (v->pixmap) {
+		xs_damage_pixmap(xserver, v->pixmap, &region);
+		pixman_region32_fini(&region);
+		return;
+	}
 	pixman_region32_translate(&region, v->dx, v->dy);
 	xs_damage(xserver, v->top, &region);
 	pixman_region32_fini(&region);
