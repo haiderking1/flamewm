@@ -1,5 +1,5 @@
-// XINERAMA, MIT-SCREEN-SAVER, DPMS, XTEST against flame's X server, run by
-// the harness: make test
+// XINERAMA, MIT-SCREEN-SAVER, DPMS, XTEST, XI 1, GLX pbuffers against
+// flame's X server, run by the harness: make test
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <xcb/dpms.h>
+#include <xcb/glx.h>
 #include <xcb/screensaver.h>
 #include <xcb/shape.h>
 #include <xcb/xcb.h>
@@ -133,6 +134,78 @@ static void test_xi1(xcb_connection_t *c) {
 	free(r);
 	free(error);
 	CHECK(!xcb_request_check(c, xcb_input_close_device_checked(c, 4)));
+
+	// at least a byte after the names: chromium's parser reads one more
+	// and aborts every CEF and electron app on X when it isn't there
+	xcb_input_list_input_devices_reply_t *list = xcb_input_list_input_devices_reply(c,
+		xcb_input_list_input_devices(c), NULL);
+	CHECK(list && list->devices_len == 4);
+	if (list) {
+		xcb_str_iterator_t name = xcb_input_list_input_devices_names_iterator(list);
+		const char *end = (const char *)name.data;
+		for (; name.rem; xcb_str_next(&name)) {
+			end = xcb_str_name(name.data) + xcb_str_name_length(name.data);
+		}
+		CHECK(end - (const char *)list < 32 + 4 * (long)list->length);
+	}
+	free(list);
+
+	// device properties: none, no error (chromium's touch setup asks)
+	xcb_input_get_device_property_reply_t *prop = xcb_input_get_device_property_reply(c,
+		xcb_input_get_device_property(c, XCB_ATOM_STRING, XCB_ATOM_ANY, 0, 1, 4, 0), NULL);
+	CHECK(prop && prop->type == XCB_NONE && prop->device_id == 4);
+	free(prop);
+	xcb_input_list_device_properties_reply_t *props = xcb_input_list_device_properties_reply(c,
+		xcb_input_list_device_properties(c, 4), NULL);
+	CHECK(props && props->num_atoms == 0);
+	free(props);
+	error = NULL;
+	prop = xcb_input_get_device_property_reply(c,
+		xcb_input_get_device_property(c, XCB_ATOM_STRING, XCB_ATOM_ANY, 0, 1, 42, 0), &error);
+	CHECK(!prop && error); // no such device
+	free(prop);
+	free(error);
+}
+
+// pbuffers, what ANGLE (chromium's GL) makes current first thing
+static void test_glx_pbuffer(xcb_connection_t *c) {
+	xcb_glx_get_fb_configs_reply_t *f = xcb_glx_get_fb_configs_reply(c,
+		xcb_glx_get_fb_configs(c, 0), NULL);
+	CHECK(f && f->num_FB_configs > 0);
+	uint32_t config = 0;
+	if (f) {
+		uint32_t *pairs = xcb_glx_get_fb_configs_property_list(f);
+		for (uint32_t i = 0; i < f->num_properties; i++) {
+			if (pairs[2 * i] == 0x8013) { // GLX_FBCONFIG_ID
+				config = pairs[2 * i + 1];
+			}
+		}
+	}
+	free(f);
+	xcb_glx_pbuffer_t pbuffer = xcb_generate_id(c);
+	uint32_t attribs[] = {0x8041, 64, 0x8040, 32}; // GLX_PBUFFER_WIDTH, _HEIGHT
+	CHECK(!xcb_request_check(c, xcb_glx_create_pbuffer_checked(c, 0, config, pbuffer, 2,
+		attribs)));
+	xcb_glx_get_drawable_attributes_reply_t *a = xcb_glx_get_drawable_attributes_reply(c,
+		xcb_glx_get_drawable_attributes(c, pbuffer), NULL);
+	uint32_t width = 0, height = 0, type = 0;
+	if (a) {
+		uint32_t *pairs = xcb_glx_get_drawable_attributes_attribs(a);
+		for (uint32_t i = 0; i < a->num_attribs; i++) {
+			width = pairs[2 * i] == 0x801d ? pairs[2 * i + 1] : width;
+			height = pairs[2 * i] == 0x801e ? pairs[2 * i + 1] : height;
+			type = pairs[2 * i] == 0x8010 ? pairs[2 * i + 1] : type;
+		}
+	}
+	CHECK(width == 64 && height == 32 && type == 4);
+	free(a);
+	CHECK(!xcb_request_check(c, xcb_glx_destroy_pbuffer_checked(c, pbuffer)));
+	xcb_generic_error_t *error = NULL;
+	a = xcb_glx_get_drawable_attributes_reply(c, xcb_glx_get_drawable_attributes(c, pbuffer),
+		&error);
+	CHECK(!a && error); // gone
+	free(a);
+	free(error);
 }
 
 // a client can't take flame's own windows away: the selection window survives
@@ -219,6 +292,7 @@ int main(void) {
 	test_xtest(c, s);
 	test_shape(c, s);
 	test_xi1(c);
+	test_glx_pbuffer(c);
 	test_flame_windows(c, s); // last: every window goes
 	xcb_disconnect(c);
 	if (failures) {
