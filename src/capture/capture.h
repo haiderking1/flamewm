@@ -19,6 +19,9 @@ struct flame_capture {
 
 	struct wl_listener desktop_changed;
 	struct wl_listener new_request;
+	// something drew: anyone waiting on a window looks right away
+	struct wl_listener scene_commit, scene_changed;
+	struct wl_event_source *poke;
 };
 
 bool capture_init(struct flame_capture *capture, struct flame_server *server);
