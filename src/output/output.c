@@ -23,6 +23,15 @@ static bool before_render(void *data, int64_t target) {
 	return anims_tick(&output->server->anims, target);
 }
 
+// the workspace showing has a window fullscreen on screen. workspaces are laid
+// out on the primary output, the others never have one
+static bool fullscreen_shown(void *data) {
+	struct flame_output *output = data;
+	struct flame_desktop *desktop = &output->server->desktop;
+	struct flame_view *view = desktop->active ? desktop->active->fullscreen : NULL;
+	return view && view->fullscreen_shown && output == outputs_primary(&output->server->outputs);
+}
+
 // windows a transaction waits on may be hidden, they still need callbacks to
 // draw what it's waiting for. this keeps them coming once a refresh: only new
 // cycles count, the revisits in between would turn this into a busy loop
@@ -121,6 +130,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 		.data = output,
 		.before_render = before_render,
 		.callbacks_sent = callbacks_sent,
+		.fullscreen = fullscreen_shown,
 	};
 	if (!output->background || !frame_init(&output->frames, &server->render, wlr_output,
 			server->backend.session, &output->box, hooks)) {
