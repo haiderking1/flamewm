@@ -43,11 +43,13 @@ static void fake_input(struct xs_client *client, const struct xin *in) {
 	case 6: { // MotionNotify, detail 1: relative
 		int x = xin16s(in, 24), y = xin16s(in, 26);
 		if (detail) {
-			x += xserver->pointer_x;
-			y += xserver->pointer_y;
+			int px, py;
+			xs_pointer_position(xserver, &px, &py);
+			x += px;
+			y += py;
 		}
-		struct xs_window *top = xs_window_child_at(xserver->root, x, y);
-		xserver_pointer_motion(xserver, top, x, y, state, time);
+		// flame's cursor moves with it, X hears it from there
+		xs_warp_pointer(xserver, NULL, x, y);
 		break;
 	}
 	default:

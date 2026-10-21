@@ -52,6 +52,20 @@ int xshell_pointer_to_x(const struct flame_xshell *xshell, double v) {
 	return (int)floor(v * xshell->scale);
 }
 
+bool xshell_pointer_confine(const struct flame_xshell *xshell, double *x0, double *y0,
+		double *x1, double *y1) {
+	int x, y, width, height;
+	if (!xserver_pointer_confine(xshell->xserver, &x, &y, &width, &height)) {
+		return false;
+	}
+	// the middle of its edge pixels: anywhere between floors into it
+	*x0 = xshell_from_x(xshell, x + 0.5);
+	*y0 = xshell_from_x(xshell, y + 0.5);
+	*x1 = xshell_from_x(xshell, x + width - 0.5);
+	*y1 = xshell_from_x(xshell, y + height - 0.5);
+	return true;
+}
+
 // the middle of the X pixel the pointer's in, layout coords: who's under the
 // pointer is decided there, so flame and X agree to the pixel. a pointer
 // at 41.7 is in X's row 41, it can't be over a window that starts at 42

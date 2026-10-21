@@ -286,6 +286,10 @@ struct xs_hooks {
 	void (*focus_changed)(void *data, uint32_t focus);
 	// where the pointer is, root coords
 	void (*pointer)(void *data, double *x, double *y);
+	// a client moved the pointer (WarpPointer, XTest) to x, y root coords:
+	// flame's cursor goes there, and the motion comes back through
+	// xserver_pointer_motion like the mouse's would
+	void (*warp_pointer)(void *data, int x, int y);
 	// DRI3: a render node for the client to allocate on, -1 for none
 	int (*open_device)(void *data);
 	// DRI3: the modifiers flame can show format with
@@ -393,6 +397,7 @@ struct flame_xserver {
 		uint32_t window;
 		bool owner_events, xi;
 		uint32_t mask;
+		uint32_t confine; // the pointer's: a window it stays in, 0 for none
 	} pointer_grab, keyboard_grab;
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
@@ -481,6 +486,10 @@ void xserver_set_focus(struct flame_xserver *xserver, uint32_t focus);
 // an X client holds the pointer (a menu open): it gets every pointer event
 // wherever the pointer is, and the pointer moves no focus meanwhile
 bool xserver_pointer_grabbed(const struct flame_xserver *xserver);
+// the grab confines the pointer (GrabPointer's confine_to, wine clipping the
+// cursor to a game): to this rectangle, root coords
+bool xserver_pointer_confine(const struct flame_xserver *xserver, int *x, int *y, int *width,
+	int *height);
 // flame as the window manager gives a top-level the keyboard, ICCCM's way:
 // SetInputFocus unless WM_HINTS says it takes no input, WM_TAKE_FOCUS when
 // it's in WM_PROTOCOLS (it sets the focus itself, wine does). nothing when
