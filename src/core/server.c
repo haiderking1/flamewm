@@ -57,8 +57,16 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	setenv("XDG_SESSION_TYPE", "wayland", true);
 	// before anything gets started, they all inherit $FLAMEWM_SOCKET
 	ipc_start(&server->ipc, server->socket);
-	// steam's X side, for launchers that hand it over (tools/steam)
+	// flame's own X server, $DISPLAY for everyone
 	xbridge_start(&server->xbridge);
+	// apps started by the session (launchers through systemd, dbus
+	// activation) get the same, like sway's systemd integration. only on a
+	// real seat: a nested or headless flame mustn't take over the session's
+	if (server->backend.session) {
+		const char *const argv[] = {"dbus-update-activation-environment", "--systemd",
+			"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", NULL};
+		spawn(argv);
+	}
 
 	wlr_log(WLR_INFO, "flamewm running on WAYLAND_DISPLAY=%s", server->socket);
 	server_keymap_names(server);
