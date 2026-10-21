@@ -165,6 +165,59 @@ static void test_xi1(xcb_connection_t *c) {
 	CHECK(!prop && error); // no such device
 	free(prop);
 	free(error);
+
+	// the rest of XI1 answers like Xorg: wine's desktop process asks for the
+	// button mapping and dies on an error
+	xcb_input_get_device_button_mapping_reply_t *map =
+		xcb_input_get_device_button_mapping_reply(c,
+			xcb_input_get_device_button_mapping(c, 4), NULL);
+	CHECK(map && map->map_size >= 3 && xcb_input_get_device_button_mapping_map(map)[0] == 1
+		&& xcb_input_get_device_button_mapping_map(map)[2] == 3);
+	free(map);
+	error = NULL;
+	map = xcb_input_get_device_button_mapping_reply(c,
+		xcb_input_get_device_button_mapping(c, 5), &error);
+	CHECK(!map && error && error->error_code == XCB_MATCH); // a keyboard has no buttons
+	free(map);
+	free(error);
+	xcb_input_get_device_modifier_mapping_reply_t *mods =
+		xcb_input_get_device_modifier_mapping_reply(c,
+			xcb_input_get_device_modifier_mapping(c, 5), NULL);
+	CHECK(mods && mods->keycodes_per_modifier >= 1);
+	free(mods);
+	xcb_input_get_device_key_mapping_reply_t *keys = xcb_input_get_device_key_mapping_reply(c,
+		xcb_input_get_device_key_mapping(c, 5, 38, 1), NULL);
+	CHECK(keys && keys->keysyms_per_keycode >= 1 && xcb_input_get_device_key_mapping_keysyms(
+		keys)[0] == 'a');
+	free(keys);
+	xcb_input_get_device_focus_reply_t *focus = xcb_input_get_device_focus_reply(c,
+		xcb_input_get_device_focus(c, 5), NULL);
+	CHECK(focus != NULL);
+	free(focus);
+	xcb_input_query_device_state_reply_t *state = xcb_input_query_device_state_reply(c,
+		xcb_input_query_device_state(c, 4), NULL);
+	CHECK(state && state->num_classes == 2);
+	free(state);
+	xcb_input_get_feedback_control_reply_t *feedback = xcb_input_get_feedback_control_reply(c,
+		xcb_input_get_feedback_control(c, 4), NULL);
+	CHECK(feedback && feedback->num_feedbacks == 0);
+	free(feedback);
+	xcb_input_grab_device_reply_t *grab = xcb_input_grab_device_reply(c,
+		xcb_input_grab_device(c, xcb_setup_roots_iterator(xcb_get_setup(c)).data->root,
+			XCB_CURRENT_TIME, 0, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, 0, 4, NULL), NULL);
+	CHECK(grab && grab->status == XCB_GRAB_STATUS_SUCCESS);
+	free(grab);
+	CHECK(!xcb_request_check(c, xcb_input_ungrab_device_checked(c, XCB_CURRENT_TIME, 4)));
+	xcb_input_get_device_motion_events_reply_t *motion =
+		xcb_input_get_device_motion_events_reply(c,
+			xcb_input_get_device_motion_events(c, 0, XCB_CURRENT_TIME, 4), NULL);
+	CHECK(motion && motion->num_events == 0);
+	free(motion);
+	// and the core pointer has as many buttons as XI says
+	xcb_get_pointer_mapping_reply_t *core = xcb_get_pointer_mapping_reply(c,
+		xcb_get_pointer_mapping(c), NULL);
+	CHECK(core && core->map_len == 9);
+	free(core);
 }
 
 // a configure that changes nothing sends nothing, like Xorg: toolkits take

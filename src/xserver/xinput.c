@@ -35,7 +35,7 @@
 // XI1's GetExtensionVersion, libXi asks it before anything else
 #define GET_EXTENSION_VERSION 1
 
-#define BUTTONS 9
+#define BUTTONS XS_POINTER_BUTTONS
 // x, y, then scrolling: vertical, horizontal
 #define VALUATORS 4
 #define SCROLL_INCREMENT 15 // a wheel notch, in wayland's axis units
@@ -647,10 +647,253 @@ static void get_property(struct xs_client *client) {
 	xs_reply_send(client, &out);
 }
 
+// ---- XInput 1 ----
+
+// what libXi's XI1 calls get, the way Xorg answers them. wine's desktop
+// process asks for the button mapping and dies on an error, taking the
+// clipping and the foreground window down with it. XI1's events never
+// come (XI2 has replaced them), so its grabs, focus and feedback have
+// nothing to change
+
+static bool is_pointer(uint8_t device) {
+	return device == MASTER_POINTER || device == SLAVE_POINTER;
+}
+
+// the device the request is about exists and is the kind asked: BadDevice,
+// BadMatch otherwise
+static bool xi1_device(struct xs_client *client, uint8_t device, uint8_t minor, int pointer) {
+	if (!device_exists(device)) {
+		xs_error(client, BAD_DEVICE, device, XS_XI_OPCODE, minor);
+		return false;
+	}
+	if (pointer >= 0 && is_pointer(device) != (pointer == 1)) {
+		xs_error(client, XS_ERROR_MATCH, device, XS_XI_OPCODE, minor);
+		return false;
+	}
+	return true;
+}
+
+#define ANY_DEVICE (-1)
+#define POINTERS 1
+#define KEYBOARDS 0
+
+// a reply with just a status (or a count) in its first byte
+static void xi1_status(struct xs_client *client, uint8_t minor, uint8_t status) {
+	struct xout out;
+	xs_reply_begin(client, &out, minor);
+	xout8(&out, status);
+	xout_zero(&out, 23);
+	xs_reply_send(client, &out);
+}
+
+static void query_device_state(struct xs_client *client, uint8_t device) {
+	struct flame_xserver *xserver = client->xserver;
+	struct xout out;
+	xs_reply_begin(client, &out, 30);
+	xout8(&out, is_pointer(device) ? 2 : 1); // classes
+	xout_zero(&out, 23);
+	if (is_pointer(device)) {
+		uint8_t buttons[32] = {0};
+		for (int b = 1; b <= 5; b++) {
+			if (xserver->state & (1u << (7 + b))) {
+				buttons[b / 8] |= (uint8_t)(1u << (b % 8));
+			}
+		}
+		xout8(&out, 1); // ButtonState
+		xout8(&out, 36);
+		xout8(&out, BUTTONS);
+		xout8(&out, 0);
+		xout_bytes(&out, buttons, sizeof(buttons));
+		int x, y;
+		xs_pointer_position(xserver, &x, &y);
+		xout8(&out, 2); // ValuatorState
+		xout8(&out, 4 + 4 * VALUATORS);
+		xout8(&out, VALUATORS);
+		xout8(&out, 0); // relative
+		for (int axis = 0; axis < VALUATORS; axis++) {
+			xout32(&out, (uint32_t)(axis == 0 ? x : axis == 1 ? y : 0));
+		}
+	} else {
+		xout8(&out, 0); // KeyState: none held, as QueryKeymap says
+		xout8(&out, 36);
+		xout8(&out, 248);
+		xout8(&out, 0);
+		xout_zero(&out, 32);
+	}
+	xs_reply_send(client, &out);
+}
+
+// GetDeviceControl: control, device. resolution for pointers, enabled for all
+static void get_device_control(struct xs_client *client, const struct xin *in) {
+	struct flame_xserver *xserver = client->xserver;
+	uint16_t control = xin16(in, 4);
+	uint8_t device = xin8(in, 6);
+	if (!xi1_device(client, device, 34, control == 1 ? POINTERS : ANY_DEVICE)) {
+		return;
+	}
+	struct xout out;
+	if (control == 1) { // DEVICE_RESOLUTION
+		xs_reply_begin(client, &out, 34);
+		xout8(&out, 0); // Success
+		xout_zero(&out, 23);
+		xout16(&out, 1);
+		xout16(&out, (uint16_t)(8 + 12 * VALUATORS));
+		xout32(&out, VALUATORS);
+		for (int axis = 0; axis < VALUATORS; axis++) {
+			xout32(&out, 1);
+		}
+		for (int axis = 0; axis < VALUATORS; axis++) {
+			xout32(&out, 0);
+		}
+		for (int axis = 0; axis < VALUATORS; axis++) {
+			xout32(&out, (uint32_t)(axis == 0 ? xserver->root->width : axis == 1
+				? xserver->root->height : 0));
+		}
+		xs_reply_send(client, &out);
+	} else if (control == 5) { // DEVICE_ENABLE
+		xs_reply_begin(client, &out, 34);
+		xout8(&out, 0);
+		xout_zero(&out, 23);
+		xout16(&out, 5);
+		xout16(&out, 8);
+		xout8(&out, 1); // enabled
+		xout_zero(&out, 3);
+		xs_reply_send(client, &out);
+	} else {
+		xs_error(client, XS_ERROR_VALUE, control, XS_XI_OPCODE, 34);
+	}
+}
+
+// true: an XI1 request, answered
+static bool xi1_request(struct xs_client *client, const struct xin *in, uint8_t minor) {
+	struct flame_xserver *xserver = client->xserver;
+	struct xout out;
+	switch (minor) {
+	case 5: // SetDeviceMode: device, mode. relative is all there is
+		if (xi1_device(client, xin8(in, 4), minor, POINTERS)) {
+			if (xin8(in, 5) != 0) {
+				xs_error(client, XS_ERROR_MATCH, xin8(in, 5), XS_XI_OPCODE, minor);
+			} else {
+				xi1_status(client, minor, 0);
+			}
+		}
+		return true;
+	case 7: // GetSelectedExtensionEvents: window. nobody, XI1's events never come
+	case 9: // GetDeviceDontPropagateList: window
+		if (!xserver_window(xserver, xin32(in, 4))) {
+			xs_error(client, XS_ERROR_WINDOW, xin32(in, 4), XS_XI_OPCODE, minor);
+			return true;
+		}
+		xs_reply_begin(client, &out, minor);
+		xout_zero(&out, 24);
+		xs_reply_send(client, &out);
+		return true;
+	case 10: // GetDeviceMotionEvents: start, stop, device. no history
+		if (xi1_device(client, xin8(in, 12), minor, POINTERS)) {
+			xs_reply_begin(client, &out, minor);
+			xout32(&out, 0);
+			xout8(&out, VALUATORS);
+			xout8(&out, 0); // relative
+			xout_zero(&out, 18);
+			xs_reply_send(client, &out);
+		}
+		return true;
+	case 11: // ChangeKeyboardDevice
+	case 12: // ChangePointerDevice: Xorg turns them down since XI2
+		xs_error(client, BAD_DEVICE, xin8(in, 4), XS_XI_OPCODE, minor);
+		return true;
+	case 13: // GrabDevice: window, time, classes, modes, owner events, device
+		if (xi1_device(client, xin8(in, 17), minor, ANY_DEVICE)) {
+			xi1_status(client, minor, 0); // Success
+		}
+		return true;
+	case 20: // GetDeviceFocus: device. the keyboard's is the core focus
+		if (xi1_device(client, xin8(in, 4), minor, KEYBOARDS)) {
+			xs_reply_begin(client, &out, minor);
+			xout32(&out, xserver->focus);
+			xout32(&out, 0); // time
+			xout8(&out, 1); // RevertToPointerRoot
+			xout_zero(&out, 15);
+			xs_reply_send(client, &out);
+		}
+		return true;
+	case 22: // GetFeedbackControl: device. no feedbacks
+		if (xi1_device(client, xin8(in, 4), minor, ANY_DEVICE)) {
+			xs_reply_begin(client, &out, minor);
+			xout16(&out, 0);
+			xout_zero(&out, 22);
+			xs_reply_send(client, &out);
+		}
+		return true;
+	case 24: // GetDeviceKeyMapping: device, first, count. the core keymap
+		if (xi1_device(client, xin8(in, 4), minor, KEYBOARDS)) {
+			uint8_t first = xin8(in, 5), count = xin8(in, 6);
+			if (first < 8 || first + count - 1 > 255) {
+				xs_error(client, XS_ERROR_VALUE, first, XS_XI_OPCODE, minor);
+				return true;
+			}
+			xs_keyboard_mapping_reply(client, first, count, minor);
+		}
+		return true;
+	case 26: // GetDeviceModifierMapping: device
+		if (xi1_device(client, xin8(in, 4), minor, KEYBOARDS)) {
+			xs_modifier_mapping_reply(client, minor);
+		}
+		return true;
+	case 27: // SetDeviceModifierMapping: MappingSuccess, nothing changes
+		if (xi1_device(client, xin8(in, 4), minor, KEYBOARDS)) {
+			xi1_status(client, minor, 0);
+		}
+		return true;
+	case 28: // GetDeviceButtonMapping: device. every button itself
+		if (xi1_device(client, xin8(in, 4), minor, POINTERS)) {
+			xs_reply_begin(client, &out, minor);
+			xout8(&out, BUTTONS);
+			xout_zero(&out, 23);
+			for (uint8_t b = 1; b <= BUTTONS; b++) {
+				xout8(&out, b);
+			}
+			xout_pad(&out);
+			xs_reply_send(client, &out);
+		}
+		return true;
+	case 29: // SetDeviceButtonMapping: MappingSuccess, nothing changes
+	case 33: // SetDeviceValuators: Success, nothing changes
+		if (xi1_device(client, xin8(in, 4), minor, POINTERS)) {
+			xi1_status(client, minor, 0);
+		}
+		return true;
+	case 30: // QueryDeviceState: device
+		if (xi1_device(client, xin8(in, 4), minor, ANY_DEVICE)) {
+			query_device_state(client, xin8(in, 4));
+		}
+		return true;
+	case 34:
+		get_device_control(client, in);
+		return true;
+	case 35: // ChangeDeviceControl: control, device. Success, nothing changes
+		if (xi1_device(client, xin8(in, 6), minor, ANY_DEVICE)) {
+			xi1_status(client, minor, 0);
+		}
+		return true;
+	// no reply, nothing changes: XI1's event selection and propagation,
+	// ungrabs, passive grabs, allowing events, focus, feedback, key
+	// mapping, sending events, the bell
+	case 6: case 8: case 14: case 15: case 16: case 17: case 18: case 19: case 21: case 23:
+	case 25: case 31: case 32:
+		return true;
+	default:
+		return false;
+	}
+}
+
 void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	struct xout out;
 	uint8_t minor = xin8(in, 1);
+	if (xi1_request(client, in, minor)) {
+		return;
+	}
 	switch (minor) {
 	case GET_EXTENSION_VERSION:
 		get_extension_version(client);
@@ -803,9 +1046,9 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	case 60:
 		get_selected_events(client, in);
 		break;
-	// accepted, nothing changes: XI1's event selection, the hierarchy, the
-	// client pointer, ungrabs, allowing events, device properties, barriers
-	case 6: case 37: case 38: case 43: case 44: case 53: case 55:
+	// accepted, nothing changes: the hierarchy, the client pointer,
+	// ungrabs, allowing events, device properties, barriers
+	case 37: case 38: case 43: case 44: case 53: case 55:
 	case 57: case 58:
 	case 61:
 		break;
