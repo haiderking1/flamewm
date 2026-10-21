@@ -27,5 +27,8 @@ void capture_finish(struct flame_capture *capture);
 // view is going away: its handle and anyone capturing it let go now, not
 // at the next desktop change
 void capture_view_gone(struct flame_capture *capture, struct flame_view *view);
+// view's ext-foreign-toplevel identifier, what the portal names it by. NULL
+// when it isn't listed (yet)
+const char *capture_identifier(struct flame_capture *capture, struct flame_view *view);
 
 #endif

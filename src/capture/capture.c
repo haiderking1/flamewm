@@ -45,10 +45,11 @@ struct window_source {
 	struct wlr_ext_image_capture_source_v1 base;
 	struct flame_capture *capture;
 	struct capture_window *window; // NULL once it's gone
-	int started;
+	int started_count; // sessions running
 	bool wanted; // a client waits for a frame
 	bool force; // and it wants one whatever changed (its first)
 	uint64_t look; // what the last frame showed
+	int64_t started, sent; // ms: when it started, the last frame
 	struct wlr_swapchain *swapchain;
 	struct wl_event_source *tick;
 };
@@ -76,40 +77,18 @@ static bool window_area(struct flame_view *view, struct wlr_box *area) {
 	return width > 0 && height > 0;
 }
 
-static uint64_t mix(uint64_t hash, uint64_t value) {
-	return (hash ^ value) * 0x100000001b3ull;
-}
+// a share that just started gets every frame it asks for for this long: the
+// first ones go while the stream's still being set up (pipewire renegotiates)
+// and a window that doesn't change would leave it black till it did
+#define WARM_UP_MS 1000
+// an unchanged window still sends a frame this often: someone joining a
+// stream late gets a picture
+#define KEEPALIVE_MS 1000
 
-static uint64_t float_bits(float value) {
-	uint32_t bits;
-	memcpy(&bits, &value, sizeof(bits));
-	return bits;
-}
-
-// everything that changes what the window looks like: what's in it, where,
-// which buffer, a commit into the same buffer
-static uint64_t look_of(const struct flame_element_list *list, struct wlr_box area,
-		float scale) {
-	uint64_t hash = 0xcbf29ce484222325ull;
-	hash = mix(hash, (uint64_t)area.width << 32 | (uint32_t)area.height);
-	hash = mix(hash, float_bits(scale));
-	for (size_t i = 0; i < list->len; i++) {
-		const struct flame_element *e = &list->data[i];
-		hash = mix(hash, (uint64_t)e->type);
-		hash = mix(hash, (uintptr_t)e->id);
-		hash = mix(hash, (uint64_t)(uint32_t)e->box.x << 32 | (uint32_t)e->box.y);
-		hash = mix(hash, (uint64_t)(uint32_t)e->box.width << 32 | (uint32_t)e->box.height);
-		hash = mix(hash, (uint64_t)(uint32_t)e->clip.width << 32 | (uint32_t)e->clip.height);
-		hash = mix(hash, (uintptr_t)e->buffer);
-		hash = mix(hash, (uintptr_t)e->image);
-		hash = mix(hash, (uintptr_t)e->texture);
-		hash = mix(hash, e->surface ? e->surface->current.seq : 0);
-		hash = mix(hash, float_bits(e->alpha));
-		for (int c = 0; c < 4; c++) {
-			hash = mix(hash, float_bits(e->color[c]));
-		}
-	}
-	return hash;
+static int64_t now_ms(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
 // ms between looks at the window: the screen's refresh
@@ -148,7 +127,7 @@ static bool source_size(struct window_source *source, int width, int height) {
 
 static void source_produce(struct window_source *source) {
 	struct capture_window *window = source->window;
-	if (!window || !source->started || !source->wanted) {
+	if (!window || !source->started_count || !source->wanted) {
 		return;
 	}
 	struct flame_capture *capture = source->capture;
@@ -159,9 +138,11 @@ static void source_produce(struct window_source *source) {
 	elements_init(&list);
 	bool ok = window_area(view, &area) && elements_collect_node(&list, &view->content->node,
 		area);
-	uint64_t look = ok ? look_of(&list, area, scale) : 0;
+	uint64_t look = ok ? elements_look(&list, area, scale) : 0;
+	int64_t now = now_ms();
+	bool due = now - source->started < WARM_UP_MS || now - source->sent >= KEEPALIVE_MS;
 	struct wlr_buffer *buffer = NULL;
-	if (ok && (source->force || look != source->look)
+	if (ok && (source->force || due || look != source->look)
 			&& source_size(source, (int)ceilf(area.width * scale),
 				(int)ceilf(area.height * scale))) {
 		buffer = wlr_swapchain_acquire(source->swapchain);
@@ -169,6 +150,7 @@ static void source_produce(struct window_source *source) {
 	if (buffer && render_elements_to_buffer(&capture->server->render, &list, area, scale,
 			buffer)) {
 		source->look = look;
+		source->sent = now;
 		source->wanted = false;
 		source->force = false;
 		struct source_frame frame = {.buffer = buffer};
@@ -184,11 +166,11 @@ static void source_produce(struct window_source *source) {
 		wlr_buffer_unlock(buffer);
 	}
 	// its clients draw on for whoever watches, on a hidden workspace too
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	struct timespec when;
+	clock_gettime(CLOCK_MONOTONIC, &when);
 	for (size_t i = 0; i < list.len; i++) {
 		if (list.data[i].surface) {
-			wlr_surface_send_frame_done(list.data[i].surface, &now);
+			wlr_surface_send_frame_done(list.data[i].surface, &when);
 		}
 	}
 	elements_finish(&list);
@@ -204,14 +186,15 @@ static int handle_tick(void *data) {
 
 static void source_start(struct wlr_ext_image_capture_source_v1 *base, bool with_cursors) {
 	struct window_source *source = wl_container_of(base, source, base);
-	if (source->started++ == 0) {
+	if (source->started_count++ == 0) {
 		source->look = 0;
+		source->started = now_ms();
 	}
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *base) {
 	struct window_source *source = wl_container_of(base, source, base);
-	if (source->started > 0 && --source->started == 0) {
+	if (source->started_count > 0 && --source->started_count == 0) {
 		source->wanted = false;
 		wl_event_source_timer_update(source->tick, 0);
 	}
@@ -369,6 +352,16 @@ static void handle_new_request(struct wl_listener *listener, void *data) {
 	// gone or no memory: an inert source, the client hears it stopped
 	wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(request,
 		window && window->source ? &window->source->base : NULL);
+}
+
+const char *capture_identifier(struct flame_capture *capture, struct flame_view *view) {
+	struct capture_window *window;
+	wl_list_for_each(window, &capture->windows, link) {
+		if (window->view == view) {
+			return window->handle->identifier;
+		}
+	}
+	return NULL;
 }
 
 void capture_view_gone(struct flame_capture *capture, struct flame_view *view) {

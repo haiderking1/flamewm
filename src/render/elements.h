@@ -86,6 +86,12 @@ bool elements_push_surface(struct flame_element_list *list, struct wlr_surface *
 bool elements_push_texture(struct flame_element_list *list, const void *id,
 	struct wlr_texture *texture, const void *image, struct wlr_box box, struct wlr_box area);
 
+// what list looks like drawn into area at scale, as a number: a different
+// one when anything in it moved, showed up, changed buffer or got a commit
+// into the same buffer. window capture and previews redraw only then
+uint64_t elements_look(const struct flame_element_list *list, struct wlr_box area,
+	float scale);
+
 // fills visible and opaque, top down
 void elements_occlude(struct flame_element_list *list);
 
