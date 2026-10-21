@@ -3,6 +3,8 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_ext_data_control_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
@@ -32,8 +34,13 @@ bool globals_init(struct flame_server *server) {
 		&& wlr_fractional_scale_manager_v1_create(display, 1)
 		&& wlr_single_pixel_buffer_manager_v1_create(display)
 		&& wlr_presentation_create(display, server->backend.wlr, 2)
-		// grim and friends
-		&& wlr_screencopy_manager_v1_create(display);
+		// grim and friends. the ext one lets the client pick a format and
+		// stride it can use: wlr-screencopy hands out what the gpu reads
+		// fastest, 24 bit on nvidia, and a row that isn't whole words
+		// (outputs not a multiple of 4 wide) breaks pixman, grim with it
+		&& wlr_screencopy_manager_v1_create(display)
+		&& wlr_ext_image_copy_capture_manager_v1_create(display, 1)
+		&& wlr_ext_output_image_capture_source_manager_v1_create(display, 1);
 
 	if (!ok) {
 		wlr_log(WLR_ERROR, "failed to create wayland globals");
