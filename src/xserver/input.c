@@ -113,6 +113,23 @@ bool xserver_pointer_grabbed(const struct flame_xserver *xserver) {
 	return grab_on((struct flame_xserver *)xserver, &xserver->pointer_grab);
 }
 
+pid_t xserver_pointer_grab_pid(const struct flame_xserver *xserver) {
+	return xserver_pointer_grabbed(xserver) ? xserver->pointer_grab.client->pid : 0;
+}
+
+static void let_go(struct flame_xserver *xserver, bool keyboard);
+
+void xserver_break_grabs(struct flame_xserver *xserver, pid_t pid) {
+	for (int keyboard = 0; keyboard < 2; keyboard++) {
+		struct xs_grab *grab = keyboard ? &xserver->keyboard_grab : &xserver->pointer_grab;
+		if (pid && grab->client && grab->client->pid == pid) {
+			wlr_log(WLR_DEBUG, "xserver: %s isn't where the user is, its grab breaks",
+				grab->client->comm);
+			let_go(xserver, keyboard);
+		}
+	}
+}
+
 // a device event while a client holds the device: to its own windows the
 // usual way with owner events, else (or when none of them wants it) to the
 // grab window by the grab's mask, nobody else hears it

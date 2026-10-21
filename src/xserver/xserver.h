@@ -515,6 +515,11 @@ void xserver_set_focus(struct flame_xserver *xserver, uint32_t focus);
 // an X client holds the pointer (a menu open): it gets every pointer event
 // wherever the pointer is, and the pointer moves no focus meanwhile
 bool xserver_pointer_grabbed(const struct flame_xserver *xserver);
+// whose app holds the pointer, 0 for nobody
+pid_t xserver_pointer_grab_pid(const struct flame_xserver *xserver);
+// an app's grabs, pointer and keyboard, let go like X does when the grab
+// window goes out of sight: it isn't the one the user is in anymore
+void xserver_break_grabs(struct flame_xserver *xserver, pid_t pid);
 // the grab confines the pointer (GrabPointer's confine_to, wine clipping the
 // cursor to a game): to this rectangle, root coords
 bool xserver_pointer_confine(const struct flame_xserver *xserver, int *x, int *y, int *width,
