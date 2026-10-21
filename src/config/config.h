@@ -42,6 +42,13 @@ struct flame_anim_config {
 	float focused_opacity, unfocused_opacity;
 };
 
+// a screen by its connector name (DP-1, HDMI-A-1), "*" for any without
+// its own
+struct flame_output_config {
+	char *name;
+	float scale; // 0 for the default
+};
+
 // read only while it's in use. the compiled in defaults, with the user's
 // init.lua on top (config/lua.c): a reload builds a new one and swaps it in
 struct flame_config {
@@ -79,6 +86,9 @@ struct flame_config {
 	// commands to run once flame is up, the first load only
 	char **autostart;
 	size_t autostart_count;
+
+	struct flame_output_config *outputs;
+	size_t output_count;
 };
 
 extern const struct flame_config flame_default_config;
@@ -105,6 +115,10 @@ struct flame_window_rule {
 };
 void config_window_rules(const struct flame_config *config, const char *app_id,
 	const char *title, struct flame_window_rule *out);
+
+// what the config says about the output called name, NULL for nothing
+const struct flame_output_config *config_output(const struct flame_config *config,
+	const char *name);
 
 // a keybind's lua function
 void config_run_lua_bind(struct flame_server *server, int ref);

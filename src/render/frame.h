@@ -93,6 +93,9 @@ struct flame_frame {
 
 	struct flame_element_list prev, cur;
 
+	// output sized buffers for close animations, see render/snapshot.c
+	struct wlr_swapchain *snapshots;
+
 	// explicit sync: our drawing finished / KMS let go of a buffer
 	struct wlr_drm_syncobj_timeline *in_timeline, *out_timeline;
 	uint64_t in_point, out_point;

@@ -61,7 +61,8 @@ static void handle_tree_destroy(struct wl_listener *listener, void *data) {
 }
 
 void ghost_play(struct flame_anims *anims, struct flame_tree *parent,
-		struct wlr_texture *texture, struct wlr_box box, const struct ghost_style *style) {
+		struct wlr_texture *texture, struct wlr_fbox src, struct wlr_box box,
+		const struct ghost_style *style) {
 	struct ghost *ghost = calloc(1, sizeof(*ghost));
 	if (!ghost || style->type == FLAME_ANIM_NONE) {
 		wlr_texture_destroy(texture);
@@ -81,6 +82,7 @@ void ghost_play(struct flame_anims *anims, struct flame_tree *parent,
 	}
 	scene_node_set_position(&ghost->tree->node, box.x, box.y);
 	scene_buffer_set(ghost->buffer, texture, texture, box.width, box.height, false, NULL, 0);
+	scene_buffer_set_source(ghost->buffer, &src);
 	listener_connect(&ghost->tree_destroy, &ghost->tree->node.events.destroy,
 		handle_tree_destroy);
 	ghost->anim.step = step;

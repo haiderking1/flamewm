@@ -10,6 +10,7 @@
 
 #include "config/config.h"
 #include "core/server.h"
+#include "render/snapshot.h"
 #include "util/listener.h"
 
 // a mouse resize lands right before the frame that shows it, animations
@@ -51,10 +52,17 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	free(output);
 }
 
-static bool output_enable(struct wlr_output *wlr_output) {
+// the scale init.lua asks for, 1 when it says nothing
+static float configured_scale(const struct flame_config *config, const char *name) {
+	const struct flame_output_config *oc = config_output(config, name);
+	return oc && oc->scale > 0 ? oc->scale : 1;
+}
+
+static bool output_enable(struct wlr_output *wlr_output, const struct flame_config *config) {
 	struct wlr_output_state state;
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
+	wlr_output_state_set_scale(&state, configured_scale(config, wlr_output->name));
 
 	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 	if (mode) {
@@ -76,7 +84,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 		wlr_log(WLR_ERROR, "failed to init rendering on %s", wlr_output->name);
 		return;
 	}
-	if (!output_enable(wlr_output)) {
+	if (!output_enable(wlr_output, server->config)) {
 		wlr_log(WLR_ERROR, "failed to enable %s", wlr_output->name);
 		return;
 	}
@@ -130,6 +138,7 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 		scene_node_set_position(&output->background->node, output->box.x, output->box.y);
 		scene_rect_set_size(output->background, output->box.width, output->box.height);
 		layers_arrange(&outputs->server->layers, output);
+		render_snapshot_warm(&output->frames);
 	}
 
 	desktop_arrange(&outputs->server->desktop);
@@ -171,6 +180,23 @@ struct flame_output *outputs_primary(struct flame_outputs *outputs) {
 	}
 	struct flame_output *output = wl_container_of(outputs->list.next, output, link);
 	return output;
+}
+
+void outputs_apply_config(struct flame_outputs *outputs) {
+	struct flame_output *output;
+	wl_list_for_each(output, &outputs->list, link) {
+		float scale = configured_scale(outputs->server->config, output->wlr->name);
+		if (scale == output->wlr->scale) {
+			continue;
+		}
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_scale(&state, scale);
+		if (!wlr_output_commit_state(output->wlr, &state)) {
+			wlr_log(WLR_ERROR, "%s: can't change scale to %.2f", output->wlr->name, scale);
+		}
+		wlr_output_state_finish(&state);
+	}
 }
 
 void outputs_test_unplug(struct flame_outputs *outputs) {

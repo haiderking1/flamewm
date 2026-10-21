@@ -37,6 +37,7 @@
 //     animation = false, open = "zoom", close = "fade", fade_in = false,
 //     fade_out = false, opacity = 0.9 }
 //   flame.autostart(command)  run once when flame comes up
+//   flame.output(name, { scale = 1.5 })  name a connector (DP-1) or "*"
 //   flame.spawn(command), flame.quit(), flame.close(), flame.fullscreen(),
 //   flame.toggle_floating(), flame.focus("next"|"prev"), flame.workspace(n),
 //   flame.move_to_workspace(n), flame.reload(), flame.log(message)
@@ -450,6 +451,43 @@ static int l_autostart(lua_State *L) {
 	return 0;
 }
 
+static int l_output(lua_State *L) {
+	struct flame_config *config = self(L)->config;
+	const char *name = luaL_checkstring(L, 1);
+	luaL_checktype(L, 2, LUA_TTABLE);
+	lua_getfield(L, 2, "scale");
+	float scale = 0;
+	if (!lua_isnil(L, -1)) {
+		lua_Number n = luaL_checknumber(L, -1);
+		if (!(n >= 0.25 && n <= 8)) {
+			return luaL_error(L, "flame.output: scale %f is out of 0.25..8", n);
+		}
+		scale = (float)n;
+	}
+	lua_pop(L, 1);
+	// the same name again replaces it
+	struct flame_output_config *out = NULL;
+	for (size_t i = 0; i < config->output_count; i++) {
+		if (!strcmp(config->outputs[i].name, name)) {
+			out = &config->outputs[i];
+		}
+	}
+	if (!out) {
+		char *copy = strdup(name);
+		struct flame_output_config *grown = copy ? realloc(config->outputs,
+			(config->output_count + 1) * sizeof(*grown)) : NULL;
+		if (!grown) {
+			free(copy);
+			return luaL_error(L, "flame.output: out of memory");
+		}
+		config->outputs = grown;
+		out = &config->outputs[config->output_count++];
+		out->name = copy;
+	}
+	out->scale = scale;
+	return 0;
+}
+
 static int l_spawn(lua_State *L) {
 	const char *argv[] = {"/bin/sh", "-c", luaL_checkstring(L, 1), NULL};
 	spawn(argv);
@@ -525,6 +563,7 @@ static const luaL_Reg functions[] = {
 	{"unbind", l_unbind},
 	{"clear_binds", l_clear_binds},
 	{"autostart", l_autostart},
+	{"output", l_output},
 	{"spawn", l_spawn},
 	{"log", l_log},
 	{"quit", l_quit},
@@ -586,7 +625,25 @@ void config_free(struct flame_config *config) {
 		free(config->autostart[i]);
 	}
 	free(config->autostart);
+	for (size_t i = 0; i < config->output_count; i++) {
+		free(config->outputs[i].name);
+	}
+	free(config->outputs);
 	free(config);
+}
+
+const struct flame_output_config *config_output(const struct flame_config *config,
+		const char *name) {
+	const struct flame_output_config *any = NULL;
+	for (size_t i = 0; i < config->output_count; i++) {
+		if (!strcmp(config->outputs[i].name, name)) {
+			return &config->outputs[i];
+		}
+		if (!strcmp(config->outputs[i].name, "*")) {
+			any = &config->outputs[i];
+		}
+	}
+	return any;
 }
 
 static char *message(const char *fmt, const char *a, const char *b) {

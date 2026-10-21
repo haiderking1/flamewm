@@ -92,6 +92,7 @@ struct flame_buffer_node {
 	// a new value for every new picture, the frame repaints it all then
 	const void *key;
 	int width, height; // layout size it's drawn at
+	struct wlr_fbox src; // the part of texture shown, empty for all of it
 	bool opaque;
 	// the gpu work that made the picture, waited on before reading it
 	struct wlr_drm_syncobj_timeline *wait_timeline;
@@ -154,6 +155,8 @@ void scene_surface_set_clip(struct flame_surface_node *node, const struct wlr_bo
 void scene_buffer_set(struct flame_buffer_node *node, struct wlr_texture *texture,
 	const void *key, int width, int height, bool opaque,
 	struct wlr_drm_syncobj_timeline *wait_timeline, uint64_t wait_point);
+// only part of the texture, NULL for all of it again
+void scene_buffer_set_source(struct flame_buffer_node *node, const struct wlr_fbox *src);
 
 struct flame_tree *scene_tree_from_node(struct flame_node *node);
 
