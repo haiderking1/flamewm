@@ -1,8 +1,10 @@
 #!/bin/sh
 # steam on flamewm, no xwayland. its UI (CEF in steamwebhelper) draws over
 # wayland straight to flame, valve's window bookkeeping (map, hide, title,
-# focus) talks to flame's own X server, which never draws anything.
-# games it starts get turned away by that X server and go wayland
+# focus) talks to flame's own X server. games it starts draw where they
+# like: X games go to flame's X (its GL is the gpu's own, nvidia's on
+# nvidia, fullscreen through EWMH), proton with wine's wayland driver and
+# SDL games told to go wayland
 if [ -z "$FLAMEWM_X11_DISPLAY" ]; then
 	echo "flame-steam: not running inside flamewm, starting plain steam" >&2
 	exec steam "$@"
