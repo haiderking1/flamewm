@@ -409,15 +409,19 @@ static void list_input_devices(struct xs_client *client) {
 			xout8(&out, 1); // ButtonClass
 			xout8(&out, 4);
 			xout16(&out, BUTTONS);
+			// the same axes XI2 tells about the same pointer (x, y, the two
+			// scrolls): chromium puts both lists together, a pointer with two
+			// axes here and four there trips it
 			xout8(&out, 2); // ValuatorClass
-			xout8(&out, 8 + 12 * 2);
-			xout8(&out, 2); // axes
+			xout8(&out, 8 + 12 * VALUATORS);
+			xout8(&out, VALUATORS); // axes
 			xout8(&out, 0); // relative
 			xout32(&out, 0); // motion buffer
-			for (int axis = 0; axis < 2; axis++) {
+			for (int axis = 0; axis < VALUATORS; axis++) {
 				xout32(&out, 1); // resolution
 				xout32(&out, 0);
-				xout32(&out, axis ? xserver->root->height : xserver->root->width);
+				xout32(&out, axis == 0 ? xserver->root->width : axis == 1
+					? xserver->root->height : 0);
 			}
 		} else {
 			xout8(&out, 0); // KeyClass
@@ -433,6 +437,10 @@ static void list_input_devices(struct xs_client *client) {
 		xout8(&out, (uint8_t)len);
 		xout_bytes(&out, devices[i].name, len);
 	}
+	// at least one byte of padding after the names, then to 4, like Xorg:
+	// chromium reads one more byte there and aborts when the reply ends
+	// right after the names (every CEF and electron app on X)
+	xout8(&out, 0);
 	xout_pad(&out);
 	xs_reply_send(client, &out);
 }
@@ -684,6 +692,32 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 		xout16(&out, 0);
 		xs_reply_send(client, &out);
 		break;
+	case 36: { // ListDeviceProperties: none
+		uint8_t id = xin8(in, 4);
+		if (!device_exists(id)) {
+			xs_error(client, BAD_DEVICE, id, XS_XI_OPCODE, minor);
+			break;
+		}
+		xs_reply_begin(client, &out, minor);
+		xout16(&out, 0);
+		xs_reply_send(client, &out);
+		break;
+	}
+	case 39: { // GetDeviceProperty: there's no such property, Xorg's None
+		uint8_t id = xin8(in, 20);
+		if (!device_exists(id)) {
+			xs_error(client, BAD_DEVICE, id, XS_XI_OPCODE, minor);
+			break;
+		}
+		xs_reply_begin(client, &out, minor);
+		xout32(&out, 0); // type None
+		xout32(&out, 0); // bytes after
+		xout32(&out, 0); // items
+		xout8(&out, 0); // format
+		xout8(&out, id);
+		xs_reply_send(client, &out);
+		break;
+	}
 	case 56: // XIListProperties: none
 		xs_reply_begin(client, &out, 0);
 		xout16(&out, 0);
@@ -698,7 +732,8 @@ void xs_xi_request(struct xs_client *client, const struct xin *in) {
 	// accepted, nothing changes: XI1's event selection, warping, cursors,
 	// the hierarchy, the client pointer, ungrabs, allowing events, device
 	// properties, barriers
-	case 6: case 41: case 42: case 43: case 44: case 52: case 53: case 55: case 57: case 58:
+	case 6: case 37: case 38: case 41: case 42: case 43: case 44: case 52: case 53: case 55:
+	case 57: case 58:
 	case 61:
 		break;
 	default:

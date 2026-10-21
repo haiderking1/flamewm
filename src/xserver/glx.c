@@ -113,14 +113,9 @@ static void query_server_string(struct xs_client *client, const struct xin *in) 
 // GetVisualConfigs: one per visual, its plain one. 18 values in a fixed
 // order, then attribute pairs
 static void get_visual_configs(struct xs_client *client) {
-	static const uint32_t pairs[][2] = {
-		{0x20, 0x8000}, // GLX_VISUAL_CAVEAT_EXT: none
-		{0x22, 0x8002}, // GLX_X_VISUAL_TYPE: true color
-		{100000, 0}, // GLX_SAMPLE_BUFFERS
-		{100001, 0}, // GLX_SAMPLES
-	};
+	enum { PAIRS = 4 };
 	const struct config *visuals[] = {plain(XS_VISUAL_24), plain(XS_VISUAL_32)};
-	uint32_t props = 18 + 2 * (uint32_t)(sizeof(pairs) / sizeof(pairs[0]));
+	uint32_t props = 18 + 2 * PAIRS;
 	struct xout out;
 	xs_reply_begin(client, &out, 0);
 	xout32(&out, 2);
@@ -137,7 +132,13 @@ static void get_visual_configs(struct xs_client *client) {
 		for (int j = 0; j < 18; j++) {
 			xout32(&out, fixed[j]);
 		}
-		for (size_t j = 0; j < sizeof(pairs) / sizeof(pairs[0]); j++) {
+		const uint32_t pairs[PAIRS][2] = {
+			{0x20, 0x8000}, // GLX_VISUAL_CAVEAT_EXT: none
+			{0x22, 0x8002}, // GLX_X_VISUAL_TYPE: true color
+			{100000, 0}, // GLX_SAMPLE_BUFFERS
+			{100001, 0}, // GLX_SAMPLES
+		};
+		for (size_t j = 0; j < PAIRS; j++) {
 			xout32(&out, pairs[j][0]);
 			xout32(&out, pairs[j][1]);
 		}
@@ -199,7 +200,7 @@ static void get_fb_configs(struct xs_client *client) {
 
 enum {
 	OBJECT_CONTEXT,
-	OBJECT_DRAWABLE, // a GLXWindow, GLXPixmap, or an X window made current
+	OBJECT_DRAWABLE, // a GLXWindow, GLXPixmap, pbuffer, or an X window made current
 };
 
 struct glx_object {
@@ -208,7 +209,11 @@ struct glx_object {
 	struct xs_client *owner;
 	int kind;
 	uint32_t config;
-	uint32_t drawable; // drawables: the X window or pixmap
+	uint32_t drawable; // drawables: the X window or pixmap, 0 for a pbuffer
+	// pbuffers: offscreen, the client's driver keeps their pixels. ANGLE
+	// (chromium's GL) starts by making one current
+	bool pbuffer;
+	uint32_t width, height;
 };
 
 static struct glx_object *object_find(struct flame_xserver *xserver, uint32_t id, int kind) {
@@ -315,6 +320,31 @@ static void get_drawable_attributes(struct xs_client *client, const struct xin *
 	struct flame_xserver *xserver = client->xserver;
 	uint32_t id = xin32(in, 4);
 	struct glx_object *glx = object_find(xserver, id, OBJECT_DRAWABLE);
+	if (glx && glx->pbuffer) {
+		// what Xorg says about a pbuffer
+		const uint32_t attribs[][2] = {
+			{0x20d4, 0}, // GLX_Y_INVERTED_EXT
+			{0x801d, glx->width}, // GLX_WIDTH
+			{0x801e, glx->height}, // GLX_HEIGHT
+			{0x800c, 0}, // GLX_SCREEN
+			{0x20d6, 0x20dd}, // GLX_TEXTURE_TARGET_EXT: GLX_TEXTURE_RECTANGLE_EXT
+			{0x801f, 0}, // GLX_EVENT_MASK
+			{0x8013, glx->config}, // GLX_FBCONFIG_ID
+			{0x801b, 1}, // GLX_PRESERVED_CONTENTS
+			{0x8010, 4}, // GLX_DRAWABLE_TYPE: pbuffer
+		};
+		size_t count = sizeof(attribs) / sizeof(attribs[0]);
+		struct xout out;
+		xs_reply_begin(client, &out, 0);
+		xout32(&out, (uint32_t)count);
+		xout_zero(&out, 20);
+		for (size_t i = 0; i < count; i++) {
+			xout32(&out, attribs[i][0]);
+			xout32(&out, attribs[i][1]);
+		}
+		xs_reply_send(client, &out);
+		return;
+	}
 	uint32_t x_id = glx ? glx->drawable : id;
 	struct xs_window *window = xserver_window(xserver, x_id);
 	struct xs_pixmap *pixmap = window ? NULL : xs_pixmap_find(xserver, x_id);
@@ -393,6 +423,30 @@ void xs_glx_request(struct xs_client *client, const struct xin *in) {
 	case 31: // CreateWindow: screen, fbconfig, window, glx window
 		object_new(client, xin32(in, 16), OBJECT_DRAWABLE, xin32(in, 8), xin32(in, 12), minor);
 		break;
+	case 27: { // CreatePbuffer: screen, fbconfig, pbuffer, attribute pairs
+		uint32_t id = xin32(in, 12), n = xin32(in, 16);
+		object_new(client, id, OBJECT_DRAWABLE, xin32(in, 8), 0, minor);
+		struct glx_object *o = object_find(client->xserver, id, OBJECT_DRAWABLE);
+		if (o) {
+			o->pbuffer = true;
+			for (uint32_t i = 0; i < n && 20 + i * 8 + 8 <= in->len; i++) {
+				uint32_t name = xin32(in, 20 + i * 8), value = xin32(in, 24 + i * 8);
+				if (name == 0x8041) { // GLX_PBUFFER_WIDTH
+					o->width = value;
+				} else if (name == 0x8040) { // GLX_PBUFFER_HEIGHT
+					o->height = value;
+				}
+			}
+		}
+		break;
+	}
+	case 28: { // DestroyPbuffer
+		struct glx_object *o = object_find(client->xserver, xin32(in, 4), OBJECT_DRAWABLE);
+		if (o && o->pbuffer) {
+			object_free(o);
+		}
+		break;
+	}
 	case 15: // DestroyGLXPixmap
 	case 23: // DestroyPixmap
 	case 32: { // DestroyWindow
@@ -436,8 +490,8 @@ void xs_glx_request(struct xs_client *client, const struct xin *in) {
 		break;
 	// rendering (indirect, nobody does), swaps, waits, pbuffers, client
 	// info: accepted, nothing to keep. GL happens in the client
-	case 1: case 2: case 8: case 9: case 10: case 11: case 12: case 16: case 20: case 27:
-	case 28: case 30: case 33: case 35:
+	case 1: case 2: case 8: case 9: case 10: case 11: case 12: case 16: case 20: case 30:
+	case 33: case 35:
 		break;
 	default:
 		xs_error(client, XS_ERROR_REQUEST, 0, XS_GLX_OPCODE, minor);
