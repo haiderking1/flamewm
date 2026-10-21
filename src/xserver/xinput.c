@@ -210,7 +210,7 @@ void xs_xi_device_event(struct flame_xserver *xserver, struct xs_window *receive
 
 // Enter, Leave, FocusIn and FocusOut share a layout
 static void crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-		uint8_t detail, uint16_t state, uint32_t time, bool focus) {
+		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time, bool focus) {
 	int rx = xserver->pointer_x, ry = xserver->pointer_y;
 	int ox, oy;
 	xs_window_origin(window, &ox, &oy);
@@ -221,13 +221,13 @@ static void crossing(struct flame_xserver *xserver, int evtype, struct xs_window
 	event[19] = detail;
 	put32(event + 20, XS_ROOT);
 	put32(event + 24, window->id);
-	put32(event + 28, 0); // child
+	put32(event + 28, child ? child->id : 0);
 	put32(event + 32, fp1616(rx));
 	put32(event + 36, fp1616(ry));
 	put32(event + 40, fp1616(rx - ox));
 	put32(event + 44, fp1616(ry - oy));
 	event[48] = 1; // same screen
-	event[49] = xserver->focus == window->id;
+	event[49] = xs_focus_within(xserver, window);
 	put16(event + 50, 1); // buttons, in units
 	put_mods(event + 52, state);
 	put32(event + 72, buttons_of(state));
@@ -236,13 +236,13 @@ static void crossing(struct flame_xserver *xserver, int evtype, struct xs_window
 }
 
 void xs_xi_crossing(struct flame_xserver *xserver, int evtype, struct xs_window *window,
-		uint8_t detail, uint16_t state, uint32_t time) {
-	crossing(xserver, evtype, window, detail, state, time, false);
+		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time) {
+	crossing(xserver, evtype, window, detail, child, state, time, false);
 }
 
-void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window) {
-	crossing(xserver, evtype, window, 3 /* NotifyNonlinear */, xserver->state,
-		xs_now(xserver), true);
+void xs_xi_focus(struct flame_xserver *xserver, int evtype, struct xs_window *window,
+		uint8_t detail) {
+	crossing(xserver, evtype, window, detail, NULL, xserver->state, xs_now(xserver), true);
 }
 
 void xs_xi_raw(struct flame_xserver *xserver, int evtype, uint32_t detail, double dx,

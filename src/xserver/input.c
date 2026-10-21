@@ -97,17 +97,79 @@ static struct xs_window *propagate(struct flame_xserver *xserver, struct xs_wind
 	return NULL;
 }
 
+#define NOTIFY_ANCESTOR 0
+#define NOTIFY_VIRTUAL 1
+#define NOTIFY_INFERIOR 2
+#define NOTIFY_NONLINEAR 3
+#define NOTIFY_NONLINEAR_VIRTUAL 4
+
+// one EnterNotify or LeaveNotify. child: the window inside window on the
+// pointer's way, NULL for none
 static void crossing(struct flame_xserver *xserver, uint8_t type, struct xs_window *window,
-		uint16_t state, uint32_t time) {
+		uint8_t detail, struct xs_window *child, uint16_t state, uint32_t time) {
 	struct xs_event event;
-	fill(xserver, &event, type, 3 /* NotifyNonlinear */, window, window, state, time);
+	fill(xserver, &event, type, detail, window, child, state, time);
 	xs_event_put8(&event, 30, 0); // mode: normal
-	xs_event_put8(&event, 31, 2 | (xserver->focus == window->id ? 1 : 0));
+	// same screen, and focus: the keyboard's on this window or one it's in
+	xs_event_put8(&event, 31, 2 | (xs_focus_within(xserver, window) ? 1 : 0));
 	bool enter = type == EVENT_ENTER;
 	int evtype = enter ? XS_XI_ENTER : XS_XI_LEAVE;
 	xs_event_deliver_input(xserver, window, enter ? MASK_ENTER : MASK_LEAVE, evtype, &event,
 		false);
-	xs_xi_crossing(xserver, evtype, window, 3, state, time);
+	xs_xi_crossing(xserver, evtype, window, detail, child, state, time);
+}
+
+// LeaveNotify up from below from (not included) to stop (not included),
+// each with the window it came out of
+static void leave_up(struct flame_xserver *xserver, struct xs_window *from,
+		struct xs_window *stop, uint8_t detail, uint16_t state, uint32_t time) {
+	struct xs_window *child = from;
+	for (struct xs_window *w = from->parent; w && w != stop; w = w->parent) {
+		crossing(xserver, EVENT_LEAVE, w, detail, child, state, time);
+		child = w;
+	}
+}
+
+// EnterNotify down from below stop to the parent of to, each with the
+// window it goes on into
+static void enter_down(struct flame_xserver *xserver, struct xs_window *stop,
+		struct xs_window *to, uint8_t detail, uint16_t state, uint32_t time) {
+	struct xs_window *chain[64];
+	int len = 0;
+	for (struct xs_window *w = to; w->parent && w->parent != stop && len < 64; w = w->parent) {
+		chain[len++] = w;
+	}
+	while (len > 0) {
+		struct xs_window *child = chain[--len];
+		crossing(xserver, EVENT_ENTER, child->parent, detail, child, state, time);
+	}
+}
+
+// the pointer went from a to b (NULL: out of X's windows, onto the root):
+// the protocol's crossing events, Xorg's way. a toolkit whose window the
+// pointer goes into a child of hears NotifyInferior, not that it left
+static void cross(struct flame_xserver *xserver, struct xs_window *a, struct xs_window *b,
+		uint16_t state, uint32_t time) {
+	a = a ? a : xserver->root;
+	b = b ? b : xserver->root;
+	if (a == b) {
+		return;
+	}
+	if (xs_window_inferior(a, b)) {
+		crossing(xserver, EVENT_LEAVE, a, NOTIFY_ANCESTOR, NULL, state, time);
+		leave_up(xserver, a, b, NOTIFY_VIRTUAL, state, time);
+		crossing(xserver, EVENT_ENTER, b, NOTIFY_INFERIOR, NULL, state, time);
+	} else if (xs_window_inferior(b, a)) {
+		crossing(xserver, EVENT_LEAVE, a, NOTIFY_INFERIOR, NULL, state, time);
+		enter_down(xserver, a, b, NOTIFY_VIRTUAL, state, time);
+		crossing(xserver, EVENT_ENTER, b, NOTIFY_ANCESTOR, NULL, state, time);
+	} else {
+		struct xs_window *common = xs_window_common(a, b);
+		crossing(xserver, EVENT_LEAVE, a, NOTIFY_NONLINEAR, NULL, state, time);
+		leave_up(xserver, a, common, NOTIFY_NONLINEAR_VIRTUAL, state, time);
+		enter_down(xserver, common, b, NOTIFY_NONLINEAR_VIRTUAL, state, time);
+		crossing(xserver, EVENT_ENTER, b, NOTIFY_NONLINEAR, NULL, state, time);
+	}
 }
 
 static bool alive(struct flame_xserver *xserver, uint32_t id) {
@@ -127,13 +189,9 @@ void xserver_pointer_motion(struct flame_xserver *xserver, struct xs_window *top
 	struct xs_window *previous = alive(xserver, xserver->pointer_window)
 		? xserver_window(xserver, xserver->pointer_window) : NULL;
 	if (!grab && under != previous) {
-		if (previous) {
-			crossing(xserver, EVENT_LEAVE, previous, state, time);
-		}
-		if (under) {
-			crossing(xserver, EVENT_ENTER, under, state, time);
-		}
+		// where it is first: focus flags and anything asked back see it
 		xserver->pointer_window = under ? under->id : 0;
+		cross(xserver, previous, under, state, time);
 		xserver->scroll_primed = false; // toolkits forget the valuators on enter
 	}
 
@@ -243,10 +301,10 @@ void xserver_pointer_scroll(struct flame_xserver *xserver, bool vertical, double
 void xserver_pointer_leave(struct flame_xserver *xserver, uint32_t time) {
 	struct xs_window *previous = alive(xserver, xserver->pointer_window)
 		? xserver_window(xserver, xserver->pointer_window) : NULL;
-	if (previous) {
-		crossing(xserver, EVENT_LEAVE, previous, 0, time);
-	}
 	xserver->pointer_window = 0;
+	if (previous) {
+		cross(xserver, previous, NULL, 0, time);
+	}
 }
 
 static void key(struct flame_xserver *xserver, uint8_t keycode, bool pressed, uint16_t state,

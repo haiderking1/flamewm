@@ -458,6 +458,13 @@ void xserver_move_window(struct flame_xserver *xserver, struct xs_window *window
 	int x, int y, int width, int height);
 // flame moved focus, the X side follows. focus is a window id or XS_FOCUS_NONE
 void xserver_set_focus(struct flame_xserver *xserver, uint32_t focus);
+// flame as the window manager gives a top-level the keyboard, ICCCM's way:
+// SetInputFocus unless WM_HINTS says it takes no input, WM_TAKE_FOCUS when
+// it's in WM_PROTOCOLS (it sets the focus itself, wine does). nothing when
+// the focus is in it already: an app that put it on its own child keeps it
+void xserver_focus_window(struct flame_xserver *xserver, struct xs_window *window);
+// the keyboard focus is window or something in it
+bool xserver_focus_in(struct flame_xserver *xserver, const struct xs_window *window);
 
 // input for X windows. top: the X top-level flame has under the pointer, NULL
 // when it's over something else. state: X's modifier and button mask
