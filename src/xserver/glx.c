@@ -110,10 +110,17 @@ static void query_server_string(struct xs_client *client, const struct xin *in) 
 	}
 }
 
+// the ARGB visual is for compositing, picked only when asked for: Xorg puts
+// it and its configs in a later visual select group, choosers try group 0
+// first. a plain rgb request getting it would draw its window see-through
+static uint32_t select_group(const struct config *c) {
+	return c->visual == XS_VISUAL_32 ? 1 : 0;
+}
+
 // GetVisualConfigs: one per visual, its plain one. 18 values in a fixed
 // order, then attribute pairs
 static void get_visual_configs(struct xs_client *client) {
-	enum { PAIRS = 4 };
+	enum { PAIRS = 5 };
 	const struct config *visuals[] = {plain(XS_VISUAL_24), plain(XS_VISUAL_32)};
 	uint32_t props = 18 + 2 * PAIRS;
 	struct xout out;
@@ -137,6 +144,7 @@ static void get_visual_configs(struct xs_client *client) {
 			{0x22, 0x8002}, // GLX_X_VISUAL_TYPE: true color
 			{100000, 0}, // GLX_SAMPLE_BUFFERS
 			{100001, 0}, // GLX_SAMPLES
+			{0x8028, select_group(c)}, // GLX_VISUAL_SELECT_GROUP_SGIX
 		};
 		for (size_t j = 0; j < PAIRS; j++) {
 			xout32(&out, pairs[j][0]);
@@ -164,9 +172,9 @@ static void get_fb_configs(struct xs_client *client) {
 			{0x8010, 1 | 2 | 4}, // GLX_DRAWABLE_TYPE: window, pixmap, pbuffer
 			{0x8012, 1}, // GLX_X_RENDERABLE
 			{0x22, 0x8002}, // GLX_X_VISUAL_TYPE: true color
-			// slow or not, Xorg's rule: none. visual_select_group 0 for all
+			// slow or not, Xorg's rule: none
 			{0x20, 0x8000}, // GLX_CONFIG_CAVEAT: none
-			{0x8028, 0}, // GLX_VISUAL_SELECT_GROUP_SGIX
+			{0x8028, select_group(c)}, // GLX_VISUAL_SELECT_GROUP_SGIX
 			{4, 1}, // GLX_RGBA
 			{2, c->buffer}, // GLX_BUFFER_SIZE
 			{3, 0}, // GLX_LEVEL
