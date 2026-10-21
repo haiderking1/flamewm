@@ -50,7 +50,7 @@ bool xs_id_in_use(struct flame_xserver *xserver, uint32_t id) {
 			return true;
 		}
 	}
-	return false;
+	return xs_damage_id_in_use(xserver, id);
 }
 
 bool xs_id_available(struct xs_client *client, uint32_t id) {
@@ -117,6 +117,15 @@ static uint32_t *used_ids(struct xs_client *client, size_t *len) {
 	struct xs_present_select *select;
 	wl_list_for_each(select, &xserver->present_selects, link) {
 		add(&ids, len, &cap, base, select->id);
+	}
+	size_t damages = xs_damage_ids(xserver, base, NULL, 0);
+	uint32_t *damage = damages ? malloc(damages * sizeof(*damage)) : NULL;
+	if (damage) {
+		damages = xs_damage_ids(xserver, base, damage, damages);
+		for (size_t i = 0; i < damages; i++) {
+			add(&ids, len, &cap, base, damage[i]);
+		}
+		free(damage);
 	}
 	// render's own lists, as many as there are
 	size_t n = xs_render_ids(xserver, base, NULL, 0);

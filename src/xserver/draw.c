@@ -268,6 +268,7 @@ static void damage_quiet(struct flame_xserver *xserver, struct xs_window *top,
 	if (!top || !top->backing || !pixman_region32_not_empty(region)) {
 		return;
 	}
+	xs_damage_backing(xserver, top, region);
 	pixman_region32_union(&top->damage, &top->damage, region);
 	top->damaged = true;
 	if (!xserver->damage_idle) {
@@ -283,7 +284,19 @@ struct target {
 	int width, height, depth;
 	pixman_region32_t clip; // image coords, what may be touched
 	struct xs_window *window, *top; // windows: the window and its top-level
+	struct xs_pixmap *pixmap; // pixmaps
 };
+
+// drawing landed in region (image coords): flame hears about windows, and
+// DAMAGE's clients about either
+static void damage_target(struct flame_xserver *xserver, const struct target *t,
+		const pixman_region32_t *region) {
+	if (t->pixmap) {
+		xs_damage_pixmap(xserver, t->pixmap, region);
+	} else {
+		damage(xserver, t->top, region);
+	}
+}
 
 static void target_finish(struct target *t) {
 	pixman_region32_fini(&t->clip);
@@ -359,6 +372,7 @@ static bool target_get(struct xs_client *client, uint32_t id, const struct xs_gc
 			.width = pixmap->width,
 			.height = pixmap->height,
 			.depth = pixmap->depth,
+			.pixmap = pixmap,
 		};
 		pixman_region32_init_rect(&t->clip, 0, 0, pixmap->width, pixmap->height);
 	}
@@ -658,7 +672,7 @@ static void draw_boxes(struct xs_client *client, struct target *t, const struct 
 	pixman_region32_t region;
 	boxes_region(b, t, &region);
 	paint(client->xserver, t, gc, &region);
-	damage(client->xserver, t->top, &region);
+	damage_target(client->xserver, t, &region);
 	pixman_region32_fini(&region);
 }
 
@@ -776,7 +790,10 @@ void xs_draw_window_shown(struct flame_xserver *xserver, struct xs_window *windo
 
 void xs_draw_window_hidden(struct flame_xserver *xserver, struct xs_window *window) {
 	if (window->parent && !window->parent->parent) {
-		// a top-level: its pixels go, it's drawn again when it shows
+		// a top-level: its pixels go, it's drawn again when it shows. the
+		// screen there shows what's under it now
+		xs_damage_root(xserver, window->x, window->y, window->width + 2 * window->border,
+			window->height + 2 * window->border);
 		if (window->backing) {
 			pixman_image_unref(window->backing);
 			window->backing = NULL;
@@ -800,7 +817,11 @@ void xs_draw_window_moved(struct flame_xserver *xserver, struct xs_window *windo
 		return;
 	}
 	if (window->parent && !window->parent->parent) {
-		// a top-level: where it is is flame's business, only a new size redraws
+		// a top-level: the screen changed where it was and where it is. where
+		// it is is flame's business, only a new size redraws
+		int b = 2 * window->border;
+		xs_damage_root(xserver, old_x, old_y, old_w + b, old_h + b);
+		xs_damage_root(xserver, window->x, window->y, window->width + b, window->height + b);
 		if (window->width == old_w && window->height == old_h && window->backing) {
 			return;
 		}
@@ -1236,7 +1257,7 @@ void xs_draw_put_image(struct xs_client *client, uint32_t drawable, uint32_t gc_
 		pixman_image_set_clip_region32(t.image, NULL);
 	}
 	pixman_image_unref(src);
-	damage(client->xserver, t.top, &region);
+	damage_target(client->xserver, &t, &region);
 	pixman_region32_fini(&region);
 	target_finish(&t);
 }
@@ -1404,7 +1425,7 @@ static void copy_area(struct xs_client *client, const struct xin *in) {
 				pixman_image_unref(from);
 			}
 		}
-		damage(client->xserver, t.top, &region);
+		damage_target(client->xserver, &t, &region);
 		pixman_region32_fini(&region);
 	}
 	target_finish(&t);
@@ -1463,7 +1484,7 @@ static void copy_plane(struct xs_client *client, const struct xin *in) {
 		if (mask) {
 			pixman_image_unref(mask);
 		}
-		damage(client->xserver, t.top, &region);
+		damage_target(client->xserver, &t, &region);
 		pixman_region32_fini(&region);
 	}
 	target_finish(&t);

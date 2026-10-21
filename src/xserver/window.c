@@ -115,6 +115,7 @@ static void free_window(struct flame_xserver *xserver, struct xs_window *window)
 	xs_randr_window_gone(xserver, window->id);
 	xs_xi_window_gone(xserver, window->id);
 	xs_shape_window_gone(xserver, window);
+	xs_damage_drawable_gone(xserver, window->id);
 	xs_draw_window_freed(window);
 	wl_list_remove(&window->link);
 	wl_list_remove(&window->all_link);
@@ -454,6 +455,7 @@ void xs_focus_lost(struct flame_xserver *xserver, struct xs_window *window) {
 }
 
 void xs_pixmap_destroy(struct flame_xserver *xserver, struct xs_pixmap *pixmap) {
+	xs_damage_drawable_gone(xserver, pixmap->id);
 	if (xserver->hooks.pixmap_destroyed) {
 		xserver->hooks.pixmap_destroyed(xserver->hooks.data, pixmap);
 	}
@@ -511,6 +513,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	xs_randr_client_gone(xserver, client);
 	xs_xi_client_gone(xserver, client);
 	xs_shape_client_gone(xserver, client);
+	xs_damage_client_gone(xserver, client);
 	struct xs_fence *fence, *ftmp;
 	wl_list_for_each_safe(fence, ftmp, &xserver->fences, link) {
 		if (fence->owner == client) {
