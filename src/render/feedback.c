@@ -17,6 +17,13 @@ static void enter(struct flame_surface_state *state, struct wlr_output *output) 
 		wlr_surface_send_leave(state->surface, state->entered);
 	}
 	state->entered = output;
+	// cycles are counted per output, from 1 for a new one (one coming back
+	// after a vt switch is new): the old output's count means nothing here.
+	// kept, a surface would get no callbacks until this one caught up with
+	// it, frozen for as long as the old output ran
+	state->callback_cycle = 0;
+	state->jit_wake = 0;
+	state->jit_target = 0;
 	wlr_surface_send_enter(state->surface, output);
 	// clients render at the output's scale instead of getting stretched
 	wlr_fractional_scale_v1_notify_scale(state->surface, output->scale);

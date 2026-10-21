@@ -7,6 +7,7 @@
 
 #include "bindings/action.h"
 #include "core/server.h"
+#include "input/fake.h"
 #include "ipc/ipc.h"
 #include "ipc/state.h"
 #include "util/macros.h"
@@ -129,6 +130,28 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 	}
 	if (!strcmp(name, "pointer")) {
 		pointer_command(client, &save);
+		return;
+	}
+	if (!strcmp(name, "test")) {
+		// a vt switch where the driver drops the screens: they go and the
+		// keyboards with them, then all of it comes back
+		const char *what = strtok_r(NULL, " \t\r", &save);
+		struct flame_server *server = client->ipc->server;
+		if (!getenv("FLAME_TEST_INPUT")) {
+			reply_error(client, "start flame with FLAME_TEST_INPUT=1 for this");
+		} else if (what && !strcmp(what, "unplug")) {
+			reply_ok(client);
+			fake_keyboard_destroy(&server->input);
+			outputs_test_unplug(&server->outputs);
+		} else if (what && !strcmp(what, "plug")) {
+			reply_ok(client);
+			outputs_test_plug(&server->outputs);
+			if (!server->input.fake) {
+				fake_keyboard_create(&server->input);
+			}
+		} else {
+			reply_error(client, "test unplug|plug");
+		}
 		return;
 	}
 	if (!strcmp(name, "key")) {

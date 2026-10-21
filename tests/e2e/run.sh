@@ -151,6 +151,20 @@ sleep 0.8
 $CTL state | grep -o '\"floating\":[a-z]*,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0-9]*,\"height\":[0-9]*'" \
 	'"floating":true,"x":478,"y":238,"width":324,"height":244'
 
+case_run "vt switch dropping the screen: windows from before keep drawing and typing" "
+foot sh -c 'timeout 3 yes; clear; cat > typed' > /dev/null 2>&1 &
+sleep 4
+$CTL test unplug > /dev/null
+sleep 0.5
+$CTL test plug > /dev/null
+sleep 1
+grim before.png
+for k in h i Return; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done
+sleep 1
+grim after.png
+cat typed
+cmp -s before.png after.png || echo redrew" "hi" "redrew"
+
 case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &
 sleep 0.8

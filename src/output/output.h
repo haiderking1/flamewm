@@ -46,4 +46,9 @@ void outputs_schedule_frame(struct flame_outputs *outputs);
 // single output for now, the first one plugged in owns the desktop
 struct flame_output *outputs_primary(struct flame_outputs *outputs);
 
+// tests (FLAME_TEST_INPUT=1, headless): every screen goes, the way some
+// drivers drop them on a vt switch, and one comes back
+void outputs_test_unplug(struct flame_outputs *outputs);
+bool outputs_test_plug(struct flame_outputs *outputs);
+
 #endif
