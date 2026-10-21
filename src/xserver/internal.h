@@ -99,6 +99,8 @@ enum {
 #define XS_DAMAGE_OPCODE 147
 #define XS_DAMAGE_FIRST_EVENT 93
 #define XS_DAMAGE_FIRST_ERROR 161
+// windows' pixels for compositing managers, see composite.c
+#define XS_COMPOSITE_OPCODE 148
 
 // ---- talking back (xserver.c) ----
 
@@ -388,6 +390,12 @@ void xs_damage_client_gone(struct flame_xserver *xserver, struct xs_client *clie
 // the ids of damages from base's client, how many (out NULL: just count)
 size_t xs_damage_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
 bool xs_damage_id_in_use(struct flame_xserver *xserver, uint32_t id);
+
+// ---- Composite (composite.c) ----
+
+void xs_composite_request(struct xs_client *client, const struct xin *request);
+void xs_composite_window_gone(struct flame_xserver *xserver, uint32_t window);
+void xs_composite_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 void xs_shape_window_gone(struct flame_xserver *xserver, struct xs_window *window);
 void xs_shape_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 

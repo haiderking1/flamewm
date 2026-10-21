@@ -349,6 +349,9 @@ struct flame_xserver {
 	struct wl_list xi_selects;
 	struct wl_list shape_selects; // shape.c's
 	struct wl_list damages; // damage.c's
+	// composite.c's: who redirected what, who holds the overlay window
+	struct wl_list redirects, overlay_refs;
+	struct xs_window *overlay;
 	double scroll[2], scroll_notches[2];
 	bool scroll_primed;
 	// XKB, see xkb.c: flame's keymap worked out for X, the keyboard's state,

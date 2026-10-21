@@ -74,7 +74,7 @@ XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xcb-xfixes xcb-xinerama xcb-scree
 	xcb-dpms xcb-xtest xcb-shape xcb-render xcb-damage xcb-composite xkbcommon-x11 xkbcommon
 XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test \
 	$(BUILD)/tests/ids_test $(BUILD)/tests/misc_test $(BUILD)/tests/xfixes_test \
-	$(BUILD)/tests/damage_test $(BUILD)/tests/fuzz_test
+	$(BUILD)/tests/damage_test $(BUILD)/tests/composite_test $(BUILD)/tests/fuzz_test
 
 $(BUILD)/tests/harness: tests/xserver/harness.c $(XSERVER_SRCS)
 	@mkdir -p $(dir $@)
