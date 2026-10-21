@@ -118,6 +118,15 @@ static void apply(struct flame_xserver *xserver, struct xs_window *window, int k
 	xs_changed(xserver);
 }
 
+void xs_shape_get(struct xs_window *window, int kind, pixman_region32_t *out) {
+	current(window, kind, out);
+}
+
+void xs_shape_set(struct flame_xserver *xserver, struct xs_window *window, int kind,
+		pixman_region32_t *src) {
+	apply(xserver, window, kind, OP_SET, src);
+}
+
 static struct xs_window *window_arg(struct xs_client *client, const struct xin *in, size_t at,
 		uint8_t minor) {
 	uint32_t id = xin32(in, at);

@@ -526,8 +526,7 @@ void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *c
 	struct xs_region *region, *rtmp;
 	wl_list_for_each_safe(region, rtmp, &xserver->regions, link) {
 		if (region->owner == client) {
-			wl_list_remove(&region->link);
-			free(region);
+			xs_region_free(region);
 		}
 	}
 	struct xs_present_select *select, *sstmp;
