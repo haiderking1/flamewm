@@ -96,7 +96,8 @@ struct flame_xbridge {
 };
 
 bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server);
-// the X server starts listening, $FLAMEWM_X11_DISPLAY says where. flame runs
+// the X server starts listening, $DISPLAY (and $FLAMEWM_X11_DISPLAY) says
+// where, for everything flame starts. flame runs
 // fine without it
 void xbridge_start(struct flame_xbridge *xbridge);
 // init.lua reloaded: X follows what changed for it

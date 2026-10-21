@@ -19,7 +19,6 @@ case_run() {
 #!/bin/sh
 exec > "$WORK/out" 2>&1
 sleep 0.5
-export DISPLAY=\$FLAMEWM_X11_DISPLAY
 cd "$WORK"
 $script
 $CTL quit > /dev/null 2>&1
@@ -166,7 +165,6 @@ cat typed
 cmp -s before.png after.png || echo redrew" "hi" "redrew"
 
 case_run "EWMH: flame is X's window manager, and composites" "
-export DISPLAY=\$FLAMEWM_X11_DISPLAY
 $BIN/xewmh check" "wm flame, check points at itself: yes" "compositor: yes" \
 	"supports fullscreen: yes"
 case_run "EWMH: an X window goes fullscreen and back, asked to" "
@@ -180,7 +178,6 @@ $BIN/xewmh close" "active is the new one: yes" "active is the first one: yes" "c
 	"asked to close: yes"
 
 case_run "GTK client side decorations on X: shadows outside, click through, headerbar drags" "
-export DISPLAY=\$FLAMEWM_X11_DISPLAY
 GDK_BACKEND=x11 $BIN/gtkcsd tiled > /dev/null 2>&1 &
 sleep 1.5
 GDK_BACKEND=x11 $BIN/gtkcsd dialog dialog > /dev/null 2>&1 &
@@ -223,7 +220,6 @@ set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | g
 printf 'flame.output("*", { scale = 2 })\nflame.set { x_zero_scaling = true }\n' > "$WORK/zero.lua"
 CASE_ARGS="-c $WORK/zero.lua"
 case_run "X apps at scale 2, drawing at its pixels: dpi told, input lands, headerbars drag" "
-export DISPLAY=\$FLAMEWM_X11_DISPLAY
 $BIN/xewmh dpi
 GDK_BACKEND=x11 $BIN/gtkcsd dialog dialog > /dev/null 2>&1 &
 sleep 1.5

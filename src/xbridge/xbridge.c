@@ -14,21 +14,6 @@
 #include "util/listener.h"
 #include "util/macros.h"
 
-// whose wayland toplevels are views of their X windows
-static const char *const bridged[] = {"steamwebhelper"};
-// whose X windows are never shown: steam's UI is on wayland, the rest of its
-// X windows (the updater's, its old GL surface) are leftovers nobody sees on X
-static const char *const hidden[] = {"steam", "steamwebhelper"};
-
-static bool listed(const char *const *names, size_t count, const char *comm) {
-	for (size_t i = 0; i < count; i++) {
-		if (!strcmp(names[i], comm)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 static struct flame_xbridge_process *find(struct flame_xbridge *xbridge, pid_t pid) {
 	struct flame_xbridge_process *process;
 	wl_list_for_each(process, &xbridge->processes, link) {
@@ -272,6 +257,8 @@ void xbridge_window_placed(struct flame_xbridge_window *window, struct wlr_box b
 		MAX(xshell_to_x(xshell, box.y + box.height) - y0, 1));
 }
 
+static void hook_windows_changed(void *data);
+
 // ---- toplevels ----
 
 void xbridge_window_attach(struct flame_xbridge *xbridge, struct flame_xbridge_window *window,
@@ -282,6 +269,15 @@ void xbridge_window_attach(struct flame_xbridge *xbridge, struct flame_xbridge_w
 	pid_t pid;
 	wl_client_get_credentials(client, &pid, NULL, NULL);
 	struct flame_xbridge_process *process = find(xbridge, pid);
+	// a process making X views and wayland toplevels both draws over
+	// wayland what it runs on X (CEF on ozone wayland): from its first
+	// toplevel on they're one. anyone else's wayland windows are just that
+	bool claiming = process && !process->claimed && process->views_len > 0;
+	if (claiming) {
+		process->claimed = true;
+		wlr_log(WLR_INFO, "xbridge: %s (%d) draws its X windows over wayland, bridged",
+			process->comm, (int)pid);
+	}
 	if (!process || !process->claimed) {
 		return;
 	}
@@ -289,6 +285,10 @@ void xbridge_window_attach(struct flame_xbridge *xbridge, struct flame_xbridge_w
 	window->index = ++process->created;
 	wl_list_insert(process->windows.prev, &window->link);
 	wlr_log(WLR_DEBUG, "xbridge: pid %d toplevel #%u", (int)pid, window->index);
+	if (claiming) {
+		// its X windows stop showing as X windows, its toplevels follow them
+		hook_windows_changed(xbridge);
+	}
 }
 
 void xbridge_window_detach(struct flame_xbridge_window *window) {
@@ -388,7 +388,7 @@ void xbridge_pointer_pressed(struct flame_xbridge *xbridge, struct wlr_surface *
 
 bool xbridge_hides(struct flame_xbridge *xbridge, pid_t pid) {
 	struct flame_xbridge_process *process = find(xbridge, pid);
-	return process && (process->claimed || listed(hidden, LENGTH(hidden), process->comm));
+	return process && process->claimed;
 }
 
 static void release(struct flame_xbridge_process *process);
@@ -411,7 +411,6 @@ static void hook_connected(void *data, struct xs_client *client) {
 		}
 		process->xbridge = xbridge;
 		process->pid = client->pid;
-		process->claimed = listed(bridged, LENGTH(bridged), client->comm);
 		snprintf(process->comm, sizeof(process->comm), "%s", client->comm);
 		wl_list_init(&process->windows);
 		// apps open and close probe connections all the time, a process is
@@ -422,8 +421,7 @@ static void hook_connected(void *data, struct xs_client *client) {
 				process->pidfd, WL_EVENT_READABLE, handle_process_exit, process);
 		}
 		wl_list_insert(&xbridge->processes, &process->link);
-		wlr_log(WLR_INFO, "xbridge: %s (%d) talks X%s", client->comm, (int)client->pid,
-			process->claimed ? ", its windows are bridged" : "");
+		wlr_log(WLR_INFO, "xbridge: %s (%d) talks X", client->comm, (int)client->pid);
 	}
 	process->connections++;
 }
@@ -466,9 +464,9 @@ static void hook_window_created(void *data, struct xs_window *window) {
 	struct flame_xbridge *xbridge = data;
 	struct flame_xbridge_process *process = window->owner
 		? find(xbridge, window->owner->pid) : NULL;
-	// a view: something the app made inside one of its own top-levels
-	if (!process || !process->claimed || !window->parent
-			|| !xs_window_top_level(window->parent)) {
+	// a view: something the app made inside one of its own top-levels. kept
+	// for everyone, a process that also opens wayland toplevels gets bridged
+	if (!process || !window->parent || !xs_window_top_level(window->parent)) {
 		return;
 	}
 	if (process->views_len == process->views_cap) {
@@ -693,8 +691,9 @@ void xbridge_start(struct flame_xbridge *xbridge) {
 	xshell_started(&xbridge->server->xshell);
 	char display[16];
 	snprintf(display, sizeof(display), ":%d", xbridge->xserver.display);
-	// not $DISPLAY: an app picking X over wayland here would draw into
-	// nothing. launchers that know (tools/steam) hand it over on purpose
+	// like a compositor running Xwayland: whatever needs X finds it, apps
+	// that do both still pick wayland ($WAYLAND_DISPLAY goes first for them)
+	setenv("DISPLAY", display, true);
 	setenv("FLAMEWM_X11_DISPLAY", display, true);
 }
 
