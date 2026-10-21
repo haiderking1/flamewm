@@ -327,7 +327,8 @@ static struct flame_node *node_at(struct flame_node *node, int x, int y, double 
 	case FLAME_NODE_BUFFER:;
 		struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
 		struct wlr_box area = {x, y, buffer->width, buffer->height};
-		if (!buffer->texture || !wlr_box_contains_point(&area, lx, ly)) {
+		if ((!buffer->texture && !buffer->input_when_empty)
+				|| !wlr_box_contains_point(&area, lx, ly)) {
 			return NULL;
 		}
 		if (buffer->impl && buffer->impl->accepts_input

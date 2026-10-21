@@ -844,8 +844,23 @@ static bool self_presented(const struct flame_xwindow *window) {
 	return false;
 }
 
+// the cpu picture's node is the window's input too, where X has the window:
+// until something's drawn, or while the top-level presents to itself, it's
+// an empty one at X's size. input goes by where X has it, drawn or not
+static void core_input(struct flame_xwindow *window) {
+	struct xs_window *x = x_of(window);
+	if (!x || (window->core_texture && !self_presented(window))) {
+		return;
+	}
+	buffer_show(window->core_node, NULL, NULL, from_x(window->xshell, x->width),
+		from_x(window->xshell, x->height), false, NULL, 0);
+}
+
+// the top-level presenting to itself: that's its picture, the cpu's goes
 static void core_update(struct flame_xwindow *window) {
-	scene_node_set_enabled(&window->core_node->node, !self_presented(window));
+	if (self_presented(window)) {
+		core_input(window);
+	}
 }
 
 static void show(struct xlayer *layer, struct xpresent *xp) {
@@ -1722,6 +1737,9 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	window->content = parent ? scene_tree_create(parent) : NULL;
 	window->core_node = window->content
 		? scene_buffer_create(window->content, &core_impl, window) : NULL;
+	if (window->core_node) {
+		window->core_node->input_when_empty = true;
+	}
 	if (!window->core_node) {
 		if (window->content) {
 			scene_node_destroy(&window->content->node);
@@ -2039,6 +2057,10 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 		}
 	}
 	layers_update(xshell);
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		core_input(window);
+	}
 	floats_update(xshell);
 	x_stack_update(xshell);
 	ewmh_update(xshell);
@@ -2057,7 +2079,7 @@ static void content_refresh(struct flame_xwindow *window) {
 	wl_list_for_each(layer, &window->layers, link) {
 		layer_place(layer);
 	}
-	if (window->core && window->core_texture) {
+	if (window->core && window->core_texture && !self_presented(window)) {
 		pixman_image_t *image = window->core->image;
 		scene_buffer_set(window->core_node, window->core_texture,
 			(const void *)++window->core_serial,
@@ -2191,6 +2213,12 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 	xshell->pointer_window = window->id;
 	xserver_pointer_motion(xserver, x_of(window), xshell_to_x(xshell, lx),
 		xshell_to_x(xshell, ly), x_state(xshell), time);
+	if (xserver->pointer_window != xshell->pointer_logged) {
+		// where X apps' hovers and clicks go, for when they go somewhere odd
+		xshell->pointer_logged = xserver->pointer_window;
+		wlr_log(WLR_DEBUG, "xshell: pointer at %.0f,%.0f over 0x%x in 0x%x%s", lx, ly,
+			xserver->pointer_window, window->id, window->floating ? " (floats)" : "");
+	}
 	*view = window->floating ? NULL : &window->view;
 	return true;
 }

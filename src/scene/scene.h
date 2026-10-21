@@ -97,6 +97,9 @@ struct flame_buffer_node {
 	int width, height; // layout size it's drawn at
 	struct wlr_fbox src; // the part of texture shown, empty for all of it
 	bool opaque;
+	// takes the pointer over its whole size even with nothing to show: an
+	// X window gets input by where it is, drawn yet or not
+	bool input_when_empty;
 	// the gpu work that made the picture, waited on before reading it
 	struct wlr_drm_syncobj_timeline *wait_timeline;
 	uint64_t wait_point;
