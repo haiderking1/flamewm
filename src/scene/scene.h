@@ -82,6 +82,9 @@ struct flame_buffer_node_impl {
 	void (*sampled)(struct flame_buffer_node *node, struct flame_frame *frame,
 		uint64_t draw_id, struct wlr_drm_syncobj_timeline *render_done,
 		uint64_t render_point);
+	// a point (node coords) that shows but doesn't take input, a shadow:
+	// what's below gets it. NULL: everything does
+	bool (*accepts_input)(struct flame_buffer_node *node, double x, double y);
 };
 
 // a picture flame shows for something that isn't a wl_surface (X11 windows):

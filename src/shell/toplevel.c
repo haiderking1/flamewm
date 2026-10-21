@@ -524,6 +524,33 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data) 
 	wlr_xdg_surface_schedule_configure(xdg->base);
 }
 
+// a headerbar or a decoration's edge dragged: flame's drag takes it from
+// there, on the button the app saw go down (the serial says it did)
+static uint32_t held_button(struct flame_toplevel *toplevel, struct wlr_seat *seat,
+		uint32_t serial) {
+	if (!wlr_seat_validate_pointer_grab_serial(seat, toplevel->xdg->base->surface, serial)) {
+		return 0;
+	}
+	const struct wlr_seat_pointer_state *state = &seat->pointer_state;
+	return state->button_count > 0 ? state->buttons[0].button : 0;
+}
+
+static void handle_request_move(struct wl_listener *listener, void *data) {
+	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, request_move);
+	struct wlr_xdg_toplevel_move_event *event = data;
+	struct flame_server *server = toplevel->view.desktop->server;
+	drag_request(&server->input.drag, &toplevel->view, FLAME_DRAG_MOVE, 0,
+		held_button(toplevel, event->seat->seat, event->serial));
+}
+
+static void handle_request_resize(struct wl_listener *listener, void *data) {
+	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, request_resize);
+	struct wlr_xdg_toplevel_resize_event *event = data;
+	struct flame_server *server = toplevel->view.desktop->server;
+	drag_request(&server->input.drag, &toplevel->view, FLAME_DRAG_RESIZE, event->edges,
+		held_button(toplevel, event->seat->seat, event->serial));
+}
+
 // bars show the focused window's title, and browsers change it all the time
 static void handle_set_title(struct wl_listener *listener, void *data) {
 	struct flame_toplevel *toplevel = wl_container_of(listener, toplevel, set_title);
@@ -545,6 +572,8 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&toplevel->destroy);
 	listener_disconnect(&toplevel->request_maximize);
 	listener_disconnect(&toplevel->request_fullscreen);
+	listener_disconnect(&toplevel->request_move);
+	listener_disconnect(&toplevel->request_resize);
 	listener_disconnect(&toplevel->set_title);
 	listener_disconnect(&toplevel->set_app_id);
 
@@ -589,6 +618,10 @@ void toplevel_create(struct flame_server *server, struct wlr_xdg_toplevel *xdg_t
 		handle_request_maximize);
 	listener_connect(&toplevel->request_fullscreen,
 		&xdg_toplevel->events.request_fullscreen, handle_request_fullscreen);
+	listener_connect(&toplevel->request_move, &xdg_toplevel->events.request_move,
+		handle_request_move);
+	listener_connect(&toplevel->request_resize, &xdg_toplevel->events.request_resize,
+		handle_request_resize);
 	listener_connect(&toplevel->set_title, &xdg_toplevel->events.set_title, handle_set_title);
 	listener_connect(&toplevel->set_app_id, &xdg_toplevel->events.set_app_id,
 		handle_set_app_id);

@@ -179,6 +179,47 @@ $BIN/xewmh activate
 $BIN/xewmh close" "active is the new one: yes" "active is the first one: yes" "clients: 2" \
 	"asked to close: yes"
 
+case_run "GTK client side decorations on X: shadows outside, click through, headerbar drags" "
+export DISPLAY=\$FLAMEWM_X11_DISPLAY
+GDK_BACKEND=x11 $BIN/gtkcsd tiled > /dev/null 2>&1 &
+sleep 1.5
+GDK_BACKEND=x11 $BIN/gtkcsd dialog dialog > /dev/null 2>&1 &
+sleep 1.5
+$BIN/xwins
+$CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0-9]*,\"height\":[0-9]*'
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+fx=\$1; fy=\$2
+# deep in the shadow, left of the dialog: the tile under it takes the click
+$CTL pointer move \$((fx - 22)) \$((fy + 120)) > /dev/null
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.3
+$CTL state | grep -o '\"title\":\"[a-z]*\"' | head -1
+# the headerbar dragged: flame moves it
+$CTL pointer move \$((fx + 150)) \$((fy + 20)) > /dev/null
+$CTL pointer button left press > /dev/null
+for i in 1 2 3 4 5 6 7 8 9 10; do $CTL pointer move \$((fx + 150 + i * 6)) \$((fy + 20 + i * 4)) > /dev/null; sleep 0.03; done
+$CTL pointer button left release > /dev/null
+sleep 0.3
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+[ \$1 -gt \$((fx + 20)) ] && [ \$2 -gt \$((fy + 10)) ] && echo headerbar moved it" \
+	"tiled 8,8 1264x704" '"floating":true' '"title":"tiled"' "headerbar moved it"
+
+case_run "GTK client side decorations on wayland: the headerbar drags the window" "
+GDK_BACKEND=wayland $BIN/gtkcsd moving > /dev/null 2>&1 &
+sleep 1.5
+$CTL togglefloating > /dev/null
+sleep 0.5
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+fx=\$1; fy=\$2
+$CTL pointer move \$((fx + 150)) \$((fy + 20)) > /dev/null
+$CTL pointer button left press > /dev/null
+for i in 1 2 3 4 5 6 7 8 9 10; do $CTL pointer move \$((fx + 150 + i * 6)) \$((fy + 20 + i * 4)) > /dev/null; sleep 0.03; done
+$CTL pointer button left release > /dev/null
+sleep 0.3
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+[ \$1 -gt \$((fx + 20)) ] && [ \$2 -gt \$((fy + 10)) ] && echo headerbar moved it" \
+	"headerbar moved it"
+
 case_run "GL on X: a multisampled srgb config, made current, frames swapped and seen" "
 $BIN/glx > glx.out 2>&1 &
 sleep 0.9

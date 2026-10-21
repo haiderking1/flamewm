@@ -1,6 +1,7 @@
 #include "input/drag.h"
 
 #include <linux/input-event-codes.h>
+#include <wlr/util/edges.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
@@ -146,14 +147,15 @@ static const char *resize_cursor(struct flame_drag *drag, bool right, bool botto
 	return horizontal ? "ew-resize" : "ns-resize";
 }
 
-static bool begin_resize(struct flame_drag *drag, struct flame_view *view) {
-	struct wlr_cursor *cursor = pointer(drag);
-	// the quarter you grab decides which edges follow you
-	bool right = cursor->x >= view->geometry.x + view->geometry.width / 2.0;
-	bool bottom = cursor->y >= view->geometry.y + view->geometry.height / 2.0;
+// which edges follow: right or left, bottom or top, and whether across x
+// and y at all (a side follows one way only)
+static bool begin_resize_edges(struct flame_drag *drag, struct flame_view *view, bool right,
+		bool bottom, bool use_x, bool use_y) {
 	if (view->floating) {
 		drag->float_right = right;
 		drag->float_bottom = bottom;
+		drag->float_x = use_x;
+		drag->float_y = use_y;
 		drag->resize_pending = false;
 		// whatever's in flight lands now, nothing comes back over the drag
 		while (transaction_active(&drag->server->desktop.transaction)) {
@@ -164,8 +166,10 @@ static bool begin_resize(struct flame_drag *drag, struct flame_view *view) {
 		return true;
 	}
 
-	drag->horizontal = grab_axis(view, TREE_SPLIT_VERTICAL, right, &right);
-	drag->vertical = grab_axis(view, TREE_SPLIT_HORIZONTAL, bottom, &bottom);
+	drag->horizontal = use_x ? grab_axis(view, TREE_SPLIT_VERTICAL, right, &right)
+		: (struct flame_drag_axis){0};
+	drag->vertical = use_y ? grab_axis(view, TREE_SPLIT_HORIZONTAL, bottom, &bottom)
+		: (struct flame_drag_axis){0};
 	if (!drag->horizontal.split && !drag->vertical.split) {
 		return false; // alone on the workspace, nothing to resize
 	}
@@ -175,6 +179,14 @@ static bool begin_resize(struct flame_drag *drag, struct flame_view *view) {
 	// whatever's in flight lands now, from here on nothing waits
 	desktop_arrange_live(&drag->server->desktop);
 	return true;
+}
+
+static bool begin_resize(struct flame_drag *drag, struct flame_view *view) {
+	struct wlr_cursor *cursor = pointer(drag);
+	// the quarter you grab decides which edges follow you
+	bool right = cursor->x >= view->geometry.x + view->geometry.width / 2.0;
+	bool bottom = cursor->y >= view->geometry.y + view->geometry.height / 2.0;
+	return begin_resize_edges(drag, view, right, bottom, true, true);
 }
 
 static void resize_motion(struct flame_drag *drag) {
@@ -190,7 +202,14 @@ static void apply_float_resize(struct flame_drag *drag) {
 	struct wlr_cursor *cursor = pointer(drag);
 	int dx = (int)(cursor->x - drag->start_x), dy = (int)(cursor->y - drag->start_y);
 	struct wlr_box box = drag->float_start;
-	// the grabbed corner follows the cursor, the opposite one stays put
+	// the grabbed corner follows the cursor, the opposite one stays put. a
+	// side only across it
+	if (!drag->float_x) {
+		dx = 0;
+	}
+	if (!drag->float_y) {
+		dy = 0;
+	}
 	if (drag->float_right) {
 		box.width += dx;
 	} else {
@@ -269,6 +288,10 @@ void drag_frame(struct flame_drag *drag) {
 
 // ---- shared ----
 
+static bool start(struct flame_drag *drag, struct flame_view *view, enum flame_drag_mode mode,
+	uint32_t button, uint32_t edges);
+static uint32_t button_bit(uint32_t button);
+
 static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	struct flame_server *server = drag->server;
 	struct wlr_cursor *cursor = pointer(drag);
@@ -286,9 +309,18 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 		return false;
 	}
 
+	enum flame_drag_mode mode = button == BTN_LEFT ? FLAME_DRAG_MOVE : FLAME_DRAG_RESIZE;
+	return start(drag, view, mode, button, 0);
+}
+
+// edges 0: the quarter grabbed decides (mod + drag)
+static bool start(struct flame_drag *drag, struct flame_view *view, enum flame_drag_mode mode,
+		uint32_t button, uint32_t edges) {
+	struct flame_server *server = drag->server;
+	struct wlr_cursor *cursor = pointer(drag);
 	drag->view = view;
 	drag->button = button;
-	drag->mode = button == BTN_LEFT ? FLAME_DRAG_MOVE : FLAME_DRAG_RESIZE;
+	drag->mode = mode;
 	drag->start_x = cursor->x;
 	drag->start_y = cursor->y;
 	drag->float_start = view->float_box;
@@ -299,8 +331,16 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	if (view->floating) {
 		transaction_flush(&server->desktop.transaction);
 	}
-	bool started = drag->mode == FLAME_DRAG_MOVE
-		? begin_move(drag, view) : begin_resize(drag, view);
+	bool started;
+	if (mode == FLAME_DRAG_MOVE) {
+		started = begin_move(drag, view);
+	} else if (edges) {
+		started = begin_resize_edges(drag, view, edges & WLR_EDGE_RIGHT,
+			edges & WLR_EDGE_BOTTOM, edges & (WLR_EDGE_LEFT | WLR_EDGE_RIGHT),
+			edges & (WLR_EDGE_TOP | WLR_EDGE_BOTTOM));
+	} else {
+		started = begin_resize(drag, view);
+	}
 	if (!started) {
 		drag->view = NULL;
 		return false;
@@ -308,6 +348,21 @@ static bool try_begin(struct flame_drag *drag, uint32_t button) {
 	focus_view(&server->desktop, view);
 	// clients don't get the pointer while we're holding a window
 	wlr_seat_pointer_clear_focus(server->input.seat);
+	return true;
+}
+
+bool drag_request(struct flame_drag *drag, struct flame_view *view,
+		enum flame_drag_mode mode, uint32_t edges, uint32_t button) {
+	struct flame_server *server = drag->server;
+	if (drag->view || !view || !view->shown || view->workspace != server->desktop.active
+			|| view->fullscreen_shown || view->fullscreen_wanted || !button) {
+		return false;
+	}
+	if (!start(drag, view, mode, button, edges)) {
+		return false;
+	}
+	// the press went to the app, its release is the drag's
+	drag->swallowed |= button_bit(button);
 	return true;
 }
 

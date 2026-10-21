@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <linux/input-event-codes.h>
+#include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
 #include "core/server.h"
@@ -25,6 +27,8 @@ static const char *const atom_names[EWMH_ATOMS] = {
 	[NET_FRAME_EXTENTS] = "_NET_FRAME_EXTENTS",
 	[NET_REQUEST_FRAME_EXTENTS] = "_NET_REQUEST_FRAME_EXTENTS",
 	[NET_WM_WINDOW_TYPE] = "_NET_WM_WINDOW_TYPE",
+	[NET_WM_MOVERESIZE] = "_NET_WM_MOVERESIZE",
+	[GTK_FRAME_EXTENTS] = "_GTK_FRAME_EXTENTS",
 	[NET_WM_CM_S0] = "_NET_WM_CM_S0",
 };
 
@@ -219,6 +223,47 @@ static struct flame_xwindow *managed(struct flame_xshell *xshell, uint32_t id) {
 	return NULL;
 }
 
+// _NET_WM_MOVERESIZE's directions, top-left clockwise, then move
+static const uint32_t direction_edges[8] = {
+	WLR_EDGE_TOP | WLR_EDGE_LEFT, WLR_EDGE_TOP, WLR_EDGE_TOP | WLR_EDGE_RIGHT, WLR_EDGE_RIGHT,
+	WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT, WLR_EDGE_BOTTOM, WLR_EDGE_BOTTOM | WLR_EDGE_LEFT,
+	WLR_EDGE_LEFT,
+};
+#define DIRECTION_MOVE 8
+#define DIRECTION_CANCEL 11
+
+// a headerbar or a decoration's edge dragged: flame's drag takes it from
+// there. the app saw the button go down and lets go of the pointer: its
+// release is the drag's, X forgets it's held
+static void move_resize(struct flame_xshell *xshell, struct flame_xwindow *window,
+		const uint32_t data[5]) {
+	struct flame_drag *drag = &xshell->server->input.drag;
+	uint32_t direction = data[2];
+	if (direction == DIRECTION_CANCEL) {
+		drag_forget(drag, &window->view);
+		return;
+	}
+	if (direction > DIRECTION_MOVE) {
+		return; // keyboard moves and sizes: flame's are mod + mouse
+	}
+	// the button it says, or the one held
+	static const uint32_t buttons[] = {0, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
+	uint32_t xbutton = data[3] < 4 ? data[3] : 0;
+	if (!xbutton) {
+		for (uint32_t b = 1; b <= 3 && !xbutton; b++) {
+			xbutton = xshell->buttons & (1u << (7 + b)) ? b : 0;
+		}
+	}
+	uint32_t button = buttons[xbutton];
+	bool move = direction == DIRECTION_MOVE;
+	if (drag_request(drag, &window->view, move ? FLAME_DRAG_MOVE : FLAME_DRAG_RESIZE,
+			move ? 0 : direction_edges[direction], button) && xbutton) {
+		uint16_t bit = (uint16_t)(1u << (7 + xbutton));
+		xshell->buttons &= (uint16_t)~bit;
+		xshell->xserver->state &= (uint16_t)~bit;
+	}
+}
+
 #define STATE_REMOVE 0
 #define STATE_ADD 1
 #define STATE_TOGGLE 2
@@ -268,5 +313,7 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 		}
 	} else if (type == atom(xshell, NET_CLOSE_WINDOW)) {
 		view_close(view);
+	} else if (type == atom(xshell, NET_WM_MOVERESIZE)) {
+		move_resize(xshell, window, data);
 	}
 }

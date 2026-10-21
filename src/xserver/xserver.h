@@ -445,6 +445,9 @@ void xserver_send_client_message(struct flame_xserver *xserver, uint32_t window,
 // the top-level X has at a root point (its stacking, not flame's), NULL for none
 struct xs_window *xserver_top_level_at(struct flame_xserver *xserver, int x, int y);
 void xserver_window_root_position(struct xs_window *window, int *x, int *y);
+// a point, window coords, the window takes input at: inside its bounding and
+// input shapes (toolkits cut their shadows out of them)
+bool xserver_window_accepts_input(const struct xs_window *window, int x, int y);
 // an atom by name, made when it doesn't exist. NULL name for unknown ones
 uint32_t xserver_atom(struct flame_xserver *xserver, const char *name);
 const char *xserver_atom_name(struct flame_xserver *xserver, uint32_t atom);

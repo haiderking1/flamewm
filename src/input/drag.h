@@ -38,9 +38,11 @@ struct flame_drag {
 	double start_x, start_y; // cursor when it started
 	int origin_x, origin_y; // where the window sat when it started (move)
 	struct flame_drag_axis horizontal, vertical; // (resize)
-	// a floating window: its box when it started, which corner follows
+	// a floating window: its box when it started, which corner follows, and
+	// which axes do (a side only follows across it)
 	struct wlr_box float_start;
 	bool float_right, float_bottom;
+	bool float_x, float_y;
 	bool resize_pending; // the cursor moved since the last frame (resize)
 	// mouse buttons whose press we ate, so only their releases get eaten too
 	uint32_t swallowed;
@@ -54,6 +56,13 @@ bool drag_button(struct flame_drag *drag, uint32_t button, bool pressed);
 void drag_motion(struct flame_drag *drag);
 // an output is about to draw, a resize catches up with the cursor here
 void drag_frame(struct flame_drag *drag);
+
+// the window asks (a headerbar dragged, a decoration's edge): moved or
+// resized as if mod were held, while button (held now, the app saw it go
+// down) stays down. edges: WLR_EDGE_* that follow, for a resize. false: it
+// can't be now
+bool drag_request(struct flame_drag *drag, struct flame_view *view,
+	enum flame_drag_mode mode, uint32_t edges, uint32_t button);
 
 // put it back where it was, nothing swaps
 void drag_cancel(struct flame_drag *drag);
