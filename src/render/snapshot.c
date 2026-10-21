@@ -118,6 +118,30 @@ static void draw(struct wlr_render_pass *pass, const struct flame_render_target 
 	}
 }
 
+bool render_elements_to_buffer(struct flame_render *render,
+		const struct flame_element_list *list, struct wlr_box area, float scale,
+		struct wlr_buffer *buffer) {
+	struct flame_render_target target = {
+		.logical = area,
+		.scale = scale,
+		.transform = WL_OUTPUT_TRANSFORM_NORMAL,
+		.trans_width = buffer->width,
+		.trans_height = buffer->height,
+	};
+	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(render->renderer, buffer,
+		NULL);
+	if (!pass) {
+		return false;
+	}
+	wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+		.box = {0, 0, buffer->width, buffer->height},
+		.color = {0, 0, 0, 0},
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	});
+	draw(pass, &target, list);
+	return wlr_render_pass_submit(pass);
+}
+
 struct wlr_texture *render_snapshot(struct flame_frame *frame, struct flame_node *node,
 		struct wlr_box *box, struct wlr_fbox *src) {
 	struct wlr_box area;
