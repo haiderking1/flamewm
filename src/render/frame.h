@@ -36,8 +36,10 @@ struct flame_frame_presented {
 struct flame_frame_hooks {
 	void *data;
 	// right before a frame gets built from the scene (a mouse resize lands
-	// here, animations step to target: when this frame should be on screen)
-	void (*before_render)(void *data, int64_t target);
+	// here, animations step to target: when this frame should be on screen).
+	// true: the next frame is wanted too. asking from in here any other way
+	// is lost, this frame's submission clears it
+	bool (*before_render)(void *data, int64_t target);
 	// frame callbacks just went out (transactions keep hidden windows drawing).
 	// new_cycle: a submission or the refresh grid moving on, at most once a
 	// refresh. anything re-requesting frames from here has to wait for one, a
