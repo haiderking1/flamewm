@@ -1,6 +1,7 @@
 #include "output/output.h"
 
 #include <drm_fourcc.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -68,6 +69,13 @@ static bool output_enable(struct wlr_output *wlr_output, const struct flame_conf
 	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 	if (mode) {
 		wlr_output_state_set_mode(&state, mode);
+	}
+	// tests: a headless screen the size of a real one, FLAME_HEADLESS_SIZE=WxH
+	const char *size = getenv("FLAME_HEADLESS_SIZE");
+	int width, height;
+	if (size && wlr_output_is_headless(wlr_output)
+			&& sscanf(size, "%dx%d", &width, &height) == 2 && width > 0 && height > 0) {
+		wlr_output_state_set_custom_mode(&state, width, height, 0);
 	}
 
 	// frames with alpha, 32 bits either way: nvidia reads an XRGB buffer
