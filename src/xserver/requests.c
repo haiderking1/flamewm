@@ -632,16 +632,28 @@ static void query_colors(struct xs_client *client, const struct xin *in) {
 // flame's xkb keymap as X's core one: two levels per key, plain and shifted
 // flame's keymap, the core way: a row of keysyms per keycode, both layouts
 static void get_keyboard_mapping(struct xs_client *client, const struct xin *in) {
-	struct flame_xserver *xserver = client->xserver;
 	uint8_t first = xin8(in, 4), count = xin8(in, 5);
 	if (first < 8 || first + count - 1 > 255) {
 		xs_error(client, XS_ERROR_VALUE, first, 101, 0);
 		return;
 	}
+	xs_keyboard_mapping_reply(client, first, count, 0);
+}
+
+// XI1's has the same rows, its reply type where the core one has the width
+void xs_keyboard_mapping_reply(struct xs_client *client, uint8_t first, uint8_t count,
+		uint8_t xi_minor) {
+	struct flame_xserver *xserver = client->xserver;
 	int width = xs_xkb_core_width(xserver);
 	struct xout out;
-	xs_reply_begin(client, &out, (uint8_t)width);
-	xout_zero(&out, 24);
+	if (xi_minor) {
+		xs_reply_begin(client, &out, xi_minor);
+		xout8(&out, (uint8_t)width);
+		xout_zero(&out, 23);
+	} else {
+		xs_reply_begin(client, &out, (uint8_t)width);
+		xout_zero(&out, 24);
+	}
 	for (int i = 0; i < count; i++) {
 		uint32_t syms[XS_XKB_CORE_MAX];
 		xs_xkb_core_syms(xserver, (uint8_t)(first + i), syms, width);
@@ -652,8 +664,9 @@ static void get_keyboard_mapping(struct xs_client *client, const struct xin *in)
 	xs_reply_send(client, &out);
 }
 
-// which keys are the modifiers, from what the keymap's keys do
-static void get_modifier_mapping(struct xs_client *client) {
+// which keys are the modifiers, from what the keymap's keys do. xi_minor:
+// XI1's reply, 0 the core one
+void xs_modifier_mapping_reply(struct xs_client *client, uint8_t xi_minor) {
 	struct flame_xserver *xserver = client->xserver;
 	uint8_t max;
 	uint8_t min = xs_xkb_range(xserver, &max);
@@ -669,8 +682,14 @@ static void get_modifier_mapping(struct xs_client *client) {
 		}
 	}
 	struct xout out;
-	xs_reply_begin(client, &out, (uint8_t)per); // keycodes per modifier
-	xout_zero(&out, 24);
+	if (xi_minor) {
+		xs_reply_begin(client, &out, xi_minor);
+		xout8(&out, (uint8_t)per);
+		xout_zero(&out, 23);
+	} else {
+		xs_reply_begin(client, &out, (uint8_t)per); // keycodes per modifier
+		xout_zero(&out, 24);
+	}
 	for (int m = 0; m < 8; m++) {
 		xout_bytes(&out, keys[m], (size_t)per);
 	}
@@ -1010,16 +1029,17 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case 118: // SetModifierMapping
 		reply_empty(client, 0); // Success
 		break;
-	case 117: // GetPointerMapping: 1 2 3
-		xs_reply_begin(client, &out, 3);
+	case 117: // GetPointerMapping: every button itself, as many as XI says
+		xs_reply_begin(client, &out, XS_POINTER_BUTTONS);
 		xout_zero(&out, 24);
-		xout8(&out, 1);
-		xout8(&out, 2);
-		xout8(&out, 3);
+		for (uint8_t b = 1; b <= XS_POINTER_BUTTONS; b++) {
+			xout8(&out, b);
+		}
+		xout_pad(&out);
 		xs_reply_send(client, &out);
 		break;
 	case 119:
-		get_modifier_mapping(client);
+		xs_modifier_mapping_reply(client, 0);
 		break;
 	case XS_BIG_REQUESTS_OPCODE:
 		big_requests(client, in);

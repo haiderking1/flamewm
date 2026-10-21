@@ -247,6 +247,14 @@ size_t xs_cursor_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out
 // the pointer grab's cursor, the grab held
 void xs_grab_cursor(struct flame_xserver *xserver, struct xs_cursor *cursor);
 
+// the core keyboard and modifier mappings, as the core reply (xi_minor 0)
+// or XI1's GetDeviceKeyMapping / GetDeviceModifierMapping
+void xs_keyboard_mapping_reply(struct xs_client *client, uint8_t first, uint8_t count,
+	uint8_t xi_minor);
+void xs_modifier_mapping_reply(struct xs_client *client, uint8_t xi_minor);
+// the pointer's buttons: left, middle, right, the wheel's four, back, forward
+#define XS_POINTER_BUTTONS 9
+
 // everything a client made goes when it does
 void xs_client_resources_free(struct flame_xserver *xserver, struct xs_client *client);
 
