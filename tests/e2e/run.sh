@@ -192,6 +192,21 @@ sleep 0.3
 echo \"foot got: \$(head -c1 typed), F9 \$(grep -o '\\[20~' typed | wc -l) time\"" \
 	"hotkey grabbed: yes" "taken twice: no" "held while typed in wayland: yes" "up after: yes" \
 	"raw events: 2" "hotkey presses: 1" "hotkey presses after ungrab: 0" "foot got: a, F9 1 time"
+case_run "a fullscreen X game shows its own buffers (direct scanout) and never stalls" "
+$BIN/glxfull 3 > full.out 2>&1 &
+sleep 0.8
+$CTL pointer move 300 300 > /dev/null
+sleep 0.7
+$CTL state | grep -o '\"scanout\":[a-z]*'
+grim -t ppm full.ppm
+wait
+cat full.out
+python3 -I -c \"
+d = open('full.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):][(h // 2 * w + w // 2) * 3:][:3]
+print('center', *px)
+\"" '"scanout":true' "kept going: yes" "center 0 255 0"
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

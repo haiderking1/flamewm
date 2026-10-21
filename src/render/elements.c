@@ -235,6 +235,7 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 				pushed->buffer_node = buffer;
 				pushed->wait_timeline = buffer->wait_timeline;
 				pushed->wait_point = buffer->wait_point;
+				pushed->buffer = buffer->scanout_buffer;
 			}
 		}
 		break;

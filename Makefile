@@ -156,6 +156,11 @@ $(E2E)/glxchild: tests/e2e/glxchild.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_DEFAULT_SOURCE -o $@ $< $(shell pkg-config --cflags --libs gl x11)
 
+$(E2E)/glxfull: tests/e2e/glxfull.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< \
+		$(shell pkg-config --cflags --libs gl x11)
+
 $(E2E)/gtkcsd: tests/e2e/gtkcsd.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -o $@ $< $(shell pkg-config --cflags --libs gtk+-3.0)
@@ -173,7 +178,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

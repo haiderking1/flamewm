@@ -57,7 +57,7 @@ not linked, flame works without them, these features don't.
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland drag and drop client |
 | gbm (mesa or the nvidia driver), libdrm | `gbm` `libdrm` | `make e2e`: window sharing into gpu buffers, the way the portal takes frames |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
-| libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: an X GL app, multisampled, swapping frames |
+| libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
 

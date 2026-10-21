@@ -85,6 +85,11 @@ struct flame_buffer_node_impl {
 	// a point (node coords) that shows but doesn't take input, a shadow:
 	// what's below gets it. NULL: everything does
 	bool (*accepts_input)(struct flame_buffer_node *node, double x, double y);
+	// a frame put scanout_buffer itself on screen (direct scanout), as draw_id
+	// on frame's output. it stays on screen, read by KMS, until a frame after
+	// that one reaches the screen (events.presented with a later draw_id)
+	void (*scanned_out)(struct flame_buffer_node *node, struct flame_frame *frame,
+		uint64_t draw_id);
 };
 
 // a picture flame shows for something that isn't a wl_surface (X11 windows):
@@ -103,6 +108,9 @@ struct flame_buffer_node {
 	// the gpu work that made the picture, waited on before reading it
 	struct wlr_drm_syncobj_timeline *wait_timeline;
 	uint64_t wait_point;
+	// the buffer texture was made from, when the owner lets KMS show it
+	// itself (a fullscreen X game, see impl.scanned_out). NULL: drawn only
+	struct wlr_buffer *scanout_buffer;
 	const struct flame_buffer_node_impl *impl;
 	void *data;
 };

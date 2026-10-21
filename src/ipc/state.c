@@ -2,6 +2,7 @@
 
 #include <wayland-util.h>
 
+#include "core/server.h"
 #include "desktop/desktop.h"
 #include "util/strbuf.h"
 
@@ -25,6 +26,21 @@ static void write_window(struct strbuf *out, struct flame_view *view) {
 		box.height);
 }
 
+// each screen and how its frames go out: scanout, a client's buffer shown by
+// KMS itself with nothing composed
+static void write_outputs(struct flame_server *server, struct strbuf *out) {
+	strbuf_printf(out, ",\"outputs\":[");
+	struct flame_output *output;
+	bool first = true;
+	wl_list_for_each(output, &server->outputs.list, link) {
+		strbuf_printf(out, "%s{\"name\":", first ? "" : ",");
+		strbuf_json_string(out, output->wlr->name);
+		strbuf_printf(out, ",\"scanout\":%s}", output->frames.scanout.active ? "true" : "false");
+		first = false;
+	}
+	strbuf_printf(out, "]");
+}
+
 void ipc_state_write(struct flame_desktop *desktop, struct strbuf *out) {
 	// ids are what you press: 1..9, then 10 on the 0 key
 	strbuf_printf(out, "{\"event\":\"state\",\"workspace\":%d,\"workspaces\":[",
@@ -38,5 +54,6 @@ void ipc_state_write(struct flame_desktop *desktop, struct strbuf *out) {
 	}
 	strbuf_printf(out, "],\"window\":");
 	write_window(out, desktop->focused);
+	write_outputs(desktop->server, out);
 	strbuf_printf(out, "}");
 }
