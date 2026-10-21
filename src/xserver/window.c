@@ -658,6 +658,9 @@ void xserver_focus_window(struct flame_xserver *xserver, struct xs_window *windo
 		input = !(v[0] & 1) || v[1];
 	}
 	bool take_focus = listed(xserver, window, "WM_PROTOCOLS", "WM_TAKE_FOCUS");
+	wlr_log(WLR_DEBUG, "xserver: the window manager focuses 0x%x of %s:%s%s", window->id,
+		window->owner ? window->owner->comm : "flame", input ? " SetInputFocus" : "",
+		take_focus ? " WM_TAKE_FOCUS" : "");
 	if (input || !take_focus) {
 		// passive and locally active take it from us. one that takes no
 		// input and won't take it itself gets nothing: no keys go astray

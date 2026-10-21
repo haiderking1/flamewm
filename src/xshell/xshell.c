@@ -2389,6 +2389,18 @@ bool xshell_pointer_button(struct flame_xshell *xshell, uint32_t button, bool pr
 	if (!xbutton) {
 		return true;
 	}
+	// a click in the window flame has focused while X's keyboard focus is
+	// out of the app (it was offered with WM_TAKE_FOCUS and let it go by):
+	// offered again, like X window managers do on a click
+	struct flame_xwindow *window = pressed && !xserver_pointer_grabbed(xshell->xserver)
+		? find_window(xshell, xshell->pointer_window) : NULL;
+	struct xs_window *x = window && &window->view == xshell->server->desktop.focused
+		? x_of(window) : NULL;
+	if (x && x->owner && x_pid(xshell->xserver, xshell->xserver->focus) != x->owner->pid) {
+		wlr_log(WLR_DEBUG, "xshell: click in 0x%x, the keyboard isn't in it: offered again",
+			x->id);
+		xserver_focus_window(xshell->xserver, x);
+	}
 	// the state an event carries is from before it
 	uint16_t state = x_state(xshell);
 	if (xbutton <= 5) {
