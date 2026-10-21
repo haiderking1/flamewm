@@ -376,6 +376,36 @@ static void set_clip_rectangles(struct xs_client *client, const struct xin *in) 
 	free(boxes);
 }
 
+int xs_render_picture_clip(struct flame_xserver *xserver, uint32_t id,
+		pixman_region32_t *out) {
+	struct picture *picture = picture_find(xserver, id);
+	if (!picture) {
+		return XS_RENDER_FIRST_ERROR + ERROR_PICTURE;
+	}
+	if (!picture->clipped) {
+		return XS_ERROR_MATCH;
+	}
+	pixman_region32_copy(out, &picture->clip);
+	return 0;
+}
+
+int xs_render_set_picture_clip(struct flame_xserver *xserver, uint32_t id,
+		const pixman_region32_t *region, int x, int y) {
+	struct picture *picture = picture_find(xserver, id);
+	if (!picture) {
+		return XS_RENDER_FIRST_ERROR + ERROR_PICTURE;
+	}
+	pixman_region32_fini(&picture->clip);
+	pixman_region32_init(&picture->clip);
+	picture->clipped = region != NULL;
+	if (region) {
+		pixman_region32_copy(&picture->clip, region);
+	}
+	picture->clip_x = (int16_t)x;
+	picture->clip_y = (int16_t)y;
+	return 0;
+}
+
 static void set_transform(struct xs_client *client, const struct xin *in) {
 	struct picture *picture = get_picture(client, xin32(in, 4), 28);
 	if (!picture) {

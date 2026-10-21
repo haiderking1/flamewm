@@ -167,6 +167,7 @@ struct xs_region {
 	struct wl_list link; // flame_xserver.regions
 	uint32_t id;
 	struct xs_client *owner;
+	pixman_region32_t region;
 };
 
 // who wants Present's events for a window

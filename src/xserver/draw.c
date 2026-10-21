@@ -196,7 +196,7 @@ struct xs_pixmap *xs_pixmap_find(struct flame_xserver *xserver, uint32_t id) {
 	return NULL;
 }
 
-static struct xs_gc *gc_find(struct flame_xserver *xserver, uint32_t id) {
+struct xs_gc *xs_gc_find(struct flame_xserver *xserver, uint32_t id) {
 	struct xs_gc *gc;
 	wl_list_for_each(gc, &xserver->gcs, link) {
 		if (gc->id == id) {
@@ -208,7 +208,7 @@ static struct xs_gc *gc_find(struct flame_xserver *xserver, uint32_t id) {
 
 static struct xs_gc *get_gc(struct xs_client *client, uint32_t id, uint8_t major,
 		uint16_t minor) {
-	struct xs_gc *gc = gc_find(client->xserver, id);
+	struct xs_gc *gc = xs_gc_find(client->xserver, id);
 	if (!gc) {
 		xs_error(client, XS_ERROR_GC, id, major, minor);
 	}

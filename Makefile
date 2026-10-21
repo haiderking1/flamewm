@@ -71,9 +71,10 @@ $(BUILD)/tests/hiccup_test: tests/hiccup_test.c src/render/hiccup.c
 # the clients are plain xcb (test-only deps, see deps.md)
 XSERVER_SRCS := $(wildcard src/xserver/*.c) src/util/strbuf.c
 XTEST_PKGS := xcb xcb-xinput xcb-randr xcb-xkb xcb-xfixes xcb-xinerama xcb-screensaver \
-	xcb-dpms xcb-xtest xcb-shape xkbcommon-x11 xkbcommon
+	xcb-dpms xcb-xtest xcb-shape xcb-render xcb-damage xcb-composite xkbcommon-x11 xkbcommon
 XTESTS := $(BUILD)/tests/xinput_test $(BUILD)/tests/xkb_test $(BUILD)/tests/selection_test \
-	$(BUILD)/tests/ids_test $(BUILD)/tests/misc_test $(BUILD)/tests/fuzz_test
+	$(BUILD)/tests/ids_test $(BUILD)/tests/misc_test $(BUILD)/tests/xfixes_test \
+	$(BUILD)/tests/fuzz_test
 
 $(BUILD)/tests/harness: tests/xserver/harness.c $(XSERVER_SRCS)
 	@mkdir -p $(dir $@)

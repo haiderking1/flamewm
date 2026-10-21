@@ -203,6 +203,7 @@ bool xs_draw_get_image(struct xs_client *client, uint32_t drawable, int x, int y
 	uint8_t *out, size_t stride, uint8_t *depth, uint32_t *visual, uint8_t major,
 	uint16_t minor);
 void xs_gc_destroy(struct xs_gc *gc);
+struct xs_gc *xs_gc_find(struct flame_xserver *xserver, uint32_t id);
 // the window tree changed what shows: backings, backgrounds and Expose
 void xs_draw_window_shown(struct flame_xserver *xserver, struct xs_window *window);
 void xs_draw_window_hidden(struct flame_xserver *xserver, struct xs_window *window);
@@ -221,6 +222,13 @@ void xs_damage(struct flame_xserver *xserver, struct xs_window *top,
 // ---- RENDER (render.c) ----
 
 void xs_render_request(struct xs_client *client, const struct xin *request);
+// a picture's clip into out (initialized), drawable coords before its clip
+// origin. 0, or the error: BadPicture, BadMatch for no clip
+int xs_render_picture_clip(struct flame_xserver *xserver, uint32_t id,
+	pixman_region32_t *out);
+// region NULL: no clip. 0, or BadPicture
+int xs_render_set_picture_clip(struct flame_xserver *xserver, uint32_t id,
+	const pixman_region32_t *region, int x, int y);
 void xs_render_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 void xs_render_finish(struct flame_xserver *xserver);
 
@@ -350,6 +358,11 @@ void xs_xtest_request(struct xs_client *client, const struct xin *request);
 void xs_shape_request(struct xs_client *client, const struct xin *request);
 // a point, window coords, inside its bounding and input shapes
 bool xs_shape_contains(const struct xs_window *window, int x, int y);
+// kind 0 bounding, 1 clip, 2 input: the shape now, window coords, into out
+// (the caller finishes it). set: src NULL goes back to the rectangle
+void xs_shape_get(struct xs_window *window, int kind, pixman_region32_t *out);
+void xs_shape_set(struct flame_xserver *xserver, struct xs_window *window, int kind,
+	pixman_region32_t *src);
 void xs_shape_window_gone(struct flame_xserver *xserver, struct xs_window *window);
 void xs_shape_client_gone(struct flame_xserver *xserver, struct xs_client *client);
 
@@ -375,6 +388,9 @@ void xs_xres_request(struct xs_client *client, const struct xin *request);
 // ---- the gpu path (xfixes.c, sync.c, dri3.c, present.c) ----
 
 void xs_xfixes_request(struct xs_client *client, const struct xin *request);
+struct xs_region *xs_region_find(struct flame_xserver *xserver, uint32_t id);
+// unlinks and frees it
+void xs_region_free(struct xs_region *region);
 void xs_sync_request(struct xs_client *client, const struct xin *request);
 void xs_dri3_request(struct xs_client *client, const struct xin *request);
 void xs_present_request(struct xs_client *client, const struct xin *request);
