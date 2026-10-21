@@ -543,8 +543,8 @@ bool xselection_dnd_over_x(struct flame_xselection *xselection, double lx, doubl
 		x_target_enter(dnd, window, version, source);
 	}
 	struct flame_xshell *xshell = &xselection->server->xshell;
-	dnd->last_x = (uint32_t)xshell_to_x(xshell, lx) & 0xffff;
-	dnd->last_y = (uint32_t)xshell_to_x(xshell, ly) & 0xffff;
+	dnd->last_x = (uint32_t)xshell_pointer_to_x(xshell, lx) & 0xffff;
+	dnd->last_y = (uint32_t)xshell_pointer_to_x(xshell, ly) & 0xffff;
 	send_position(dnd, time);
 	return true;
 }

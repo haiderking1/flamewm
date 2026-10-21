@@ -175,6 +175,15 @@ $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 
+case_run "a pointer between pixels: flame and X agree which window it's in" "
+$BIN/xewmh subpixel > sub.out 2>&1 &
+sleep 1
+$CTL pointer move 80.3 199.6 > /dev/null
+sleep 0.5
+$CTL pointer move 80.3 200.4 > /dev/null
+wait
+cat sub.out" "ready" "window row 199" "popup row 200"
+
 case_run "EWMH: activating and closing the EWMH way" "
 $BIN/xewmh activate
 $BIN/xewmh close" "active is the new one: yes" "active is the first one: yes" "clients: 2" \

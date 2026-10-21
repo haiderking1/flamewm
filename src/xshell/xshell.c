@@ -48,6 +48,17 @@ double xshell_from_x(const struct flame_xshell *xshell, double v) {
 	return v / xshell->scale;
 }
 
+int xshell_pointer_to_x(const struct flame_xshell *xshell, double v) {
+	return (int)floor(v * xshell->scale);
+}
+
+// the middle of the X pixel the pointer's in, layout coords: who's under the
+// pointer is decided there, so flame and X agree to the pixel. a pointer
+// at 41.7 is in X's row 41, it can't be over a window that starts at 42
+static double pointer_snap(const struct flame_xshell *xshell, double v) {
+	return xshell_from_x(xshell, xshell_pointer_to_x(xshell, v) + 0.5);
+}
+
 // an X length in whole layout units
 static int from_x(const struct flame_xshell *xshell, int v) {
 	return (int)lround(xshell_from_x(xshell, v));
@@ -2220,7 +2231,8 @@ static struct flame_xwindow *window_at(struct flame_xshell *xshell, double lx, d
 }
 
 uint32_t xshell_window_at(struct flame_xshell *xshell, double lx, double ly) {
-	struct flame_xwindow *window = window_at(xshell, lx, ly);
+	struct flame_xwindow *window = window_at(xshell, pointer_snap(xshell, lx),
+		pointer_snap(xshell, ly));
 	return window ? window->id : 0;
 }
 
@@ -2230,14 +2242,16 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 	*view = NULL;
 	// a held button keeps feeding the window it went down on
 	struct flame_xwindow *window = xshell->buttons && xshell->pointer_window
-		? find_window(xshell, xshell->pointer_window) : window_at(xshell, lx, ly);
+		? find_window(xshell, xshell->pointer_window)
+		: window_at(xshell, pointer_snap(xshell, lx), pointer_snap(xshell, ly));
+	int x = xshell_pointer_to_x(xshell, lx), y = xshell_pointer_to_x(xshell, ly);
 	if (xserver_pointer_grabbed(xserver)) {
 		// an X client holds the pointer (its menu is open): everything goes
 		// to it wherever the pointer is, over wayland windows too, and the
 		// pointer moves no focus until it lets go, like under any X server
 		xshell->pointer_window = window ? window->id : 0;
-		xserver_pointer_motion(xserver, window ? x_of(window) : NULL,
-			xshell_to_x(xshell, lx), xshell_to_x(xshell, ly), x_state(xshell), time);
+		xserver_pointer_motion(xserver, window ? x_of(window) : NULL, x, y, x_state(xshell),
+			time);
 		return true;
 	}
 	if (!window) {
@@ -2248,12 +2262,11 @@ bool xshell_pointer_motion(struct flame_xshell *xshell, double lx, double ly, ui
 		return false;
 	}
 	xshell->pointer_window = window->id;
-	xserver_pointer_motion(xserver, x_of(window), xshell_to_x(xshell, lx),
-		xshell_to_x(xshell, ly), x_state(xshell), time);
+	xserver_pointer_motion(xserver, x_of(window), x, y, x_state(xshell), time);
 	if (xserver->pointer_window != xshell->pointer_logged) {
 		// where X apps' hovers and clicks go, for when they go somewhere odd
 		xshell->pointer_logged = xserver->pointer_window;
-		wlr_log(WLR_DEBUG, "xshell: pointer at %.0f,%.0f over 0x%x in 0x%x%s", lx, ly,
+		wlr_log(WLR_DEBUG, "xshell: pointer at %.2f,%.2f (X %d,%d) over 0x%x in 0x%x%s", lx, ly, x, y,
 			xserver->pointer_window, window->id, window->floating ? " (floats)" : "");
 	}
 	*view = window->floating ? NULL : &window->view;

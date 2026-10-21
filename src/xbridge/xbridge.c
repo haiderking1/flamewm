@@ -593,8 +593,8 @@ static void hook_focus_changed(void *data, uint32_t focus) {
 static void hook_pointer(void *data, double *x, double *y) {
 	struct flame_xbridge *xbridge = data;
 	struct wlr_cursor *cursor = xbridge->server->input.cursor.wlr;
-	*x = xshell_to_x(&xbridge->server->xshell, cursor->x);
-	*y = xshell_to_x(&xbridge->server->xshell, cursor->y);
+	*x = xshell_pointer_to_x(&xbridge->server->xshell, cursor->x);
+	*y = xshell_pointer_to_x(&xbridge->server->xshell, cursor->y);
 }
 
 // X sees flame's outputs where the layout has them, in its coordinates. the
