@@ -231,5 +231,20 @@ sleep 0.8
 $CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" '"floating":false,"x":6'
 CASE_ARGS=
 
+# a flame inside this one, its screen 1266 wide: a row of a 24 bit capture
+# isn't whole words there, grim used to fail on it
+printf 'flame.set { gap = 5 }\n' > "$WORK/gap.lua"
+cat > "$WORK/inner.sh" <<EOF
+#!/bin/sh
+grim "$WORK/inner.png" > "$WORK/grim.out" 2>&1 && echo captured >> "$WORK/grim.out"
+$CTL quit > /dev/null 2>&1
+EOF
+chmod +x "$WORK/inner.sh"
+CASE_ARGS="-c $WORK/gap.lua"
+case_run "screen capture (grim) of a screen whatever its width" "
+WLR_BACKENDS=wayland timeout 20 $FLAME -s $WORK/inner.sh > inner.log 2>&1
+cat grim.out" "captured"
+CASE_ARGS=
+
 rm -rf "$WORK"
 exit $failed

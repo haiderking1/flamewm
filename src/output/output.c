@@ -1,5 +1,6 @@
 #include "output/output.h"
 
+#include <drm_fourcc.h>
 #include <stdlib.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -67,6 +68,16 @@ static bool output_enable(struct wlr_output *wlr_output, const struct flame_conf
 	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 	if (mode) {
 		wlr_output_state_set_mode(&state, mode);
+	}
+
+	// frames with alpha, 32 bits either way: nvidia reads an XRGB buffer
+	// back as 24 bit, and a 24 bit row has to be a multiple of 3 bytes for
+	// wl_shm and of 4 for pixman, so screen capture (grim) breaks at most
+	// widths. snapshots keep translucent windows translucent too. a screen
+	// that won't take it stays XRGB
+	wlr_output_state_set_render_format(&state, DRM_FORMAT_ARGB8888);
+	if (!wlr_output_test_state(wlr_output, &state)) {
+		wlr_output_state_set_render_format(&state, DRM_FORMAT_XRGB8888);
 	}
 
 	bool ok = wlr_output_commit_state(wlr_output, &state);
