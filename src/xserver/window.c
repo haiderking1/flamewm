@@ -174,9 +174,30 @@ static void restack(struct xs_window *window, struct xs_window *sibling, uint8_t
 	}
 }
 
+// the request would leave the window just where it is in its siblings
+static bool restack_noop(struct xs_window *window, struct xs_window *sibling, uint8_t mode) {
+	struct wl_list *children = &window->parent->children;
+	bool below = mode == 1;
+	if (sibling && sibling->parent == window->parent) {
+		return below ? window->link.next == &sibling->link : window->link.prev == &sibling->link;
+	}
+	return below ? window->link.prev == children : window->link.next == children;
+}
+
 void xs_window_configure(struct flame_xserver *xserver, struct xs_window *window,
 		uint16_t mask, int x, int y, int width, int height, int border, uint32_t sibling,
 		uint8_t stack) {
+	// nothing would change: no ConfigureNotify, Xorg's "really nothing to do".
+	// toolkits take every ConfigureNotify for a move and act on it (steam
+	// re-placed its menus by one it got for a move to where they were)
+	struct xs_window *relative = (mask & 32) ? xserver_window(xserver, sibling) : NULL;
+	if ((!(mask & 1) || (int16_t)x == window->x) && (!(mask & 2) || (int16_t)y == window->y)
+			&& (!(mask & 4) || width <= 0 || width == window->width)
+			&& (!(mask & 8) || height <= 0 || height == window->height)
+			&& (!(mask & 16) || border == window->border)
+			&& (!(mask & 64) || !window->parent || restack_noop(window, relative, stack))) {
+		return;
+	}
 	int old_x = window->x, old_y = window->y, old_w = window->width, old_h = window->height;
 	if (mask & 1) {
 		window->x = (int16_t)x;

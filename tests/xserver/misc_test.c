@@ -167,6 +167,38 @@ static void test_xi1(xcb_connection_t *c) {
 	free(error);
 }
 
+// a configure that changes nothing sends nothing, like Xorg: toolkits take
+// every ConfigureNotify for a move (steam re-placed its menus by them)
+static int configure_notifies(xcb_connection_t *c) {
+	free(xcb_get_input_focus_reply(c, xcb_get_input_focus(c), NULL));
+	int n = 0;
+	xcb_generic_event_t *e;
+	while ((e = xcb_poll_for_event(c))) {
+		n += (e->response_type & 0x7f) == XCB_CONFIGURE_NOTIFY;
+		free(e);
+	}
+	return n;
+}
+
+static void test_configure_noop(xcb_connection_t *c, xcb_screen_t *s) {
+	xcb_window_t w = xcb_generate_id(c);
+	uint32_t values[] = {1, XCB_EVENT_MASK_STRUCTURE_NOTIFY};
+	xcb_create_window(c, XCB_COPY_FROM_PARENT, w, s->root, 10, 20, 100, 50, 0,
+		XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual,
+		XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, values);
+	xcb_map_window(c, w);
+	configure_notifies(c);
+	uint32_t same[] = {10, 20, 100, 50, XCB_STACK_MODE_ABOVE};
+	xcb_configure_window(c, w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y
+		| XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT | XCB_CONFIG_WINDOW_STACK_MODE,
+		same);
+	CHECK(configure_notifies(c) == 0); // where it was, on top already
+	uint32_t moved[] = {11, 20};
+	xcb_configure_window(c, w, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, moved);
+	CHECK(configure_notifies(c) == 1);
+	xcb_destroy_window(c, w);
+}
+
 // pbuffers, what ANGLE (chromium's GL) makes current first thing
 static void test_glx_pbuffer(xcb_connection_t *c) {
 	xcb_glx_get_fb_configs_reply_t *f = xcb_glx_get_fb_configs_reply(c,
@@ -293,6 +325,7 @@ int main(void) {
 	test_shape(c, s);
 	test_xi1(c);
 	test_glx_pbuffer(c);
+	test_configure_noop(c, s);
 	test_flame_windows(c, s); // last: every window goes
 	xcb_disconnect(c);
 	if (failures) {
