@@ -174,6 +174,8 @@ case_run "EWMH: an X window that starts fullscreen does" "
 $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
+case_run "ICCCM WM_STATE: Normal while managed, Withdrawn once unmapped" "
+$BIN/xewmh wmstate" "mapped: 1" "unmapped: 0, type is WM_STATE: yes"
 
 case_run "a pointer between pixels: flame and X agree which window it's in" "
 $BIN/xewmh subpixel > sub.out 2>&1 &
