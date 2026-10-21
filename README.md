@@ -24,7 +24,8 @@ plus at most one prepared behind it (raven's scheduler). when nothing
 changed nothing gets drawn or flipped, clients still get their frame
 callbacks on the refresh grid, one turn per window per refresh. a lone
 fullscreen window whose buffer KMS can take goes straight to the display
-(direct scanout), no compositing.
+(direct scanout), no compositing. X games too: their presented buffers go
+to KMS themselves and go back to the game once a later frame flipped.
 
 windows covered by something opaque still get frame callbacks, four times a
 second while they ask, so they don't freeze without burning the gpu, and
@@ -41,6 +42,28 @@ the window keeps its last frame instead of one slow app delaying the screen.
 - `deadline`: always prepares ahead, for comparing
 
 anything else stops startup, a typo shouldn't quietly test the wrong thing.
+
+### tearing and vrr
+
+a fullscreen game with vsync off asks to tear (wayland: tearing-control
+async, X: PresentOptionAsync, what dxvk and vkd3d send): its frames go out
+the moment they're ready as async page flips, scanned out or composed. a
+flip KMS refuses goes out as a plain one right away, a run of refusals turns
+tearing off until the mode changes or a vt switch. apps that don't ask
+never tear.
+
+vrr (adaptive sync) lets the display wait for frames. with it on, flame
+sends every frame the moment it's ready instead of at the repaint window.
+switching it rides on a frame and gets a KMS test first, so a display that
+won't switch never costs one, it just stays how it is.
+
+```lua
+flame.set { allow_tearing = true, vrr = "fullscreen" } -- the defaults
+-- vrr: "off", "fullscreen" (while something fullscreen shows), "always"
+```
+
+`flamectl state` says per output whether it's scanning out, tearing and
+running vrr right now, so does frame timing.
 
 ### cursor
 
@@ -64,10 +87,13 @@ output every two seconds, only observing, nothing about rendering changes:
 
 - `pipeline` / `overlap` / `lead_ms`: the policy, whether it's preparing
   frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
+- `asap` / `vrr`: frames go out the moment they're ready (a game tearing,
+  or vrr on), and whether the display runs adaptive sync
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
 - `composited` / `scanout` / `cursor` / `failed`: frames we drew, client
   buffers sent straight to KMS, the same buffer again because only the
   cursor plane moved, and frames KMS refused
+- `tearing`: frames that went out as tearing flips
 - `successors` / `promoted` / `discarded`: frames prepared behind a pending
   flip, sent when it landed, or refused right then
 - `timer_late_ms` / `timer_early`: how far off the frame timer fires
@@ -175,7 +201,8 @@ the state is one json line:
 ```json
 {"event":"state","workspace":1,
  "workspaces":[{"id":1,"name":"1","windows":2,"active":true,"fullscreen":false}, ...],
- "window":{"app_id":"foot","title":"~","fullscreen":false}}
+ "window":{"app_id":"foot","title":"~","fullscreen":false},
+ "outputs":[{"name":"DP-2","scanout":false,"tearing":false,"vrr":false}]}
 ```
 
 `flamectl` does it from a shell: `flamectl workspace 3`, `flamectl subscribe`.

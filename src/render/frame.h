@@ -46,6 +46,9 @@ struct flame_frame_hooks {
 	// refresh. anything re-requesting frames from here has to wait for one, a
 	// revisit comes right after every empty pass and would loop
 	void (*callbacks_sent)(void *data, const struct timespec *now, bool new_cycle);
+	// a fullscreen window shows on this output right now (vrr's fullscreen
+	// policy). NULL: never
+	bool (*fullscreen)(void *data);
 };
 
 // one output's frames: when to draw (schedule.h decides), what it showed last
@@ -91,6 +94,7 @@ struct flame_frame {
 	// it and gets it (or would, KMS willing): frames go out asap
 	struct sync sync;
 	bool tearing_logged; // KMS refusing it was said once
+	bool vrr_logged;
 
 	struct wlr_damage_ring ring; // buffer coords, per swapchain buffer
 	pixman_region32_t pending; // layout coords, from client commits

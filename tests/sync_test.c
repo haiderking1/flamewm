@@ -59,9 +59,12 @@ static void test_vrr_policy(void) {
 static void test_vrr_debounce(void) {
 	struct sync s;
 	sync_init(&s);
+	CHECK(sync_vrr_settles_at(&s) == 0);
 	CHECK(!sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, true, 0));
+	CHECK(sync_vrr_settles_at(&s) == SYNC_VRR_DEBOUNCE_NS); // wake then to switch
 	CHECK(!sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, true, SYNC_VRR_DEBOUNCE_NS - 1));
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, true, SYNC_VRR_DEBOUNCE_NS));
+	CHECK(sync_vrr_settles_at(&s) == 0);
 	// out for a moment and back: stays on
 	int64_t t = SYNC_VRR_DEBOUNCE_NS + 100 * MS;
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t));
@@ -71,6 +74,20 @@ static void test_vrr_debounce(void) {
 	t += SYNC_VRR_DEBOUNCE_NS + 100 * MS;
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t));
 	CHECK(!sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t + SYNC_VRR_DEBOUNCE_NS));
+}
+
+// a display that won't switch (nested backends can't turn it off): it's left
+// as it is, no frame asks again
+static void test_vrr_stuck(void) {
+	struct sync s;
+	sync_init(&s);
+	CHECK(sync_vrr_switch(&s, false, true));
+	sync_vrr_refused(&s);
+	CHECK(!sync_vrr_switch(&s, false, true));
+	CHECK(!sync_vrr_switch(&s, true, false));
+	sync_reset(&s);
+	CHECK(sync_vrr_switch(&s, false, true));
+	CHECK(!sync_vrr_switch(&s, true, true));
 }
 
 static void test_vrr_parse(void) {
@@ -88,6 +105,7 @@ int main(void) {
 	test_tearing_refusals();
 	test_vrr_policy();
 	test_vrr_debounce();
+	test_vrr_stuck();
 	test_vrr_parse();
 	if (failures) {
 		fprintf(stderr, "%d failed\n", failures);

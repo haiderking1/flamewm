@@ -25,6 +25,7 @@
 
 static void process(struct flame_frame *frame);
 static void process_once(struct flame_frame *frame);
+static void vrr_refused(struct flame_frame *frame);
 
 static int64_t timespec_ns(const struct timespec *ts) {
 	return (int64_t)ts->tv_sec * 1000000000 + ts->tv_nsec;
@@ -137,6 +138,7 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 		schedule_set_period(&frame->schedule, refresh_period(frame->output));
 		sync_reset(&frame->sync); // KMS gets another chance at tearing and vrr
 		frame->tearing_logged = false;
+		frame->vrr_logged = false;
 		frame_request(frame);
 	}
 }
@@ -255,8 +257,14 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 	frame->stall_reported = false;
 
 	if (frame->has_queued) {
+		bool vrr_asked = frame->queued.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
+		bool vrr_want = frame->queued.adaptive_sync_enabled;
 		bool ok = commit(frame, &frame->queued, frame->queued_kind, false, NULL);
 		drop_queued(frame);
+		if (ok && vrr_asked && vrr_want
+				!= (frame->output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED)) {
+			vrr_refused(frame);
+		}
 		if (ok) {
 			frame->pending_draw = frame->queued_draw;
 			schedule_promoted(schedule, now_ns());
@@ -288,6 +296,7 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	frame->scanout.suspended = false;
 	sync_reset(&frame->sync);
 	frame->tearing_logged = false;
+	frame->vrr_logged = false;
 	frame_cursor_reset(&frame->cursor);
 	queue_process(frame);
 }
@@ -757,6 +766,28 @@ static bool app_wants_tearing(struct flame_frame *frame, const struct flame_elem
 	return element->buffer_node && element->buffer_node->tearing;
 }
 
+static void vrr_refused(struct flame_frame *frame) {
+	sync_vrr_refused(&frame->sync);
+	if (!frame->vrr_logged) {
+		wlr_log(WLR_INFO, "%s: adaptive sync won't switch, it stays %s until the next mode "
+			"change or vt switch", frame->output->name,
+			frame->output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED
+				? "on" : "off");
+		frame->vrr_logged = true;
+	}
+}
+
+// vrr switches with this frame if KMS takes it: a test commit first, either
+// way (nested backends can't turn it off), so a display that won't never
+// costs a frame
+static void vrr_set(struct flame_frame *frame, struct wlr_output_state *state, bool on) {
+	wlr_output_state_set_adaptive_sync_enabled(state, on);
+	if (!wlr_output_test_state(frame->output, state)) {
+		state->committed &= ~WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
+		vrr_refused(frame);
+	}
+}
+
 // a picture's own buffer goes to KMS (a fullscreen X game): a draw id for
 // it, and its owner holds on to the buffer until a later frame flips
 static uint64_t picture_scanned_out(struct flame_frame *frame,
@@ -802,13 +833,24 @@ static void render(struct flame_frame *frame, int64_t now) {
 		changed = true; // nothing to send again yet
 		cursor_only = false;
 	}
+	// vrr: the display waits for frames where it can and init.lua wants it.
+	// the switch rides on a frame, a still screen gets one for it
+	const struct flame_config *config = frame->render->server->config;
+	bool fullscreen = frame->hooks.fullscreen && frame->hooks.fullscreen(frame->hooks.data);
+	bool vrr_want = sync_vrr_wanted(&frame->sync, config->vrr, output->adaptive_sync_supported,
+		fullscreen, now);
+	bool vrr_change = sync_vrr_switch(&frame->sync, vrr_want,
+		output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED);
+	if (vrr_change && !changed) {
+		changed = true;
+		cursor_only = false;
+	}
 	bool submitted_now = false;
 	bool drew_gl = false; // went through the gpu, not straight to KMS
 	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
 	scanout_hint(&frame->scanout, candidate);
 	// the fullscreen app wants to tear (vsync off): its frames go out the
 	// moment they're ready, as async flips where KMS takes them
-	const struct flame_config *config = frame->render->server->config;
 	bool tearing = config->allow_tearing && !frame->sync.tearing_off
 		&& app_wants_tearing(frame, fullscreen_element(&frame->cur, *frame->area));
 	frame->sync.tearing = tearing;
@@ -842,6 +884,9 @@ static void render(struct flame_frame *frame, int64_t now) {
 			}
 		}
 
+		if (ready && vrr_change) {
+			vrr_set(frame, &state, vrr_want);
+		}
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
@@ -851,7 +896,16 @@ static void render(struct flame_frame *frame, int64_t now) {
 				tearing, frame_cursor_dirty(&frame->cursor));
 			bool torn = false;
 			drew = commit(frame, &state, kind, tear, &torn);
+			bool vrr_asked = state.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
 			wlr_output_state_finish(&state);
+			if (drew && vrr_asked) {
+				bool on = output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
+				if (vrr_want != on) {
+					vrr_refused(frame); // took the commit, didn't switch
+				} else {
+					wlr_log(WLR_INFO, "%s: adaptive sync %s", output->name, on ? "on" : "off");
+				}
+			}
 			if (drew) {
 				submitted_now = true;
 				frame->pending_draw = draw_id;
@@ -882,8 +936,10 @@ static void render(struct flame_frame *frame, int64_t now) {
 		// nothing went anywhere: callbacks on the refresh grid, no pageflip
 		schedule_empty(schedule, now);
 	}
-	// a game tearing: the next frame goes the moment it's ready too
-	schedule_set_asap(schedule, tearing);
+	// a game tearing, or the display following the frames (vrr): the next
+	// frame goes the moment it's ready too
+	schedule_set_asap(schedule, tearing
+		|| output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED);
 	swap_lists(frame);
 	if (again) {
 		// still animating: the refresh after this one too
@@ -968,6 +1024,11 @@ static void process_once(struct flame_frame *frame) {
 			output->name, SCHEDULE_WATCHDOG_NS / 1000000000);
 		frame->stall_reported = true;
 	}
+	// vrr's debounce settled with nothing else changing: a frame for the switch
+	int64_t settle = sync_vrr_settles_at(&frame->sync);
+	if (settle && now >= settle) {
+		schedule_request_redraw(schedule);
+	}
 	if (schedule_render_due(schedule, now)) {
 		render(frame, now);
 		now = now_ns();
@@ -999,6 +1060,10 @@ static void process_once(struct flame_frame *frame) {
 	}
 	if (frame->jit_wake && (!deadline || frame->jit_wake < deadline)) {
 		deadline = frame->jit_wake > now ? frame->jit_wake : now + 1;
+	}
+	settle = sync_vrr_settles_at(&frame->sync);
+	if (settle && (!deadline || settle < deadline)) {
+		deadline = settle > now ? settle : now + 1;
 	}
 	timer_arm(&frame->wake, deadline);
 }

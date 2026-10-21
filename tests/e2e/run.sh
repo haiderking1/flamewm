@@ -224,6 +224,17 @@ $BIN/wlgame 1.5 vsyncoff > /dev/null 2>&1 &
 sleep 1
 echo \"vsyncoff \$($CTL state | grep -o '\"tearing\":[a-z]*')\"
 wait" 'vsync "tearing":false' 'vsyncoff "tearing":true'
+printf 'flame.set { allow_tearing = false, vrr = "always" }\n' > "$WORK/sync.lua"
+CASE_ARGS="-c $WORK/sync.lua"
+case_run "allow_tearing = false wins over a game asking, vrr on a screen without it stays off" "
+$BIN/glxfull 2 vsyncoff > full.out 2>&1 &
+sleep 0.6
+$CTL pointer move 300 300 > /dev/null
+sleep 0.8
+$CTL state | grep -o '\"tearing\":[a-z]*,\"vrr\":[a-z]*'
+wait
+cat full.out" '"tearing":false,"vrr":false' "kept going: yes"
+CASE_ARGS=
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

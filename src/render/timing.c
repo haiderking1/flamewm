@@ -129,7 +129,7 @@ static int handle_report(void *data) {
 	char wayland[64], x11[64], slack[64], gpu_done[64];
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
-		"pipeline=%s overlap=%s lead_ms=%.3f "
+		"pipeline=%s overlap=%s asap=%s vrr=%s lead_ms=%.3f "
 		"flips=%u flip_hz=%.1f composited=%u scanout=%u cursor=%u failed=%u tearing=%u "
 		"successors=%u promoted=%u discarded=%u timer_late_ms=%s timer_early=%u "
 		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s gpu_done_ms=%s flip_ms=%s "
@@ -140,6 +140,8 @@ static int handle_report(void *data) {
 		"hiccups=%u planned=%u",
 		timing->output->name, timing->output->refresh / 1000.0, span,
 		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
+		schedule->asap ? "on" : "off",
+		timing->output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED ? "on" : "off",
 		schedule_lead(schedule) / 1e6,
 		timing->flips, span > 0 ? timing->flips / span : 0.0,
 		timing->composited, timing->scanout, timing->cursor, timing->failed, timing->tearing,

@@ -56,6 +56,14 @@ void sync_vrr_refused(struct sync *sync) {
 	sync->vrr_off = true;
 }
 
+bool sync_vrr_switch(const struct sync *sync, bool wanted, bool enabled) {
+	return !sync->vrr_off && wanted != enabled;
+}
+
+int64_t sync_vrr_settles_at(const struct sync *sync) {
+	return sync->vrr_seen != sync->vrr_fullscreen ? sync->vrr_since + SYNC_VRR_DEBOUNCE_NS : 0;
+}
+
 bool sync_vrr_policy_parse(const char *value, enum sync_vrr_policy *policy) {
 	static const char *const names[] = {
 		[SYNC_VRR_OFF] = "off",

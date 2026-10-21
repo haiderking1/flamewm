@@ -27,7 +27,9 @@ struct sync {
 	bool tearing_off; // too many: off till sync_reset
 	bool tearing; // the last frame tore (or would have, then was refused)
 
-	bool vrr_off; // KMS wouldn't turn it on: off till sync_reset
+	// KMS wouldn't switch it (either way, some backends can't turn it off):
+	// it stays as it is till sync_reset, nobody asks again
+	bool vrr_off;
 	bool vrr_fullscreen; // what the debounce settled on
 	bool vrr_seen; // the last frame's fullscreen, the debounce follows it
 	int64_t vrr_since; // when that last changed
@@ -49,8 +51,15 @@ void sync_tearing_result(struct sync *sync, bool refused);
 // whether something fullscreen shows on it
 bool sync_vrr_wanted(struct sync *sync, enum sync_vrr_policy policy, bool supported,
 	bool fullscreen, int64_t now);
-// KMS wouldn't turn vrr on (the commit failed, or the status says disabled)
+// KMS wouldn't switch vrr (the test or commit failed, or the status didn't
+// follow): it's left as it is from now on
 void sync_vrr_refused(struct sync *sync);
+// a frame should carry a vrr switch: wanted isn't what the display has, and
+// it hasn't refused to switch before
+bool sync_vrr_switch(const struct sync *sync, bool wanted, bool enabled);
+// when the debounce settles on a fullscreen change it's seen, 0 for nothing
+// pending: a frame then carries the switch even if nothing else changes
+int64_t sync_vrr_settles_at(const struct sync *sync);
 
 // NULL is the default, fullscreen. false for anything else than
 // off/fullscreen/always
