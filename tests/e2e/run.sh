@@ -197,6 +197,8 @@ foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5
 $BIN/wlcapture $CTL capme" "listed: yes" "drawn pixels: 889856 of 889856" \
 	"unchanged window, next frame: yes"
+case_run "sharing a window into gpu buffers, the portal's way: each copy done before it's ready" "
+$BIN/wlcapture $CTL gpu" "gpu buffer: yes" "gpu frames ready: 3"
 case_run "sharing one window: listed, captured on its own, even on a hidden workspace" "
 $BIN/wlcapture $CTL" "protocols: yes" "listed: yes" "hidden window captured: red" \
 	"unchanged window, next frame: yes" "closed while shared, session stopped: yes"

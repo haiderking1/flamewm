@@ -128,9 +128,21 @@ $(E2E)/$(1)-v1-protocol.c: $(STAGING_XML)/$(1)/$(1)-v1.xml
 endef
 $(foreach p,$(CAPTURE_PROTOCOLS),$(eval $(call capture_protocol,$(p))))
 
-$(E2E)/wlcapture: tests/e2e/wlcapture.c $(CAPTURE_HEADERS) $(CAPTURE_CODE)
-	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlcapture.c $(CAPTURE_CODE) \
-		$(shell pkg-config --cflags --libs wayland-client xcb)
+DMABUF_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/stable/linux-dmabuf/linux-dmabuf-v1.xml
+
+$(E2E)/linux-dmabuf-v1-client-protocol.h: $(DMABUF_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/linux-dmabuf-v1-protocol.c: $(DMABUF_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/wlcapture: tests/e2e/wlcapture.c $(CAPTURE_HEADERS) $(CAPTURE_CODE) \
+		$(E2E)/linux-dmabuf-v1-client-protocol.h $(E2E)/linux-dmabuf-v1-protocol.c
+	$(CC) -std=c17 -O1 -g -D_DEFAULT_SOURCE -I$(E2E) -o $@ tests/e2e/wlcapture.c $(CAPTURE_CODE) \
+		$(E2E)/linux-dmabuf-v1-protocol.c \
+		$(shell pkg-config --cflags --libs wayland-client xcb gbm libdrm)
 
 $(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
