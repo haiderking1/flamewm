@@ -50,6 +50,10 @@ static int from_x(const struct flame_xshell *xshell, int v) {
 	return (int)lround(xshell_from_x(xshell, v));
 }
 
+static struct xs_window *x_of(struct flame_xwindow *window) {
+	return xserver_window(window->xshell->xserver, window->id);
+}
+
 struct xdmabuf {
 	struct wlr_buffer base;
 	struct wlr_dmabuf_attributes attribs;
@@ -170,10 +174,32 @@ void xshell_syncobj_destroyed(struct flame_xshell *xshell, struct xs_syncobj *sy
 
 // ---- presents ----
 
-struct xpresent {
-	struct wl_list link; // flame_xwindow.queue or .retiring
+// an X window that presents, in its top-level's picture: the top-level
+// itself, or a window in it with its own pictures (a browser's web view, a
+// game's client window). shown where X has it, clipped to it and what it's
+// in, stacked the way X stacks it. each has its own queue and pacing, like
+// each has its own Present on Xorg
+struct xlayer {
+	struct wl_list link; // flame_xwindow.layers
 	struct flame_xwindow *window;
-	uint32_t target_window; // the X window the app presented to
+	uint32_t id; // the X window presented to
+	struct flame_buffer_node *node;
+	int order; // where X paints it in the top-level, layers_update's
+
+	struct xpresent *shown; // its picture right now
+	struct wl_list queue; // xpresent.link, waiting for their msc, soonest first
+	struct wl_list retiring; // xpresent.link, replaced, not done yet
+	// how long the app takes from hearing a frame made it (CompleteNotify) to
+	// its next present: quick to grow, slow to shrink. its completes are held
+	// back to just in time for the render that can show the next one
+	int64_t draw_time;
+	int64_t woken; // when the last complete went out, while drawing
+	bool drawing;
+};
+
+struct xpresent {
+	struct wl_list link; // xlayer.queue or .retiring
+	struct xlayer *layer;
 	uint32_t serial, pixmap_id, idle_fence;
 	struct xpixmap *pixmap;
 	int16_t x_off, y_off;
@@ -232,7 +258,7 @@ static void xpresent_free(struct xpresent *xp) {
 }
 
 static void maybe_free(struct xpresent *xp) {
-	if (xp->completed && xp->released && xp != xp->window->shown) {
+	if (xp->completed && xp->released && xp != xp->layer->shown) {
 		xpresent_free(xp);
 	}
 }
@@ -340,8 +366,8 @@ static void complete(struct xpresent *xp, uint8_t mode, int64_t when, uint64_t m
 		return;
 	}
 	xp->completed = true;
-	struct flame_xshell *xshell = xp->window->xshell;
-	xserver_present_complete(xshell->xserver, xp->target_window, xp->serial, false, mode,
+	struct flame_xshell *xshell = xp->layer->window->xshell;
+	xserver_present_complete(xshell->xserver, xp->layer->id, xp->serial, false, mode,
 		(uint64_t)(when / 1000), msc);
 	maybe_free(xp);
 }
@@ -350,23 +376,23 @@ static void complete(struct xpresent *xp, uint8_t mode, int64_t when, uint64_t m
 // vblank, and starts the next one. woke: it was due (the app waits on it and
 // its draw time is measured from now), not sent early because the app went on
 static void deliver(struct xpresent *xp, bool woke) {
-	struct flame_xwindow *window = xp->window;
+	struct xlayer *layer = xp->layer;
 	xp->held = false;
 	if (woke) {
-		window->woken = now_ns();
-		window->drawing = true;
+		layer->woken = now_ns();
+		layer->drawing = true;
 	}
 	complete(xp, MODE_COPY, xp->done_when, xp->done_msc);
 }
 
 // the app presented again without waiting for its complete: no point holding
 // what's left, it goes out now
-static void deliver_held(struct flame_xwindow *window) {
+static void deliver_held(struct xlayer *layer) {
 	struct xpresent *xp, *tmp;
-	if (window->shown && window->shown->held) {
-		deliver(window->shown, false);
+	if (layer->shown && layer->shown->held) {
+		deliver(layer->shown, false);
 	}
-	wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+	wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 		if (xp->held) {
 			deliver(xp, false);
 		}
@@ -380,8 +406,8 @@ static void released(struct xpresent *xp) {
 	if (xp->release) {
 		wlr_drm_syncobj_timeline_signal(xp->release, xp->release_point);
 	}
-	struct flame_xshell *xshell = xp->window->xshell;
-	xserver_present_idle(xshell->xserver, xp->target_window, xp->serial, xp->pixmap_id,
+	struct flame_xshell *xshell = xp->layer->window->xshell;
+	xserver_present_idle(xshell->xserver, xp->layer->id, xp->serial, xp->pixmap_id,
 		xp->idle_fence);
 	maybe_free(xp);
 }
@@ -405,62 +431,151 @@ static void release_when_idle(struct flame_xshell *xshell, struct xpresent *xp) 
 	released(xp);
 }
 
-static void retire(struct flame_xwindow *window, struct xpresent *xp) {
+static void retire(struct xlayer *layer, struct xpresent *xp) {
+	struct flame_xshell *xshell = layer->window->xshell;
 	stop_acquiring(xp);
-	wl_list_insert(&window->retiring, &xp->link);
+	wl_list_insert(&layer->retiring, &xp->link);
 	if (!xp->drawn_id) {
 		// never made it to the screen. the buffer goes back now, the complete
 		// waits for its msc like on Xorg: apps (NVIDIA's) throttle on how
 		// many are still out, a skip right away has them render the next one
 		xp->skipped = true;
-		uint64_t now_msc = msc_at(window->xshell, now_ns());
+		uint64_t now_msc = msc_at(xshell, now_ns());
 		if (xp->target <= now_msc) {
-			complete(xp, MODE_SKIP, msc_time(window->xshell, now_msc), now_msc);
+			complete(xp, MODE_SKIP, msc_time(xshell, now_msc), now_msc);
 		}
 	}
-	release_when_idle(window->xshell, xp);
+	release_when_idle(xshell, xp);
 }
 
 // the picture where it goes in the view: X's window starts left and top of
 // what flame shows by its shadow
 static void place_content(struct flame_xwindow *window) {
-	int x = window->content_x, y = window->content_y;
-	if (!window->floating) {
-		x -= window->ext_left;
-		y -= window->ext_top;
-	}
+	int x = window->floating ? 0 : -window->ext_left;
+	int y = window->floating ? 0 : -window->ext_top;
 	scene_node_set_position(&window->content->node, from_x(window->xshell, x),
 		from_x(window->xshell, y));
 }
 
-static void show(struct flame_xwindow *window, struct xpresent *xp) {
-	struct xpresent *old = window->shown;
-	window->shown = xp;
+// a picture for a buffer node, a frame only when something about it changed
+static void buffer_show(struct flame_buffer_node *node, struct wlr_texture *texture,
+		const void *key, int width, int height, bool opaque,
+		struct wlr_drm_syncobj_timeline *timeline, uint64_t point) {
+	if (node->texture != texture || node->key != key || node->width != width
+			|| node->height != height || node->opaque != opaque
+			|| node->wait_timeline != timeline || node->wait_point != point) {
+		scene_buffer_set(node, texture, key, width, height, opaque, timeline, point);
+	}
+}
+
+// where X has win in top: its origin there and the part of it that shows,
+// cut by everything it's in. false when it or something it's in is unmapped,
+// or it isn't in top at all
+static bool x_visible(const struct xs_window *top, const struct xs_window *win, int *ox,
+		int *oy, struct wlr_box *clip) {
+	const struct xs_window *chain[64];
+	int len = 0;
+	for (const struct xs_window *w = win; w != top; w = w->parent) {
+		if (!w || !w->parent || !w->mapped || len == 64) {
+			return false;
+		}
+		chain[len++] = w;
+	}
+	int x = 0, y = 0;
+	struct wlr_box box = {0, 0, top->width, top->height};
+	for (int i = len - 1; i >= 0; i--) {
+		x += chain[i]->x + chain[i]->border;
+		y += chain[i]->y + chain[i]->border;
+		struct wlr_box inside = {x, y, chain[i]->width, chain[i]->height}, cut;
+		if (!wlr_box_intersection(&cut, &box, &inside)) {
+			return false;
+		}
+		box = cut;
+	}
+	*ox = x;
+	*oy = y;
+	*clip = box;
+	return true;
+}
+
+// a layer's picture where X has its window, cut to what of that window
+// shows: Present puts the pixmap at the window's corner plus its offset and
+// nothing outside the window. off while its window isn't viewable
+static void layer_place(struct xlayer *layer) {
+	struct flame_xwindow *window = layer->window;
+	struct flame_xshell *xshell = window->xshell;
+	struct xpresent *xp = layer->shown;
+	struct xs_window *top = x_of(window);
+	struct xs_window *x = xserver_window(xshell->xserver, layer->id);
+	int ox, oy;
+	struct wlr_box clip, shows;
+	if (!xp || !top || !x || !x_visible(top, x, &ox, &oy, &clip)) {
+		scene_node_set_enabled(&layer->node->node, false);
+		return;
+	}
+	struct wlr_box picture = {ox + xp->x_off, oy + xp->y_off, xp->pixmap->width,
+		xp->pixmap->height};
+	if (!wlr_box_intersection(&shows, &picture, &clip)) {
+		scene_node_set_enabled(&layer->node->node, false);
+		return;
+	}
+	scene_node_set_position(&layer->node->node, from_x(xshell, shows.x),
+		from_x(xshell, shows.y));
+	struct wlr_fbox src = {0};
+	if (!wlr_box_equal(&shows, &picture)) {
+		src = (struct wlr_fbox){shows.x - picture.x, shows.y - picture.y, shows.width,
+			shows.height};
+	}
+	struct wlr_fbox *had = &layer->node->src;
+	if (had->x != src.x || had->y != src.y || had->width != src.width
+			|| had->height != src.height) {
+		scene_buffer_set_source(layer->node, wlr_fbox_empty(&src) ? NULL : &src);
+	}
+	buffer_show(layer->node, xp->pixmap->texture, xp, from_x(xshell, shows.width),
+		from_x(xshell, shows.height), xp->pixmap->opaque, xp->acquire, xp->acquire_point);
+	scene_node_set_enabled(&layer->node->node, true);
+}
+
+// the top-level presents to itself: that's its picture, not the cpu's
+static bool self_presented(const struct flame_xwindow *window) {
+	struct xlayer *layer;
+	wl_list_for_each(layer, &window->layers, link) {
+		if (layer->id == window->id && layer->shown) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void core_update(struct flame_xwindow *window) {
+	scene_node_set_enabled(&window->core_node->node, !self_presented(window));
+}
+
+static void show(struct xlayer *layer, struct xpresent *xp) {
+	struct xpresent *old = layer->shown;
+	layer->shown = xp;
 	wl_list_init(&xp->link);
-	window->content_x = xp->x_off;
-	window->content_y = xp->y_off;
-	place_content(window);
-	scene_buffer_set(window->content, xp->pixmap->texture, xp,
-		from_x(window->xshell, xp->pixmap->width), from_x(window->xshell, xp->pixmap->height),
-		xp->pixmap->opaque, xp->acquire, xp->acquire_point);
+	layer_place(layer);
 	if (old) {
 		wl_list_remove(&old->link);
-		retire(window, old);
+		retire(layer, old);
+	} else {
+		core_update(layer->window);
 	}
 }
 
 // waits for the refresh before its msc. one already queued for the same msc
 // never makes it, like on Xorg
-static void enqueue(struct flame_xwindow *window, struct xpresent *xp) {
+static void enqueue(struct xlayer *layer, struct xpresent *xp) {
 	struct xpresent *queued, *tmp;
-	wl_list_for_each_safe(queued, tmp, &window->queue, link) {
+	wl_list_for_each_safe(queued, tmp, &layer->queue, link) {
 		if (queued->target == xp->target) {
 			wl_list_remove(&queued->link);
-			retire(window, queued);
+			retire(layer, queued);
 		}
 	}
-	struct wl_list *before = &window->queue;
-	wl_list_for_each(queued, &window->queue, link) {
+	struct wl_list *before = &layer->queue;
+	wl_list_for_each(queued, &layer->queue, link) {
 		if (queued->target > xp->target) {
 			break;
 		}
@@ -477,8 +592,9 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 	int64_t next = 0;
 	uint64_t now_msc = msc_at(xshell, now_ns());
 	struct flame_xwindow *window;
-	wl_list_for_each(window, &xshell->windows, link) {
-		struct xpresent *shown = window->shown;
+	struct xlayer *layer;
+	wl_list_for_each(window, &xshell->windows, link) wl_list_for_each(layer, &window->layers, link) {
+		struct xpresent *shown = layer->shown;
 		if (shown && shown->held) {
 			next = !next || shown->held_until < next ? shown->held_until : next;
 		}
@@ -487,7 +603,7 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 			next = !next || at < next ? at : next;
 		}
 		struct xpresent *xp;
-		wl_list_for_each(xp, &window->retiring, link) {
+		wl_list_for_each(xp, &layer->retiring, link) {
 			if (xp->held) {
 				next = !next || xp->held_until < next ? xp->held_until : next;
 			}
@@ -496,10 +612,10 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 				next = !next || at < next ? at : next;
 			}
 		}
-		if (wl_list_empty(&window->queue)) {
+		if (wl_list_empty(&layer->queue)) {
 			continue;
 		}
-		struct xpresent *first = wl_container_of(window->queue.next, first, link);
+		struct xpresent *first = wl_container_of(layer->queue.next, first, link);
 		if (first->target - now_msc < MSC_FAR) {
 			// at the refresh before: the frame after that one shows it
 			int64_t at = msc_time(xshell, first->target - 1);
@@ -521,32 +637,33 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 static void process_msc(struct flame_xshell *xshell, int64_t now) {
 	uint64_t now_msc = msc_at(xshell, now);
 	struct flame_xwindow *window;
-	wl_list_for_each(window, &xshell->windows, link) {
+	struct xlayer *layer;
+	wl_list_for_each(window, &xshell->windows, link) wl_list_for_each(layer, &window->layers, link) {
 		struct xpresent *xp, *tmp;
-		if (window->shown && window->shown->held && window->shown->held_until <= now) {
-			deliver(window->shown, true);
+		if (layer->shown && layer->shown->held && layer->shown->held_until <= now) {
+			deliver(layer->shown, true);
 		}
-		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			if (xp->held && xp->held_until <= now) {
 				deliver(xp, true);
 			}
 		}
-		while (!wl_list_empty(&window->queue)) {
-			struct xpresent *first = wl_container_of(window->queue.next, first, link);
+		while (!wl_list_empty(&layer->queue)) {
+			struct xpresent *first = wl_container_of(layer->queue.next, first, link);
 			if (first->acquiring || first->target > now_msc + 1) {
 				break; // the ones behind it wait too, order stays
 			}
 			wl_list_remove(&first->link);
-			show(window, first);
+			show(layer, first);
 		}
 		// a refresh past its msc and nothing drew it: the window is covered or
 		// on another workspace. it completes anyway like a copy on Xorg, or a
 		// FIFO app waits on it forever
-		struct xpresent *shown = window->shown;
+		struct xpresent *shown = layer->shown;
 		if (shown && !shown->completed && !shown->drawn_id && shown->target < now_msc) {
 			complete(shown, MODE_COPY, msc_time(xshell, now_msc), now_msc);
 		}
-		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			if (xp->skipped && !xp->completed && xp->target <= now_msc) {
 				complete(xp, MODE_SKIP, msc_time(xshell, now_msc), now_msc);
 			}
@@ -572,7 +689,7 @@ static void handle_msc_timer(void *data) {
 static void handle_acquired(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 	struct xpresent *xp = wl_container_of(waiter, xp, acquire_waiter);
 	stop_acquiring(xp);
-	process_msc(xp->window->xshell, now_ns());
+	process_msc(xp->layer->window->xshell, now_ns());
 }
 
 // the app's gpu work for it is done. if not, a wait starts: false until then
@@ -583,7 +700,7 @@ static bool acquired(struct xpresent *xp) {
 		return true; // can't tell, or done: show it
 	}
 	xp->acquiring = wlr_drm_syncobj_timeline_waiter_init(&xp->acquire_waiter, xp->acquire,
-		xp->acquire_point, 0, xp->window->xshell->server->loop, handle_acquired);
+		xp->acquire_point, 0, xp->layer->window->xshell->server->loop, handle_acquired);
 	return !xp->acquiring;
 }
 
@@ -606,6 +723,152 @@ static struct flame_xwindow *window_of(struct flame_xshell *xshell, uint32_t id)
 	return window ? find_window(xshell, window->id) : NULL;
 }
 
+// ---- layers ----
+
+static const struct flame_buffer_node_impl layer_impl;
+
+// where each layer's window is in X's painting order in its top-level:
+// parents before what's in them, siblings bottom to top
+static void paint_order(struct flame_xwindow *window, struct xs_window *x, int *at) {
+	int here = (*at)++;
+	struct xlayer *layer;
+	wl_list_for_each(layer, &window->layers, link) {
+		if (layer->id == x->id) {
+			layer->order = here;
+		}
+	}
+	struct xs_window *child;
+	wl_list_for_each(child, &x->children, link) {
+		paint_order(window, child, at);
+	}
+}
+
+// the layers stacked the way X paints their windows, over the cpu picture
+static void layers_order(struct flame_xwindow *window) {
+	struct xs_window *top = x_of(window);
+	if (!top || wl_list_empty(&window->layers)) {
+		return;
+	}
+	int at = 0;
+	paint_order(window, top, &at);
+	// a few at most, insertion sort
+	struct wl_list sorted;
+	wl_list_init(&sorted);
+	while (!wl_list_empty(&window->layers)) {
+		struct xlayer *layer = wl_container_of(window->layers.next, layer, link), *other;
+		wl_list_remove(&layer->link);
+		struct wl_list *after = &sorted;
+		wl_list_for_each(other, &sorted, link) {
+			if (other->order > layer->order) {
+				break;
+			}
+			after = &other->link;
+		}
+		wl_list_insert(after, &layer->link);
+	}
+	wl_list_insert_list(&window->layers, &sorted);
+	// raising only when it's out of order: every raise is a frame
+	struct wl_list *node = window->content->children.next;
+	bool in_order = node == &window->core_node->node.link;
+	struct xlayer *layer;
+	wl_list_for_each(layer, &window->layers, link) {
+		node = node->next;
+		in_order &= node == &layer->node->node.link;
+	}
+	if (!in_order) {
+		scene_node_lower_to_bottom(&window->core_node->node);
+		wl_list_for_each(layer, &window->layers, link) {
+			scene_node_raise_to_top(&layer->node->node);
+		}
+	}
+}
+
+static struct xlayer *layer_get(struct flame_xwindow *window, uint32_t id) {
+	struct xlayer *layer;
+	wl_list_for_each(layer, &window->layers, link) {
+		if (layer->id == id) {
+			return layer;
+		}
+	}
+	layer = calloc(1, sizeof(*layer));
+	if (!layer) {
+		return NULL;
+	}
+	layer->node = scene_buffer_create(window->content, &layer_impl, layer);
+	if (!layer->node) {
+		free(layer);
+		return NULL;
+	}
+	scene_node_set_enabled(&layer->node->node, false);
+	layer->window = window;
+	layer->id = id;
+	wl_list_init(&layer->queue);
+	wl_list_init(&layer->retiring);
+	wl_list_insert(window->layers.prev, &layer->link);
+	layers_order(window);
+	return layer;
+}
+
+// everything it was showing goes back to the app, nothing completes
+static void layer_destroy(struct xlayer *layer) {
+	struct xpresent *shown = layer->shown;
+	layer->shown = NULL;
+	if (shown) {
+		wl_list_init(&shown->link);
+		wl_list_insert(&layer->retiring, &shown->link);
+	}
+	wl_list_insert_list(&layer->retiring, &layer->queue);
+	wl_list_init(&layer->queue);
+	struct xpresent *xp, *tmp;
+	wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
+		if (!xp->released && xp->release) {
+			wlr_drm_syncobj_timeline_signal(xp->release, xp->release_point);
+		}
+		xpresent_free(xp);
+	}
+	scene_node_destroy(&layer->node->node);
+	wl_list_remove(&layer->link);
+	struct flame_xwindow *window = layer->window;
+	free(layer);
+	core_update(window);
+}
+
+// moved into another top-level (an app reparenting its web view): the
+// layer goes with it, what it shows and all
+static void layer_move(struct xlayer *layer, struct flame_xwindow *to) {
+	struct flame_xwindow *from = layer->window;
+	wl_list_remove(&layer->link);
+	wl_list_insert(to->layers.prev, &layer->link);
+	layer->window = to;
+	scene_node_reparent(&layer->node->node, to->content);
+	core_update(from);
+	core_update(to);
+	layers_order(to);
+}
+
+// the X tree changed: every layer where its window is now
+static void layers_update(struct flame_xshell *xshell) {
+	struct flame_xwindow *window;
+	wl_list_for_each(window, &xshell->windows, link) {
+		struct xlayer *layer, *tmp;
+		wl_list_for_each_safe(layer, tmp, &window->layers, link) {
+			struct flame_xwindow *now = window_of(xshell, layer->id);
+			if (!now) {
+				layer_destroy(layer);
+			} else if (now != window) {
+				layer_move(layer, now);
+			}
+		}
+	}
+	wl_list_for_each(window, &xshell->windows, link) {
+		layers_order(window);
+		struct xlayer *layer;
+		wl_list_for_each(layer, &window->layers, link) {
+			layer_place(layer);
+		}
+	}
+}
+
 void xshell_present(struct flame_xshell *xshell, const struct xs_present *present) {
 	struct flame_xwindow *window = window_of(xshell, present->window);
 	if (!window) {
@@ -613,23 +876,24 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		xshell_windows_changed(xshell);
 		window = window_of(xshell, present->window);
 	}
-	if (window) {
+	struct xlayer *layer = window ? layer_get(window, present->window) : NULL;
+	if (layer) {
 		// woken by its complete: that's its draw time. an app idle for a while
 		// (over 50ms) isn't drawing frame after frame, that's no sample
-		if (window->drawing) {
-			int64_t took = now_ns() - window->woken;
+		if (layer->drawing) {
+			int64_t took = now_ns() - layer->woken;
 			if (took < 50000000LL) {
-				window->draw_time = took > window->draw_time
-					? took : window->draw_time + (took - window->draw_time) / 8;
+				layer->draw_time = took > layer->draw_time
+					? took : layer->draw_time + (took - layer->draw_time) / 8;
 			}
-			window->drawing = false;
+			layer->drawing = false;
 		}
-		deliver_held(window);
+		deliver_held(layer);
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);
 	struct wlr_drm_syncobj_timeline *release = timeline_of(xshell, present->release);
-	if (!window || !xpixmap || (present->acquire && !acquire)) {
+	if (!layer || !xpixmap || (present->acquire && !acquire)) {
 		// nowhere to show it: skipped, and the app gets its buffer back
 		if (release) {
 			wlr_drm_syncobj_timeline_signal(release, present->release_point);
@@ -644,8 +908,7 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 	if (!xp) {
 		return;
 	}
-	xp->window = window;
-	xp->target_window = present->window;
+	xp->layer = layer;
 	xp->serial = present->serial;
 	xp->pixmap_id = present->pixmap->id;
 	xp->idle_fence = present->idle_fence;
@@ -665,11 +928,11 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 	xp->target = present->options & OPTION_ASYNC ? now_msc
 		: present_target(present->target_msc, present->divisor, present->remainder, now_msc);
 	if (xp->acquire && !acquired(xp)) {
-		enqueue(window, xp);
-	} else if (xp->target <= now_msc + 1 && wl_list_empty(&window->queue)) {
-		show(window, xp);
+		enqueue(layer, xp);
+	} else if (xp->target <= now_msc + 1 && wl_list_empty(&layer->queue)) {
+		show(layer, xp);
 	} else {
-		enqueue(window, xp);
+		enqueue(layer, xp);
 		process_msc(xshell, xp->requested);
 	}
 	// whatever it replaced completes at its msc
@@ -712,12 +975,12 @@ struct xshell_frame {
 // when to tell an app its frame made it so its next present lands right
 // before the render that can show it: its draw time and room for that to
 // vary before render_at. 0 for right away: draw time unknown, or no render
-static int64_t app_wake(const struct flame_xwindow *window, int64_t render_at) {
-	if (!render_at || window->draw_time <= 0) {
+static int64_t app_wake(const struct xlayer *layer, int64_t render_at) {
+	if (!render_at || layer->draw_time <= 0) {
 		return 0;
 	}
-	int64_t margin = window->draw_time / 2 > JIT_MARGIN_NS ? window->draw_time / 2 : JIT_MARGIN_NS;
-	return render_at - window->draw_time - margin;
+	int64_t margin = layer->draw_time / 2 > JIT_MARGIN_NS ? layer->draw_time / 2 : JIT_MARGIN_NS;
+	return render_at - layer->draw_time - margin;
 }
 
 static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
@@ -736,7 +999,7 @@ static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 	// at the flip, that frame waits a whole refresh for flame's next render.
 	// told just in time, it makes that render, like wayland's frame callbacks
 	int64_t now = now_ns();
-	int64_t wake = app_wake(xp->window, schedule_render_at(&frame->schedule, now));
+	int64_t wake = app_wake(xp->layer, schedule_render_at(&frame->schedule, now));
 	if (wake > now) {
 		xp->held = true;
 		xp->held_until = wake;
@@ -750,13 +1013,14 @@ static void handle_presented(struct wl_listener *listener, void *data) {
 	const struct flame_frame_presented *event = data;
 	struct flame_xshell *xshell = xframe->xshell;
 	struct flame_xwindow *window;
-	wl_list_for_each(window, &xshell->windows, link) {
+	struct xlayer *layer;
+	wl_list_for_each(window, &xshell->windows, link) wl_list_for_each(layer, &window->layers, link) {
 		struct xpresent *xp, *tmp;
-		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			check_presented(xframe->xshell, xp, xframe->frame, event);
 		}
-		if (window->shown) {
-			check_presented(xframe->xshell, window->shown, xframe->frame, event);
+		if (layer->shown) {
+			check_presented(xframe->xshell, layer->shown, xframe->frame, event);
 		}
 	}
 	// the msc moved: queued presents and NotifyMSCs may be due
@@ -767,9 +1031,10 @@ static void handle_frame_destroy(struct wl_listener *listener, void *data) {
 	struct xshell_frame *xframe = wl_container_of(listener, xframe, destroy);
 	// whatever was waiting on that output won't hear from it again
 	struct flame_xwindow *window;
-	wl_list_for_each(window, &xframe->xshell->windows, link) {
+	struct xlayer *layer;
+	wl_list_for_each(window, &xframe->xshell->windows, link) wl_list_for_each(layer, &window->layers, link) {
 		struct xpresent *xp, *tmp;
-		wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
+		wl_list_for_each_safe(xp, tmp, &layer->retiring, link) {
 			if (xp->frame == xframe->frame) {
 				xp->frame = NULL;
 				if (xp->held) {
@@ -779,12 +1044,13 @@ static void handle_frame_destroy(struct wl_listener *listener, void *data) {
 				}
 			}
 		}
-		if (window->shown && window->shown->held && window->shown->frame == xframe->frame) {
-			deliver(window->shown, false);
+		struct xpresent *shown = layer->shown;
+		if (shown && shown->held && shown->frame == xframe->frame) {
+			deliver(shown, false);
 		}
-		if (window->shown && window->shown->frame == xframe->frame) {
-			window->shown->frame = NULL;
-			window->shown->drawn_id = 0; // drawn again on another output
+		if (shown && shown->frame == xframe->frame) {
+			shown->frame = NULL;
+			shown->drawn_id = 0; // drawn again on another output
 		}
 	}
 	if (xframe->xshell->clock.frame == xframe->frame) {
@@ -822,11 +1088,11 @@ static void handle_new_frame(struct wl_listener *listener, void *data) {
 	}
 }
 
-// the buffer node's owner side: a frame drew the window's picture
-static void buffer_sampled(struct flame_buffer_node *node, struct flame_frame *frame,
+// the buffer node's owner side: a frame drew a layer's picture
+static void layer_sampled(struct flame_buffer_node *node, struct flame_frame *frame,
 		uint64_t draw_id, struct wlr_drm_syncobj_timeline *render_done, uint64_t render_point) {
-	struct flame_xwindow *window = node->data;
-	struct xpresent *xp = window->shown;
+	struct xlayer *layer = node->data;
+	struct xpresent *xp = layer->shown;
 	if (!xp || node->key != xp) {
 		return;
 	}
@@ -845,18 +1111,29 @@ static void buffer_sampled(struct flame_buffer_node *node, struct flame_frame *f
 }
 
 // what the window cut out of its input shape (a toolkit's shadow) goes to
-// whatever is below it
-static bool buffer_accepts_input(struct flame_buffer_node *node, double x, double y) {
-	struct flame_xwindow *window = node->data;
+// whatever is below it. x, y: in the node, which is at dx, dy in the window
+static bool accepts_input(struct flame_xwindow *window, int dx, int dy, double x, double y) {
 	struct xs_window *xw = xserver_window(window->xshell->xserver, window->id);
-	return !xw || xserver_window_accepts_input(xw,
-		xshell_to_x(window->xshell, x) + window->content_x,
-		xshell_to_x(window->xshell, y) + window->content_y);
+	return !xw || xserver_window_accepts_input(xw, xshell_to_x(window->xshell, x + dx),
+		xshell_to_x(window->xshell, y + dy));
 }
 
-static const struct flame_buffer_node_impl buffer_impl = {
-	.sampled = buffer_sampled,
-	.accepts_input = buffer_accepts_input,
+static bool layer_accepts_input(struct flame_buffer_node *node, double x, double y) {
+	struct xlayer *layer = node->data;
+	return accepts_input(layer->window, node->node.x, node->node.y, x, y);
+}
+
+static bool core_accepts_input(struct flame_buffer_node *node, double x, double y) {
+	return accepts_input(node->data, 0, 0, x, y);
+}
+
+static const struct flame_buffer_node_impl layer_impl = {
+	.sampled = layer_sampled,
+	.accepts_input = layer_accepts_input,
+};
+
+static const struct flame_buffer_node_impl core_impl = {
+	.accepts_input = core_accepts_input,
 };
 
 // ---- X top-levels as flame views ----
@@ -866,10 +1143,6 @@ static void x_stack_update(struct flame_xshell *xshell);
 static struct flame_xwindow *from_view(struct flame_view *view) {
 	struct flame_xwindow *window = wl_container_of(view, window, view);
 	return window;
-}
-
-static struct xs_window *x_of(struct flame_xwindow *window) {
-	return xserver_window(window->xshell->xserver, window->id);
 }
 
 // what flame shows of it (inside the shadow) to X's size and back
@@ -1074,25 +1347,30 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	window->floating = x->override_redirect;
 	window->width = x->width;
 	window->height = x->height;
-	wl_list_init(&window->queue);
-	wl_list_init(&window->retiring);
+	wl_list_init(&window->layers);
+	struct flame_tree *parent;
 	if (window->floating) {
 		// menus and tooltips: where the app put them, above everything
 		window->float_tree = scene_tree_create(server->render.layers[FLAME_LAYER_OVERLAY]);
-		window->content = window->float_tree
-			? scene_buffer_create(window->float_tree, &buffer_impl, window) : NULL;
+		parent = window->float_tree;
 		if (window->float_tree) {
 			scene_node_set_position(&window->float_tree->node, from_x(xshell, x->x),
 				from_x(xshell, x->y));
 		}
 	} else {
 		view_init(&window->view, &xview_impl, &server->desktop);
-		window->content = scene_buffer_create(window->view.content, &buffer_impl, window);
+		parent = window->view.content;
 	}
-	if (!window->content) {
+	window->content = parent ? scene_tree_create(parent) : NULL;
+	window->core_node = window->content
+		? scene_buffer_create(window->content, &core_impl, window) : NULL;
+	if (!window->core_node) {
+		if (window->content) {
+			scene_node_destroy(&window->content->node);
+		}
 		if (window->float_tree) {
 			scene_node_destroy(&window->float_tree->node);
-		} else {
+		} else if (!window->floating) {
 			view_finish(&window->view);
 		}
 		free(window);
@@ -1166,7 +1444,7 @@ static void core_drop(struct flame_xwindow *window) {
 void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 		const pixman_region32_t *region) {
 	struct flame_xwindow *window = find_window(xshell, top->id);
-	if (!window || window->shown || !top->backing) {
+	if (!window || self_presented(window) || !top->backing) {
 		return; // not shown here, or Present shows it
 	}
 	pixman_image_t *image = top->backing;
@@ -1194,9 +1472,7 @@ void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 		}
 	}
 	// a new key every time: the frame repaints the window
-	window->content_x = window->content_y = 0;
-	place_content(window);
-	scene_buffer_set(window->content, window->core_texture,
+	scene_buffer_set(window->core_node, window->core_texture,
 		(const void *)++window->core_serial, from_x(xshell, pixman_image_get_width(image)),
 		from_x(xshell, pixman_image_get_height(image)),
 		pixman_image_get_format(image) != PIXMAN_a8r8g8b8, NULL, 0);
@@ -1210,24 +1486,13 @@ static void window_destroy(struct flame_xwindow *window) {
 	if (!window->floating) {
 		window_anim_snapshot(&window->view); // the close plays from its last picture
 	}
-	// everything it was showing goes back to the app, nothing completes
-	struct xpresent *shown = window->shown;
-	window->shown = NULL;
-	if (shown) {
-		wl_list_init(&shown->link);
-		wl_list_insert(&window->retiring, &shown->link);
+	struct xlayer *layer, *ltmp;
+	wl_list_for_each_safe(layer, ltmp, &window->layers, link) {
+		layer_destroy(layer);
 	}
-	wl_list_insert_list(&window->retiring, &window->queue);
-	wl_list_init(&window->queue);
-	struct xpresent *xp, *tmp;
-	wl_list_for_each_safe(xp, tmp, &window->retiring, link) {
-		if (!xp->released && xp->release) {
-			wlr_drm_syncobj_timeline_signal(xp->release, xp->release_point);
-		}
-		xpresent_free(xp);
-	}
-	scene_buffer_set(window->content, NULL, NULL, 0, 0, false, NULL, 0);
+	scene_buffer_set(window->core_node, NULL, NULL, 0, 0, false, NULL, 0);
 	core_drop(window);
+	scene_node_destroy(&window->content->node);
 	if (window->floating) {
 		scene_node_destroy(&window->float_tree->node);
 	} else {
@@ -1398,8 +1663,8 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 					// its shadow changed (a tile has none): X's window moves
 					// around what shows, which stays where it is
 					xview_placed(&window->view, window->placed);
-					place_content(window);
 				}
+				place_content(window);
 				if (window->view.floating && (x->width != window->width
 						|| x->height != window->height)) {
 					// a floating dialog resized itself: it gets that size
@@ -1414,6 +1679,7 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 			window_destroy(window);
 		}
 	}
+	layers_update(xshell);
 	floats_update(xshell);
 	x_stack_update(xshell);
 	ewmh_update(xshell);
@@ -1428,14 +1694,13 @@ void xshell_started(struct flame_xshell *xshell) {
 
 // the picture at the size it shows at now
 static void content_refresh(struct flame_xwindow *window) {
-	struct xpresent *xp = window->shown;
-	if (xp) {
-		scene_buffer_set(window->content, xp->pixmap->texture, xp,
-			from_x(window->xshell, xp->pixmap->width), from_x(window->xshell, xp->pixmap->height),
-			xp->pixmap->opaque, xp->acquire, xp->acquire_point);
-	} else if (window->core && window->core_texture) {
+	struct xlayer *layer;
+	wl_list_for_each(layer, &window->layers, link) {
+		layer_place(layer);
+	}
+	if (window->core && window->core_texture) {
 		pixman_image_t *image = window->core->image;
-		scene_buffer_set(window->content, window->core_texture,
+		scene_buffer_set(window->core_node, window->core_texture,
 			(const void *)++window->core_serial,
 			from_x(window->xshell, pixman_image_get_width(image)),
 			from_x(window->xshell, pixman_image_get_height(image)),
@@ -1476,6 +1741,17 @@ void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *x) {
 	struct flame_xwindow *window = find_window(xshell, x->id);
 	if (window) {
 		window_destroy(window);
+		return;
+	}
+	// a window inside one that presented: its pictures go back to the app
+	wl_list_for_each(window, &xshell->windows, link) {
+		struct xlayer *layer, *tmp;
+		wl_list_for_each_safe(layer, tmp, &window->layers, link) {
+			if (layer->id == x->id) {
+				layer_destroy(layer);
+				return;
+			}
+		}
 	}
 }
 
@@ -1498,7 +1774,10 @@ static struct flame_xwindow *window_at(struct flame_xshell *xshell, double lx, d
 		return NULL;
 	}
 	struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
-	return buffer->impl == &buffer_impl ? buffer->data : NULL;
+	if (buffer->impl == &layer_impl) {
+		return ((struct xlayer *)buffer->data)->window;
+	}
+	return buffer->impl == &core_impl ? buffer->data : NULL;
 }
 
 uint32_t xshell_window_at(struct flame_xshell *xshell, double lx, double ly) {
