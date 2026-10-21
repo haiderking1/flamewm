@@ -468,17 +468,28 @@ static void buffer_show(struct flame_buffer_node *node, struct wlr_texture *text
 	}
 }
 
+// win is in top and it and everything between them is mapped
+static bool x_viewable_in(const struct xs_window *top, const struct xs_window *win) {
+	int depth = 0;
+	for (const struct xs_window *w = win; w != top; w = w->parent) {
+		if (!w || !w->parent || !w->mapped || ++depth > 64) {
+			return false;
+		}
+	}
+	return true;
+}
+
 // where X has win in top: its origin there and the part of it that shows,
-// cut by everything it's in. false when it or something it's in is unmapped,
-// or it isn't in top at all
+// cut by everything it's in. false when it isn't viewable in top, or none
+// of it shows
 static bool x_visible(const struct xs_window *top, const struct xs_window *win, int *ox,
 		int *oy, struct wlr_box *clip) {
+	if (!x_viewable_in(top, win)) {
+		return false;
+	}
 	const struct xs_window *chain[64];
 	int len = 0;
 	for (const struct xs_window *w = win; w != top; w = w->parent) {
-		if (!w || !w->parent || !w->mapped || len == 64) {
-			return false;
-		}
 		chain[len++] = w;
 	}
 	int x = 0, y = 0;
@@ -498,6 +509,8 @@ static bool x_visible(const struct xs_window *top, const struct xs_window *win, 
 	return true;
 }
 
+static void core_update(struct flame_xwindow *window);
+
 // a layer's picture where X has its window, cut to what of that window
 // shows: Present puts the pixmap at the window's corner plus its offset and
 // nothing outside the window. off while its window isn't viewable
@@ -507,6 +520,17 @@ static void layer_place(struct xlayer *layer) {
 	struct xpresent *xp = layer->shown;
 	struct xs_window *top = x_of(window);
 	struct xs_window *x = xserver_window(xshell->xserver, layer->id);
+	if (xp && top && x && !x_viewable_in(top, x)) {
+		// unmapped: what it showed is gone, like X loses a window's contents.
+		// mapped again it shows nothing until it draws, never the old picture
+		// (a menu flashing what it showed last time)
+		layer->shown = NULL;
+		scene_node_set_enabled(&layer->node->node, false);
+		scene_buffer_set(layer->node, NULL, NULL, 0, 0, false, NULL, 0);
+		retire(layer, xp);
+		core_update(window);
+		xp = NULL;
+	}
 	int ox, oy;
 	struct wlr_box clip, shows;
 	if (!xp || !top || !x || !x_visible(top, x, &ox, &oy, &clip)) {
