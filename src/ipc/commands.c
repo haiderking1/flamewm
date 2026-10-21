@@ -94,7 +94,8 @@ static bool parse_arg(enum command_arg kind, const char *word, union flame_arg *
 	return true;
 }
 
-// pointer move X Y, pointer button left|middle|right press|release: tests
+// pointer move X Y, pointer button left|middle|right press|release, pointer
+// scroll DELTA (15 a wheel notch, down positive): tests
 // drive flame with these, and only when it was started for that
 static void pointer_command(struct flame_ipc_client *client, char **save) {
 	if (!getenv("FLAME_TEST_INPUT")) {
@@ -105,6 +106,11 @@ static void pointer_command(struct flame_ipc_client *client, char **save) {
 	const char *what = strtok_r(NULL, " \t\r", save);
 	const char *a = strtok_r(NULL, " \t\r", save);
 	const char *b = strtok_r(NULL, " \t\r", save);
+	if (what && a && !b && !strcmp(what, "scroll")) {
+		reply_ok(client);
+		cursor_test_scroll(cursor, strtod(a, NULL));
+		return;
+	}
 	if (what && a && b && !strcmp(what, "move")) {
 		reply_ok(client);
 		cursor_test_move(cursor, strtod(a, NULL), strtod(b, NULL));
@@ -119,7 +125,8 @@ static void pointer_command(struct flame_ipc_client *client, char **save) {
 			return;
 		}
 	}
-	reply_error(client, "pointer move X Y, or pointer button left|middle|right press|release");
+	reply_error(client, "pointer move X Y, pointer button left|middle|right press|release, "
+		"or pointer scroll DELTA");
 }
 
 void ipc_command(struct flame_ipc_client *client, char *line) {
