@@ -248,6 +248,24 @@ px = d[-(w * h * 3):][(h // 2 * w + w // 2) * 3:][:3]
 print('screen center', *px)
 \"" "samples 4" "pixel 255 0 0" "screen center 255 0 0"
 
+case_run "GL in child windows: each where X has it, stacked and cut like X" "
+$BIN/glxchild > child.out 2>&1 &
+sleep 1.2
+grim -t ppm shot.ppm
+cat child.out
+set -- \$($BIN/xwins | grep glxchild | $XGEO)
+python3 -I -c \"
+d = open('shot.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+pixels = d[-(w * h * 3):]
+x0, y0 = \$1, \$2
+for name, x, y in (('top', 20, 20), ('green', 60, 50), ('blue', 150, 110),
+		('yellow', 375, 105), ('cut', 420, 150)):
+	at = ((y0 + y) * w + x0 + x) * 3
+	print(name, *pixels[at:at + 3])
+\"
+wait" "drawn" "top 255 0 0" "green 0 255 0" "blue 0 0 255" "yellow 255 255 0" "cut 255 0 0"
+
 case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &
 sleep 0.8

@@ -23,7 +23,9 @@ struct xs_window;
 // desktop: normal ones tile like any window, override-redirect ones (menus,
 // tooltips) float where the app put them. what they show comes from Present:
 // the app's gpu buffer straight into flame's scene, no copy, flame's frame
-// clock saying when it reached the screen
+// clock saying when it reached the screen. a top-level with child windows
+// presenting on their own (a browser's web views, a game's client window)
+// shows each of them where X has it, clipped and stacked like X would
 
 struct flame_xshell {
 	struct flame_server *server;
@@ -79,29 +81,24 @@ struct flame_xwindow {
 	bool floating; // override-redirect: placed by the app, no tile
 	struct flame_view view; // tiled ones
 	struct flame_tree *float_tree; // floating ones
-	struct flame_buffer_node *content;
+	// its picture, X's window at 0,0: what was drawn with the cpu at the
+	// bottom, above that a layer (xlayer) for each window in it that presents
+	struct flame_tree *content;
+	struct flame_buffer_node *core_node;
+	struct wl_list layers; // xlayer.link, bottom to top the way X stacks them
 	int width, height; // what X thinks its size is
 	// _GTK_FRAME_EXTENTS: its shadow, drawn inside it around the window
 	// itself. flame tiles, floats and borders what's inside, X has all of it
 	int ext_left, ext_right, ext_top, ext_bottom;
-	int content_x, content_y; // where its picture starts in it (Present's offset)
 	struct wlr_box placed; // where flame put it last, layout coords
 	bool parked; // on a workspace that doesn't show: X has it out of sight
 
-	struct xpresent *shown; // its picture right now
-	struct wl_list queue; // xpresent.link, waiting for their msc, soonest first
-	struct wl_list retiring; // xpresent.link, replaced, not done yet
 	// drawn with the cpu: its backing as a texture, updated where it changed,
-	// and the key telling frames it's a new picture. Present wins over it
+	// and the key telling frames it's a new picture. the top-level's own
+	// Present wins over it, its children's go on top of it
 	struct xcore *core;
 	struct wlr_texture *core_texture;
 	uintptr_t core_serial;
-	// how long the app takes from hearing a frame made it (CompleteNotify) to
-	// its next present: quick to grow, slow to shrink. its completes are held
-	// back to just in time for the render that can show the next one
-	int64_t draw_time;
-	int64_t woken; // when the last complete went out, while drawing
-	bool drawing;
 	// _NET_WM_STATE as last told, see ewmh.c
 	uint32_t ewmh_state;
 	bool ewmh_state_set;
