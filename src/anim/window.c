@@ -7,6 +7,7 @@
 #include "anim/ghost.h"
 #include "config/config.h"
 #include "core/server.h"
+#include "desktop/fullscreen.h"
 #include "render/snapshot.h"
 #include "scene/scene.h"
 #include "util/listener.h"
@@ -147,8 +148,17 @@ static void step(struct flame_anim *anim, double eased, double t) {
 
 static void done(struct flame_anim *anim, bool finished) {
 	struct flame_view_anim *state = anim->data;
+	bool moved = state->kind == KIND_MOVE;
 	state->kind = KIND_NONE;
 	apply(state, identity());
+	struct flame_view *view = state->view;
+	if (moved && view->fullscreen_shown && !view->desktop->server->terminating) {
+		// it covers the screen now: the black behind it can come on
+		fullscreen_refresh_backdrops(view->desktop);
+	}
+	if (view->leaving_fullscreen) {
+		view_left_fullscreen(view); // back in its tile, under the bars again
+	}
 }
 
 // where the window shows right now, layout coords: a move picks up from there
@@ -202,6 +212,10 @@ void window_anim_placed(struct flame_view *view, struct wlr_box was, bool first)
 	state->from = from;
 	state->to = view->geometry;
 	anim_start(anims_of(view), &state->anim, config->move_ms, &config->move_curve);
+}
+
+bool window_anim_moving(struct flame_view *view) {
+	return view->anim && view->anim->kind == KIND_MOVE && anim_running(&view->anim->anim);
 }
 
 void window_anim_stop(struct flame_view *view) {

@@ -96,6 +96,8 @@ struct flame_view {
 	bool unmap_quietly;
 	// the next placement doesn't animate the move: the mouse put it there
 	bool placed_by_hand;
+	// shrinking back from fullscreen: still over the bars till it's in place
+	bool leaving_fullscreen;
 	// what init.lua's rules said when it opened, and its animations
 	struct flame_window_rule rule;
 	struct flame_view_anim *anim;
@@ -116,6 +118,8 @@ void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen);
 void view_hide(struct flame_view *view);
 // into the tree it belongs in: its workspace's tiles or fullscreen tree
 void view_reparent(struct flame_view *view);
+// done shrinking back from fullscreen: under the bars again
+void view_left_fullscreen(struct flame_view *view);
 // the client drew a new size, recenter it if it's smaller than fullscreen
 void view_content_changed(struct flame_view *view);
 

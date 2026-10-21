@@ -1,6 +1,6 @@
 #include "desktop/fullscreen.h"
 
-
+#include "anim/window.h"
 #include "core/server.h"
 
 bool fullscreen_area(struct flame_desktop *desktop, struct wlr_box *box) {
@@ -71,14 +71,16 @@ void fullscreen_refresh_backdrops(struct flame_desktop *desktop) {
 
 	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
 		struct flame_workspace *workspace = &desktop->workspaces[i];
-		// a displaced owner stays fullscreen on screen until its transaction lands
+		// a displaced owner stays fullscreen on screen until its transaction
+		// lands. one still growing into the screen shows what's around it,
+		// the black comes once it's there
 		bool any = false;
 		struct flame_view *view;
 		wl_list_for_each(view, &workspace->views, link) {
-			any |= view->fullscreen_shown;
+			any |= view->fullscreen_shown && !window_anim_moving(view);
 		}
 		wl_list_for_each(view, &workspace->floats, link) {
-			any |= view->fullscreen_shown;
+			any |= view->fullscreen_shown && !window_anim_moving(view);
 		}
 
 		bool on = any && have_area;
