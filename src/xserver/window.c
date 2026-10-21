@@ -243,6 +243,8 @@ void xserver_configure_notify(struct flame_xserver *xserver, struct xs_window *w
 
 void xs_window_reparent(struct flame_xserver *xserver, struct xs_window *window,
 		struct xs_window *parent, int x, int y) {
+	wlr_log(WLR_DEBUG, "xserver: 0x%x goes into 0x%x at %d,%d%s", window->id, parent->id, x, y,
+		window->mapped ? ", mapped" : "");
 	bool was_mapped = window->mapped;
 	xs_window_unmap(xserver, window);
 	struct xs_window *old = window->parent;
