@@ -172,6 +172,9 @@ $BIN/xewmh fullscreen" "state: FOCUSED MAXIMIZED_VERT MAXIMIZED_HORZ" \
 	"state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "EWMH: an X window that starts fullscreen does" "
 $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
+case_run "a tile asking to move: kept where it is, told the ICCCM way" "
+$BIN/xewmh configure" "kept: yes" "told: yes"
+
 case_run "EWMH: activating and closing the EWMH way" "
 $BIN/xewmh activate
 $BIN/xewmh close" "active is the new one: yes" "active is the first one: yes" "clients: 2" \

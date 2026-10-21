@@ -127,6 +127,10 @@ double xshell_from_x(const struct flame_xshell *xshell, double v);
 // the screen's scale or x_zero_scaling changed: X's coordinates follow,
 // every X window moves to where it is in them
 void xshell_rescale(struct flame_xshell *xshell);
+// a client asked to configure a mapped top-level: flame decides, see
+// xs_hooks.configure_request. true when it did
+bool xshell_configure_request(struct flame_xshell *xshell, struct xs_window *window,
+	uint16_t mask, const int32_t values[7]);
 // a client message for the window manager (EWMH)
 void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
 	const uint32_t data[5]);

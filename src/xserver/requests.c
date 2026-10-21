@@ -151,7 +151,15 @@ static void configure_window(struct xs_client *client, const struct xin *in) {
 			at += 4;
 		}
 	}
-	xs_window_configure(client->xserver, window, mask, values[0], values[1], values[2],
+	// a mapped top-level the window manager has: its call, like a
+	// ConfigureRequest under SubstructureRedirect
+	struct flame_xserver *xserver = client->xserver;
+	if (window->parent == xserver->root && window->mapped && !window->override_redirect
+			&& xserver->hooks.configure_request
+			&& xserver->hooks.configure_request(xserver->hooks.data, window, mask, values)) {
+		return;
+	}
+	xs_window_configure(xserver, window, mask, values[0], values[1], values[2],
 		values[3], values[4], (uint32_t)values[5], (uint8_t)values[6]);
 }
 
