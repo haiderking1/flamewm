@@ -59,6 +59,7 @@ static bool shown(struct flame_surface_state *state) {
 
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct flame_surface_state *state = wl_container_of(listener, state, commit);
+	wl_signal_emit_mutable(&state->scene->events.commit, state->surface);
 	if (state->surface->current.committed & WLR_SURFACE_STATE_BUFFER) {
 		int64_t now = now_ns();
 		state->buffer_since = now;

@@ -30,6 +30,7 @@ void scene_init(struct flame_scene *scene) {
 	memset(scene, 0, sizeof(*scene));
 	wl_signal_init(&scene->events.changed);
 	wl_signal_init(&scene->events.damage);
+	wl_signal_init(&scene->events.commit);
 	wl_signal_init(&scene->events.surface_destroy);
 	node_init(&scene->root.node, FLAME_NODE_TREE, scene, NULL);
 	wl_list_init(&scene->root.children);
