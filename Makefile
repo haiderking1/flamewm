@@ -164,6 +164,8 @@ clangd: $(PROTO_HEADERS)
 install: release
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
+	install -Dm644 data/flamewm-portals.conf \
+		$(DESTDIR)$(PREFIX)/share/xdg-desktop-portal/flamewm-portals.conf
 
 clean:
 	rm -rf build build-asan build-release
