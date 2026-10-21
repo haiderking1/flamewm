@@ -207,6 +207,23 @@ w, h = map(int, d.split(b'\\\\n')[1].split())
 px = d[-(w * h * 3):][(h // 2 * w + w // 2) * 3:][:3]
 print('center', *px)
 \"" '"scanout":true' "kept going: yes" "center 0 255 0"
+case_run "tearing: an X game with vsync off tears, scanned out, and runs unthrottled" "
+$BIN/glxfull 2 vsyncoff > full.out 2>&1 &
+sleep 0.6
+$CTL pointer move 300 300 > /dev/null
+sleep 0.8
+$CTL state | grep -o '\"tearing\":[a-z]*'
+wait
+cat full.out" '"tearing":true' "kept going: yes"
+case_run "tearing: a wayland game asking for async tears, one with vsync doesn't" "
+$BIN/wlgame 1.5 vsync > /dev/null 2>&1 &
+sleep 1
+echo \"vsync \$($CTL state | grep -o '\"tearing\":[a-z]*')\"
+wait
+$BIN/wlgame 1.5 vsyncoff > /dev/null 2>&1 &
+sleep 1
+echo \"vsyncoff \$($CTL state | grep -o '\"tearing\":[a-z]*')\"
+wait" 'vsync "tearing":false' 'vsyncoff "tearing":true'
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

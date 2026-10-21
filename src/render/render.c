@@ -8,6 +8,7 @@
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/util/log.h>
 
@@ -48,6 +49,7 @@ void render_pointer_move(struct flame_render *render, double x, double y) {
 }
 
 bool render_init(struct flame_render *render, struct flame_server *server) {
+	render->server = server;
 	render->renderer = wlr_renderer_autocreate(server->backend.wlr);
 	if (!render->renderer) {
 		wlr_log(WLR_ERROR, "failed to create renderer");
@@ -80,6 +82,13 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 	if (wlr_renderer_get_texture_formats(render->renderer, WLR_BUFFER_CAP_DMABUF)) {
 		render->dmabuf =
 			wlr_linux_dmabuf_v1_create_with_renderer(server->display, 5, render->renderer);
+	}
+
+	// fullscreen games ask to tear (vsync off) through this, see frame.c
+	render->tearing = wlr_tearing_control_manager_v1_create(server->display, 1);
+	if (!render->tearing) {
+		wlr_log(WLR_ERROR, "failed to create the tearing control manager");
+		return false;
 	}
 
 	// explicit sync: clients say when the gpu is done with a buffer instead of

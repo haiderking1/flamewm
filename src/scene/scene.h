@@ -111,6 +111,9 @@ struct flame_buffer_node {
 	// the buffer texture was made from, when the owner lets KMS show it
 	// itself (a fullscreen X game, see impl.scanned_out). NULL: drawn only
 	struct wlr_buffer *scanout_buffer;
+	// the app said its pictures may tear (X's PresentOptionAsync, a game
+	// with vsync off): fullscreen, they go out the moment they're there
+	bool tearing;
 	const struct flame_buffer_node_impl *impl;
 	void *data;
 };

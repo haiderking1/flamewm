@@ -253,6 +253,7 @@ struct xpresent {
 	uint64_t acquire_point, release_point;
 	int64_t requested; // ns, when the app handed it over
 	uint64_t target; // the msc it's meant to be on screen at
+	bool async; // PresentOptionAsync: it may tear (a game with vsync off)
 
 	// the first frame that drew it, completion goes out when that one flips
 	uint64_t drawn_id;
@@ -831,6 +832,7 @@ static void layer_drop(struct xlayer *layer) {
 	scene_node_set_enabled(&layer->node->node, false);
 	scene_buffer_set(layer->node, NULL, NULL, 0, 0, false, NULL, 0);
 	layer->node->scanout_buffer = NULL;
+	layer->node->tearing = false;
 	retire(layer, xp);
 	core_update(layer->window);
 }
@@ -884,6 +886,8 @@ static void layer_place(struct xlayer *layer) {
 		from_x(xshell, shows.height), xp->pixmap->opaque, wait, wait_point);
 	// fullscreen and alone, KMS can show it itself (see layer_scanned_out)
 	layer->node->scanout_buffer = xp->copy ? xp->copy->buffer : xp->pixmap->buffer;
+	// vsync off: fullscreen, it goes out the moment it's there, tearing
+	layer->node->tearing = xp->async;
 	scene_node_set_enabled(&layer->node->node, true);
 }
 
@@ -1312,6 +1316,7 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 	xp->acquire_point = present->acquire_point;
 	xp->release_point = present->release_point;
 	xp->requested = now_ns();
+	xp->async = present->options & OPTION_ASYNC;
 	// due by the next flip: shown at the next frame, a second one before that
 	// frame replaces it (skipped). later: queued until the refresh before its
 	// msc. that's what paces FIFO apps, they wait for their complete msc

@@ -21,6 +21,8 @@
 //     repeat_rate = 30, repeat_delay = 250, focus_follows_mouse = true,
 //     x_zero_scaling = false, x_global_keys = "always" ("never", "modifiers",
 //     "combos": X apps see keys typed in wayland windows, push to talk),
+//     allow_tearing = true (fullscreen games with vsync off tear, if they ask),
+//     vrr = "fullscreen" ("off", "always": adaptive sync where the screen can),
 //     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
 //     keyboard = { layout = "us,ara", variant = "", model = "",
 //       options = "grp:alt_shift_toggle", rules = "" } }
@@ -285,6 +287,11 @@ static int l_set(lua_State *L) {
 			config->focus_follows_mouse = lua_toboolean(L, value);
 		} else if (!strcmp(key, "x_zero_scaling")) {
 			config->x_zero_scaling = lua_toboolean(L, value);
+		} else if (!strcmp(key, "allow_tearing")) {
+			config->allow_tearing = lua_toboolean(L, value);
+		} else if (!strcmp(key, "vrr")) {
+			ok = lua_isstring(L, value)
+				&& sync_vrr_policy_parse(lua_tostring(L, value), &config->vrr);
 		} else if (!strcmp(key, "x_global_keys")) {
 			static const char *const names[] = {"never", "modifiers", "combos", "always"};
 			const char *name = lua_tostring(L, value);

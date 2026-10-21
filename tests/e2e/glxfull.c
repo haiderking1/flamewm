@@ -1,12 +1,14 @@
 // a fullscreen GL game the X way: fullscreen asked before mapping, frames
 // swapped as fast as they're taken for a few seconds. flame should show its
 // buffers themselves (direct scanout) and hand them back so it never stalls
-// usage: glxfull SECONDS
+// vsyncoff: swap interval 0, a game with vsync off. its presents ask to tear
+// usage: glxfull SECONDS [vsyncoff]
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <X11/Xatom.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static double now(void) {
@@ -48,6 +50,15 @@ int main(int argc, char **argv) {
 	if (!ctx || !glXMakeCurrent(d, w, ctx)) {
 		puts("no context");
 		return 1;
+	}
+	if (argc > 2 && !strcmp(argv[2], "vsyncoff")) {
+		PFNGLXSWAPINTERVALEXTPROC interval = (PFNGLXSWAPINTERVALEXTPROC)
+			glXGetProcAddress((const GLubyte *)"glXSwapIntervalEXT");
+		if (!interval) {
+			puts("no swap control");
+			return 1;
+		}
+		interval(d, w, 0);
 	}
 	int swaps = 0;
 	double start = now();

@@ -9,10 +9,13 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
 #include <wlr/util/transform.h>
 
+#include "config/config.h"
+#include "core/server.h"
 #include "render/coords.h"
 #include "render/damage.h"
 #include "render/feedback.h"
@@ -132,6 +135,8 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 			| WLR_OUTPUT_STATE_TRANSFORM | WLR_OUTPUT_STATE_ENABLED)) {
 		frame->whole = true;
 		schedule_set_period(&frame->schedule, refresh_period(frame->output));
+		sync_reset(&frame->sync); // KMS gets another chance at tearing and vrr
+		frame->tearing_logged = false;
 		frame_request(frame);
 	}
 }
@@ -168,10 +173,38 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	}
 }
 
+// torn: it went as a tearing flip (only asked for with tear)
 static bool commit(struct flame_frame *frame, struct wlr_output_state *state,
-		enum timing_commit kind) {
+		enum timing_commit kind, bool tear, bool *torn) {
+	if (torn) {
+		*torn = false;
+	}
+	if (tear) {
+		// an async flip changes the buffer and nothing else: KMS refuses one
+		// carrying damage clips on most drivers
+		state->tearing_page_flip = true;
+		state->committed &= ~WLR_OUTPUT_STATE_DAMAGE;
+	}
 	frame->committing = true;
 	bool ok = wlr_output_commit_state(frame->output, state);
+	if (tear && !ok) {
+		// KMS or the driver wouldn't tear this one: a plain flip right away,
+		// nothing stalls. too many of those and tearing's off for a while
+		state->tearing_page_flip = false;
+		ok = wlr_output_commit_state(frame->output, state);
+		sync_tearing_result(&frame->sync, true);
+		if (frame->sync.tearing_off && !frame->tearing_logged) {
+			wlr_log(WLR_INFO, "%s: KMS keeps refusing tearing flips, vsync until the next "
+				"mode change or vt switch", frame->output->name);
+			frame->tearing_logged = true;
+		}
+	} else if (tear) {
+		sync_tearing_result(&frame->sync, false);
+		if (torn) {
+			*torn = true;
+		}
+		timing_tearing(&frame->timing);
+	}
 	frame->committing = false;
 	if (!ok) {
 		wlr_log(WLR_DEBUG, "commit on %s failed", frame->output->name);
@@ -222,7 +255,7 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 	frame->stall_reported = false;
 
 	if (frame->has_queued) {
-		bool ok = commit(frame, &frame->queued, frame->queued_kind);
+		bool ok = commit(frame, &frame->queued, frame->queued_kind, false, NULL);
 		drop_queued(frame);
 		if (ok) {
 			frame->pending_draw = frame->queued_draw;
@@ -253,6 +286,8 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	frame->whole = true;
 	frame->stall_reported = false;
 	frame->scanout.suspended = false;
+	sync_reset(&frame->sync);
+	frame->tearing_logged = false;
 	frame_cursor_reset(&frame->cursor);
 	queue_process(frame);
 }
@@ -275,6 +310,7 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	elements_init(&frame->prev);
 	elements_init(&frame->cur);
 	schedule_init(&frame->schedule, render->pipeline, refresh_period(output));
+	sync_init(&frame->sync);
 	scanout_init(&frame->scanout, render, output);
 	frame_cursor_init(&frame->cursor, render, output);
 	timing_init(&frame->timing, output, &frame->schedule, render->frame_timing);
@@ -689,6 +725,38 @@ static void keep_scanout_buffer(struct flame_frame *frame,
 		frame->out_point, frame->output->event_loop);
 }
 
+// the app that has the output to itself: the topmost thing showing on all of
+// area (a fullscreen game or video), drawn or scanned out, a software
+// pointer over it or not. NULL for none
+static const struct flame_element *fullscreen_element(const struct flame_element_list *list,
+		struct wlr_box area) {
+	pixman_box32_t box = {area.x, area.y, area.x + area.width, area.y + area.height};
+	for (size_t i = list->len; i-- > 0;) {
+		const struct flame_element *element = &list->data[i];
+		if (element->type == FLAME_ELEMENT_RECT) {
+			continue; // a backdrop, not an app
+		}
+		if (pixman_region32_contains_rectangle((pixman_region32_t *)&element->visible, &box)
+				== PIXMAN_REGION_IN) {
+			return element;
+		}
+	}
+	return NULL;
+}
+
+// it asked for its frames to go out mid refresh: a wayland app through
+// tearing control, an X one with PresentOptionAsync
+static bool app_wants_tearing(struct flame_frame *frame, const struct flame_element *element) {
+	if (!element) {
+		return false;
+	}
+	if (element->type == FLAME_ELEMENT_SURFACE && element->surface) {
+		return wlr_tearing_control_manager_v1_surface_hint_from_surface(frame->render->tearing,
+			element->surface) == WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC;
+	}
+	return element->buffer_node && element->buffer_node->tearing;
+}
+
 // a picture's own buffer goes to KMS (a fullscreen X game): a draw id for
 // it, and its owner holds on to the buffer until a later frame flips
 static uint64_t picture_scanned_out(struct flame_frame *frame,
@@ -738,6 +806,12 @@ static void render(struct flame_frame *frame, int64_t now) {
 	bool drew_gl = false; // went through the gpu, not straight to KMS
 	const struct flame_element *candidate = scanout_candidate(&frame->cur, *frame->area);
 	scanout_hint(&frame->scanout, candidate);
+	// the fullscreen app wants to tear (vsync off): its frames go out the
+	// moment they're ready, as async flips where KMS takes them
+	const struct flame_config *config = frame->render->server->config;
+	bool tearing = config->allow_tearing && !frame->sync.tearing_off
+		&& app_wants_tearing(frame, fullscreen_element(&frame->cur, *frame->area));
+	frame->sync.tearing = tearing;
 	bool drew = false;
 	if (changed || cursor_only) {
 		struct wlr_output_state state;
@@ -772,12 +846,19 @@ static void render(struct flame_frame *frame, int64_t now) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
 		} else if (!schedule->pending) {
-			drew = commit(frame, &state, kind);
+			// a cursor plane change can't ride along an async flip
+			bool tear = !cursor_only && sync_tearing_wanted(&frame->sync, config->allow_tearing,
+				tearing, frame_cursor_dirty(&frame->cursor));
+			bool torn = false;
+			drew = commit(frame, &state, kind, tear, &torn);
 			wlr_output_state_finish(&state);
 			if (drew) {
 				submitted_now = true;
 				frame->pending_draw = draw_id;
 				schedule_submitted(schedule, &frame->submitted_ticket, now, now_ns());
+				if (torn) {
+					schedule_mark_off_grid(schedule);
+				}
 				if (schedule->pending_target) {
 					timing_slack(&frame->timing,
 						schedule->pending_target - schedule->pending_submit);
@@ -801,6 +882,8 @@ static void render(struct flame_frame *frame, int64_t now) {
 		// nothing went anywhere: callbacks on the refresh grid, no pageflip
 		schedule_empty(schedule, now);
 	}
+	// a game tearing: the next frame goes the moment it's ready too
+	schedule_set_asap(schedule, tearing);
 	swap_lists(frame);
 	if (again) {
 		// still animating: the refresh after this one too

@@ -57,9 +57,13 @@ $(BUILD)/gen/%-protocol.h: protocols/%.xml
 	$(WAYLAND_SCANNER) server-header $< $@
 
 # pure logic modules get unit tests, sanitizers on
-TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test
+TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test $(BUILD)/tests/sync_test
 
 $(BUILD)/tests/schedule_test: tests/schedule_test.c src/render/schedule.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
+
+$(BUILD)/tests/sync_test: tests/sync_test.c src/render/sync.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
 
@@ -144,6 +148,21 @@ $(E2E)/wlcapture: tests/e2e/wlcapture.c $(CAPTURE_HEADERS) $(CAPTURE_CODE) \
 		$(E2E)/linux-dmabuf-v1-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client xcb gbm libdrm)
 
+TEARING_XML := $(STAGING_XML)/tearing-control/tearing-control-v1.xml
+
+$(E2E)/tearing-control-v1-client-protocol.h: $(TEARING_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/tearing-control-v1-protocol.c: $(TEARING_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/wlgame: tests/e2e/wlgame.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h \
+		$(E2E)/tearing-control-v1-protocol.c $(E2E)/tearing-control-v1-client-protocol.h
+	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlgame.c $(E2E)/xdg-shell-protocol.c \
+		$(E2E)/tearing-control-v1-protocol.c $(shell pkg-config --cflags --libs wayland-client)
+
 $(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client)
@@ -178,7 +197,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

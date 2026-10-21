@@ -7,6 +7,7 @@
 
 #include "anim/anim.h"
 #include "bindings/keybind.h"
+#include "render/sync.h"
 
 struct flame_lua;
 struct flame_server;
@@ -85,6 +86,13 @@ struct flame_config {
 	bool x_zero_scaling;
 
 	enum flame_x_global_keys x_global_keys;
+
+	// a fullscreen app that asks to tear (a game with vsync off) does: its
+	// frames go out the moment they're done, mid refresh
+	bool allow_tearing;
+	// the display waits for frames instead of frames for the display, where
+	// it can: off, fullscreen (while something fullscreen shows), always
+	enum sync_vrr_policy vrr;
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;

@@ -57,6 +57,15 @@ void schedule_request_redraw(struct schedule *schedule) {
 	schedule->redraw = true;
 }
 
+void schedule_set_asap(struct schedule *schedule, bool asap) {
+	schedule->asap = asap;
+}
+
+void schedule_mark_off_grid(struct schedule *schedule) {
+	schedule->pending_off_grid = true;
+	schedule->pending_target = 0;
+}
+
 static int64_t base_lead(const struct schedule *schedule) {
 	int64_t lead = schedule->cpu + schedule->gpu + schedule->margin;
 	return lead < schedule->period ? lead : schedule->period;
@@ -72,6 +81,9 @@ void schedule_set_extra(struct schedule *schedule, int64_t ns) {
 }
 
 bool schedule_overlapping(const struct schedule *schedule) {
+	if (schedule->asap) {
+		return false; // the next frame goes when this one's flipped, not before
+	}
 	return schedule->policy == SCHEDULE_DEADLINE
 		|| (schedule->policy == SCHEDULE_ADAPTIVE && schedule->overlap);
 }
@@ -99,7 +111,7 @@ static int64_t render_window(const struct schedule *schedule) {
 // present) makes that refresh instead of the one after. past the window it's
 // now, still aiming at that vblank. no grid yet, or immediate: now
 static int64_t repaint_window(const struct schedule *schedule, int64_t now) {
-	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE) {
+	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE || schedule->asap) {
 		return now;
 	}
 	int64_t window = schedule_next_vblank(schedule, now) - schedule_lead(schedule);
@@ -107,7 +119,7 @@ static int64_t repaint_window(const struct schedule *schedule, int64_t now) {
 }
 
 int64_t schedule_render_at(const struct schedule *schedule, int64_t now) {
-	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE) {
+	if (!schedule->have_vblank || schedule->policy == SCHEDULE_IMMEDIATE || schedule->asap) {
 		return 0;
 	}
 	// a pending frame holds the slot until its flip, the next one after that
@@ -147,6 +159,7 @@ static void current_cycle(struct schedule *schedule) {
 void schedule_submitted(struct schedule *schedule, void *ticket, int64_t started, int64_t now) {
 	schedule->pending = ticket;
 	schedule->pending_submit = now;
+	schedule->pending_off_grid = false;
 	// a render that ran past its vblank counts as a miss, not as aimed at
 	// the one after. one that started with less time left than a render
 	// takes (something came in right before a vblank) never had a chance at
@@ -188,6 +201,16 @@ void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now)
 		return NULL; // nobody waited for this one, the clock stays
 	}
 	int64_t anchor = kernel > 0 ? kernel : now;
+	if (schedule->pending_off_grid) {
+		// a tearing flip goes when it's ready, not on a vblank: the grid
+		// stays where the last real one put it, nothing was missed
+		schedule->pending_off_grid = false;
+		schedule->last_missed = false;
+		void *ticket = schedule->pending;
+		schedule->pending = NULL;
+		new_cycle(schedule);
+		return ticket;
+	}
 	// came a refresh (or more) after the vblank it was meant for: the window
 	// was too tight. wider at once, then back down slowly while flips land
 	schedule->last_missed = kernel > 0 && schedule->pending_target
@@ -216,6 +239,7 @@ void *schedule_presented(struct schedule *schedule, int64_t kernel, int64_t now)
 void schedule_promoted(struct schedule *schedule, int64_t submit) {
 	schedule->pending = schedule->queued;
 	schedule->queued = NULL;
+	schedule->pending_off_grid = false;
 	// its own watchdog, starting from the real handoff
 	schedule->pending_submit = submit;
 	schedule->pending_target = schedule->have_vblank ? schedule_next_vblank(schedule, submit) : 0;
