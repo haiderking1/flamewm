@@ -35,6 +35,7 @@ struct flame_view_anim {
 	// a snapshot taken ahead of time, for the close
 	struct wlr_texture *snapshot;
 	struct wlr_box snapshot_box;
+	struct wlr_fbox snapshot_src;
 };
 
 static const struct flame_anim_config *config_of(struct flame_view *view) {
@@ -270,8 +271,8 @@ void window_anim_snapshot(struct flame_view *view) {
 	struct flame_effect was = state->shown;
 	state->snapshot_box = view->geometry;
 	struct flame_output *output = outputs_primary(&view->desktop->server->outputs);
-	state->snapshot = render_snapshot(&view->desktop->server->render,
-		output ? output->wlr : NULL, &view->tree->node, view->geometry);
+	state->snapshot = output ? render_snapshot(&output->frames, &view->tree->node,
+		&state->snapshot_box, &state->snapshot_src) : NULL;
 	state->shown = was;
 }
 
@@ -289,6 +290,7 @@ void window_anim_closed(struct flame_view *view) {
 	const struct flame_anim_config *config = config_of(view);
 	struct wlr_texture *texture = state->snapshot;
 	struct wlr_box box = state->snapshot_box;
+	struct wlr_fbox src = state->snapshot_src;
 	state->snapshot = NULL;
 	if (state->anim.running) {
 		anim_cancel(&state->anim);
@@ -307,7 +309,7 @@ void window_anim_closed(struct flame_view *view) {
 		.curve = config->close_curve,
 	};
 	slide_offset(view, box, &style.slide_dx, &style.slide_dy);
-	ghost_play(anims_of(view), parent, texture, box, &style);
+	ghost_play(anims_of(view), parent, texture, src, box, &style);
 }
 
 void window_anim_discard(struct flame_view *view) {

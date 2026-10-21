@@ -20,6 +20,7 @@ struct flame_layer_anim {
 	int width, height;
 	struct wlr_texture *snapshot;
 	struct wlr_box snapshot_box;
+	struct wlr_fbox snapshot_src;
 };
 
 static struct flame_server *server_of(struct flame_layer_surface *surface) {
@@ -144,8 +145,8 @@ void layer_anim_snapshot(struct flame_layer_surface *surface) {
 		wlr_texture_destroy(state->snapshot);
 	}
 	state->snapshot_box = box_of(surface);
-	state->snapshot = render_snapshot(&server_of(surface)->render, surface->output->wlr,
-		&surface->tree->node, state->snapshot_box);
+	state->snapshot = render_snapshot(&surface->output->frames, &surface->tree->node,
+		&state->snapshot_box, &state->snapshot_src);
 }
 
 void layer_anim_unmapped(struct flame_layer_surface *surface) {
@@ -163,6 +164,7 @@ void layer_anim_unmapped(struct flame_layer_surface *surface) {
 	const struct flame_anim_config *config = config_of(surface);
 	struct wlr_texture *texture = state->snapshot;
 	struct wlr_box box = state->snapshot_box;
+	struct wlr_fbox src = state->snapshot_src;
 	state->snapshot = NULL;
 	struct flame_tree *parent = surface->tree->node.parent;
 	if (!parent) {
@@ -178,7 +180,7 @@ void layer_anim_unmapped(struct flame_layer_surface *surface) {
 		.curve = config->close_curve,
 	};
 	slide_from(surface, box, &style.slide_dx, &style.slide_dy);
-	ghost_play(&server_of(surface)->anims, parent, texture, box, &style);
+	ghost_play(&server_of(surface)->anims, parent, texture, src, box, &style);
 }
 
 void layer_anim_free(struct flame_layer_surface *surface) {

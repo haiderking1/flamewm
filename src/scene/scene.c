@@ -146,6 +146,11 @@ void scene_buffer_set(struct flame_buffer_node *node, struct wlr_texture *textur
 	scene_changed(node->node.scene);
 }
 
+void scene_buffer_set_source(struct flame_buffer_node *node, const struct wlr_fbox *src) {
+	node->src = src ? *src : (struct wlr_fbox){0};
+	scene_changed(node->node.scene);
+}
+
 void scene_node_destroy(struct flame_node *node) {
 	if (!node) {
 		return;

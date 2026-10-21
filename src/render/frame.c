@@ -359,6 +359,10 @@ void frame_finish(struct flame_frame *frame) {
 		wlr_buffer_unlock(frame->front);
 		frame->front = NULL;
 	}
+	if (frame->snapshots) {
+		wlr_swapchain_destroy(frame->snapshots);
+		frame->snapshots = NULL;
+	}
 	timing_finish(&frame->timing);
 	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {

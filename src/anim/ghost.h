@@ -24,7 +24,9 @@ struct ghost_style {
 };
 
 // the ghost takes texture, it's destroyed with it
+// src: where in texture it is
 void ghost_play(struct flame_anims *anims, struct flame_tree *parent,
-	struct wlr_texture *texture, struct wlr_box box, const struct ghost_style *style);
+	struct wlr_texture *texture, struct wlr_fbox src, struct wlr_box box,
+	const struct ghost_style *style);
 
 #endif

@@ -81,5 +81,10 @@ end
 -- flame.rule({ app_id = "^rofi$" }, { open = "zoom", close = "fade" })
 -- flame.rule({ app_id = "^foot$" }, { opacity = 0.95 })
 
+-- screens by connector name (flame logs them when they come up), "*" for
+-- every screen without its own. scale: hidpi, fractional ones work too
+-- flame.output("DP-1", { scale = 1.5 })
+-- flame.output("*", { scale = 1 })
+
 -- things to start with flame, once
 -- flame.autostart("waybar")
