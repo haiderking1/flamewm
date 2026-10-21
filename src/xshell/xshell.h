@@ -128,6 +128,9 @@ void xshell_started(struct flame_xshell *xshell);
 // flame's layout coords to X's and back, see flame_xshell.scale
 int xshell_to_x(const struct flame_xshell *xshell, double v);
 double xshell_from_x(const struct flame_xshell *xshell, double v);
+// a pointer position to X's: the X pixel it's in (floor), the same one flame
+// decides the window under the pointer by
+int xshell_pointer_to_x(const struct flame_xshell *xshell, double v);
 // the screen's scale or x_zero_scaling changed: X's coordinates follow,
 // every X window moves to where it is in them
 void xshell_rescale(struct flame_xshell *xshell);

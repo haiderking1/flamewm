@@ -1,5 +1,6 @@
 // flame as X's window manager, the EWMH way an app sees it
-// usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure
+// usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure |
+//   subpixel
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -204,6 +205,40 @@ int main(int argc, char **argv) {
 		printf("told: %s\n", told ? "yes" : "no");
 		free(before);
 		free(after);
+	} else if (!strcmp(mode, "subpixel")) {
+		// a popup over a window from row 200: a pointer at 199.6 is in row 199
+		// of the window, at 200.4 in row 200 of the popup. flame and X agree to
+		// the pixel, the window never hears of a spot the popup covers
+		xcb_window_t w = window(false);
+		uint32_t mask = XCB_EVENT_MASK_POINTER_MOTION;
+		xcb_change_window_attributes(c, w, XCB_CW_EVENT_MASK, &mask);
+		xcb_window_t p = xcb_generate_id(c);
+		uint32_t pv[] = {1, XCB_EVENT_MASK_POINTER_MOTION};
+		xcb_create_window(c, 24, p, s->root, 50, 200, 100, 100, 0,
+			XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual,
+			XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, pv);
+		xcb_map_window(c, p);
+		uint32_t white = s->white_pixel;
+		xcb_gcontext_t gc = xcb_generate_id(c);
+		xcb_create_gc(c, gc, p, XCB_GC_FOREGROUND, &white);
+		xcb_rectangle_t all = {0, 0, 100, 100};
+		xcb_poly_fill_rectangle(c, p, gc, 1, &all);
+		settle();
+		puts("ready");
+		fflush(stdout);
+		// what the script's pointer moves bring, for a few seconds
+		for (int i = 0; i < 40; i++) {
+			nanosleep(&(struct timespec){0, 100000000}, NULL);
+			xcb_generic_event_t *e;
+			while ((e = xcb_poll_for_event(c))) {
+				if ((e->response_type & 0x7f) == XCB_MOTION_NOTIFY) {
+					xcb_motion_notify_event_t *m = (xcb_motion_notify_event_t *)e;
+					printf("%s row %d\n", m->event == p ? "popup" : "window", m->root_y);
+					fflush(stdout);
+				}
+				free(e);
+			}
+		}
 	} else if (!strcmp(mode, "close")) {
 		xcb_window_t w = window(false);
 		settle();
