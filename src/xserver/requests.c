@@ -472,33 +472,6 @@ static void get_input_focus(struct xs_client *client) {
 
 // ---- fonts, colors, keyboard: enough for clients that ask on the side ----
 
-static void query_font(struct xs_client *client) {
-	struct xout out;
-	xs_reply_begin(client, &out, 0);
-	// min bounds, 4 pad, max bounds, 4 pad: a 6x13 cell
-	for (int i = 0; i < 2; i++) {
-		xout16(&out, 0); // left bearing
-		xout16(&out, 6); // right bearing
-		xout16(&out, 6); // width
-		xout16(&out, 11); // ascent
-		xout16(&out, 2); // descent
-		xout16(&out, 0); // attributes
-		xout32(&out, 0);
-	}
-	xout16(&out, 32); // min char
-	xout16(&out, 126); // max char
-	xout16(&out, 32); // default char
-	xout16(&out, 0); // properties
-	xout8(&out, 0); // draw direction
-	xout8(&out, 0); // min byte1
-	xout8(&out, 0); // max byte1
-	xout8(&out, 1); // all chars exist
-	xout16(&out, 11); // font ascent
-	xout16(&out, 2); // font descent
-	xout32(&out, 0); // char infos
-	xs_reply_send(client, &out);
-}
-
 struct named_color {
 	const char *name;
 	uint8_t r, g, b;
@@ -857,30 +830,8 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 		xout_zero(&out, 32);
 		xs_reply_send(client, &out);
 		break;
-	case 47: // QueryFont
-		query_font(client);
-		break;
-	case 48: // QueryTextExtents
-		xs_reply_begin(client, &out, 0);
-		xout16(&out, 11);
-		xout16(&out, 2);
-		xout16(&out, 11);
-		xout16(&out, 2);
-		xout32(&out, 0);
-		xout32(&out, 0);
-		xout32(&out, 0);
-		xs_reply_send(client, &out);
-		break;
-	case 49: // ListFonts
-	case 52: // GetFontPath
-		xs_reply_begin(client, &out, 0);
-		xout16(&out, 0);
-		xs_reply_send(client, &out);
-		break;
-	case 50: // ListFontsWithInfo: just the last-reply marker, 60 bytes long
-		xs_reply_begin(client, &out, 0);
-		xout_zero(&out, 52);
-		xs_reply_send(client, &out);
+	case 45: case 46: case 47: case 48: case 49: case 50: case 51: case 52:
+		xs_font_request(client, in);
 		break;
 	case 54: { // FreePixmap
 		uint32_t id = xin32(in, 4);
@@ -1037,11 +988,10 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	case XS_COMPOSITE_OPCODE:
 		xs_composite_request(client, in);
 		break;
-	// accepted, nothing to do: grabs letting go, fonts and text (no core
-	// fonts), cursors, colormaps, keyboard and pointer settings, server grabs
+	// accepted, nothing to do: grabs letting go, cursors, colormaps,
+	// keyboard and pointer settings, server grabs
 	case 6: case 13: case 27: case 28: case 29: case 30: case 32: case 33: case 34:
-	case 35: case 36: case 37: case 41: case 45: case 46: case 51: case 74: case 75:
-	case 76: case 77: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
+	case 35: case 36: case 37: case 41: case 78: case 79: case 80: case 81: case 82: case 88: case 89:
 	case 90: case 93: case 94: case 95: case 96: case 100: case 102: case 104: case 105:
 	case 107: case 109: case 111: case 112: case 113: case 114: case 115: case 127:
 		break;

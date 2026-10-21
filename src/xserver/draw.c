@@ -13,8 +13,8 @@
 // every shape becomes a pixman region first (rectangles, the spans of a
 // polygon, a line's pixels, an arc as a polygon), clipped to the drawable
 // and the GC; one painter then fills it the way the GC says: solid with
-// its raster op, tiled, or stippled. no core fonts: text requests draw
-// nothing, toolkits draw their text into images on their own anyway
+// its raster op, tiled, or stippled. text too: its glyphs' pixels are the
+// shape (font.c has the fonts)
 
 #define MAX_IMAGE_BYTES (256u << 20)
 #define PI 3.14159265358979323846
@@ -855,7 +855,7 @@ static void gc_set_clip_mask(struct flame_xserver *xserver, struct xs_gc *gc, ui
 }
 
 static void gc_change(struct xs_client *client, struct xs_gc *gc, uint32_t mask,
-		const struct xin *in, size_t at) {
+		const struct xin *in, size_t at, uint8_t major) {
 	for (int bit = 0; bit < 23; bit++) {
 		if (!(mask & (1u << bit))) {
 			continue;
@@ -905,9 +905,15 @@ static void gc_change(struct xs_client *client, struct xs_gc *gc, uint32_t mask,
 		case 13:
 			gc->ts_y = (int16_t)v;
 			break;
-		case 14:
-			gc->font = v;
+		case 14: {
+			const struct xs_font *font = xs_font_find(client->xserver, v);
+			if (!font) {
+				xs_error(client, XS_ERROR_FONT, v, major, 0);
+				return;
+			}
+			gc->font = font;
 			break;
+		}
 		case 15:
 			gc->subwindow_mode = (uint8_t)v;
 			break;
@@ -971,7 +977,7 @@ static void create_gc(struct xs_client *client, const struct xin *in) {
 	};
 	pixman_region32_init(&gc->clip);
 	wl_list_insert(&xserver->gcs, &gc->link);
-	gc_change(client, gc, xin32(in, 12), in, 16);
+	gc_change(client, gc, xin32(in, 12), in, 16, 55);
 }
 
 static void copy_gc(struct xs_client *client, const struct xin *in) {
@@ -1185,6 +1191,116 @@ static void poly_arc(struct xs_client *client, const struct xin *in, bool fill) 
 	}
 	free(p);
 	draw_boxes(client, &t, gc, &b);
+	target_finish(&t);
+}
+
+// ---- text ----
+
+static const struct xs_font *gc_font(const struct xs_gc *gc) {
+	return gc->font ? gc->font : xs_font_default();
+}
+
+// a string's glyphs as boxes, a row's run of pixels each. x, y: where its
+// baseline starts (drawable coords), x moves on past every char drawn.
+// wide: CHAR2Bs, byte1 first
+static void text_boxes(struct boxes *b, const struct xs_font *font, int *x, int y,
+		const uint8_t *chars, size_t n, bool wide) {
+	int top = y - xs_font_ascent(font);
+	for (size_t i = 0; i < n; i++) {
+		const uint8_t *rows;
+		uint8_t byte1 = wide ? chars[2 * i] : 0, byte2 = wide ? chars[2 * i + 1] : chars[i];
+		if (!xs_font_glyph(font, byte1, byte2, &rows)) {
+			continue; // not there, not even its default char: nothing, no room
+		}
+		for (int row = 0; rows && row < XS_FIXED_HEIGHT; row++) {
+			for (int c = 0; c < 8;) {
+				if (!(rows[row] & (0x80 >> c))) {
+					c++;
+					continue;
+				}
+				int start = c;
+				while (c < 8 && rows[row] & (0x80 >> c)) {
+					c++;
+				}
+				boxes_add(b, *x + start, top + row, *x + c, top + row + 1);
+			}
+		}
+		*x += xs_font_width(font);
+	}
+}
+
+// PolyText8 and PolyText16: items of a delta and chars, or a font to go on
+// with (it stays the GC's). the glyphs fill the way the GC fills shapes
+static void poly_text(struct xs_client *client, const struct xin *in, bool wide) {
+	uint8_t major = wide ? 75 : 74;
+	struct xs_gc *gc = get_gc(client, xin32(in, 8), major, 0);
+	struct target t;
+	if (!gc || !target_for(client, xin32(in, 4), gc, &t, major, 0)) {
+		return;
+	}
+	int x = xin16s(in, 12), y = xin16s(in, 14);
+	size_t size = wide ? 2 : 1;
+	struct boxes b = {0};
+	for (size_t at = 16; at + 2 <= in->len;) {
+		uint8_t len = xin8(in, at);
+		if (len == 255) {
+			if (at + 5 > in->len) {
+				break;
+			}
+			// a font shift, its id most significant byte first whatever
+			// the client's byte order
+			const uint8_t *id = in->data + at + 1;
+			uint32_t fid = (uint32_t)id[0] << 24 | (uint32_t)id[1] << 16
+				| (uint32_t)id[2] << 8 | id[3];
+			const struct xs_font *font = xs_font_find(client->xserver, fid);
+			if (!font) {
+				xs_error(client, XS_ERROR_FONT, fid, major, 0);
+				break;
+			}
+			gc->font = font;
+			at += 5;
+			continue;
+		}
+		if (at + 2 + len * size > in->len) {
+			break; // what's left is padding
+		}
+		x += (int8_t)xin8(in, at + 1);
+		text_boxes(&b, gc_font(gc), &x, y, in->data + at + 2, len, wide);
+		at += 2 + len * size;
+	}
+	draw_boxes(client, &t, gc, &b);
+	target_finish(&t);
+}
+
+// ImageText8 and ImageText16: the text's whole box in the background, the
+// glyphs in the foreground, both plain copies whatever the GC's function
+// and fill say
+static void image_text(struct xs_client *client, const struct xin *in, bool wide) {
+	uint8_t major = wide ? 77 : 76;
+	size_t n = xin8(in, 1), size = wide ? 2 : 1;
+	if (16 + n * size > in->len) {
+		xs_error(client, XS_ERROR_LENGTH, 0, major, 0);
+		return;
+	}
+	struct xs_gc *gc = get_gc(client, xin32(in, 8), major, 0);
+	struct target t;
+	if (!gc || !target_for(client, xin32(in, 4), gc, &t, major, 0)) {
+		return;
+	}
+	const struct xs_font *font = gc_font(gc);
+	int x = xin16s(in, 12), y = xin16s(in, 14), end = x;
+	struct boxes glyphs = {0}, box = {0};
+	text_boxes(&glyphs, font, &end, y, in->data + 16, n, wide);
+	boxes_add(&box, x, y - xs_font_ascent(font), end, y + xs_font_descent(font));
+	pixman_region32_t back, fore;
+	boxes_region(&box, &t, &back);
+	boxes_region(&glyphs, &t, &fore);
+	fill_solid(&t, gc, gc->background, GX_COPY, &back);
+	fill_solid(&t, gc, gc->foreground, GX_COPY, &fore);
+	pixman_region32_union(&back, &back, &fore);
+	damage_target(client->xserver, &t, &back);
+	pixman_region32_fini(&back);
+	pixman_region32_fini(&fore);
 	target_finish(&t);
 }
 
@@ -1584,7 +1700,7 @@ bool xs_draw_request(struct xs_client *client, uint8_t opcode, const struct xin 
 	case 56: { // ChangeGC
 		struct xs_gc *gc = get_gc(client, xin32(in, 4), 56, 0);
 		if (gc) {
-			gc_change(client, gc, xin32(in, 8), in, 12);
+			gc_change(client, gc, xin32(in, 8), in, 12, 56);
 		}
 		return true;
 	}
@@ -1639,6 +1755,14 @@ bool xs_draw_request(struct xs_client *client, uint8_t opcode, const struct xin 
 		return true;
 	case 73:
 		get_image(client, in);
+		return true;
+	case 74: // PolyText8
+	case 75: // PolyText16
+		poly_text(client, in, opcode == 75);
+		return true;
+	case 76: // ImageText8
+	case 77: // ImageText16
+		image_text(client, in, opcode == 77);
 		return true;
 	default:
 		(void)xserver;

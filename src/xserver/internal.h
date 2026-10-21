@@ -226,6 +226,35 @@ bool xs_window_pixels(struct xs_window *window, bool inferiors, pixman_image_t *
 void xs_damage(struct flame_xserver *xserver, struct xs_window *top,
 	const pixman_region32_t *region);
 
+// ---- core fonts (font.c, fixed.c) ----
+
+// fixed's cells, and its glyphs (rows of 6 bits from the top bit down) from
+// misc-fixed 6x13, see tools/fonts/bdf2c.py. present: a bit per char
+#define XS_FIXED_WIDTH 6
+#define XS_FIXED_HEIGHT 13
+#define XS_FIXED_ASCENT 11
+#define XS_FIXED_DESCENT 2
+extern const uint8_t xs_fixed_glyphs[256][XS_FIXED_HEIGHT];
+extern const uint32_t xs_fixed_present[8];
+
+struct xs_font;
+void xs_font_request(struct xs_client *client, const struct xin *request);
+// an open font, NULL for none
+const struct xs_font *xs_font_find(struct flame_xserver *xserver, uint32_t id);
+// what GCs draw text with until told otherwise: fixed
+const struct xs_font *xs_font_default(void);
+// a char's glyph (byte1 0 for 8 bit text): its rows, NULL for a blank cell.
+// a char the font doesn't have draws its default char, false: neither there
+bool xs_font_glyph(const struct xs_font *font, uint8_t byte1, uint8_t byte2,
+	const uint8_t **rows);
+// every char is one cell: how far it moves, how far up and down it goes
+int xs_font_width(const struct xs_font *font);
+int xs_font_ascent(const struct xs_font *font);
+int xs_font_descent(const struct xs_font *font);
+void xs_font_client_gone(struct flame_xserver *xserver, struct xs_client *client);
+size_t xs_font_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out, size_t max);
+bool xs_font_id_in_use(struct flame_xserver *xserver, uint32_t id);
+
 // ---- RENDER (render.c) ----
 
 void xs_render_request(struct xs_client *client, const struct xin *request);

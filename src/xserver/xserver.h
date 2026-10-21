@@ -122,7 +122,7 @@ struct xs_gc {
 	uint8_t line_style, cap_style, join_style, fill_style, fill_rule, arc_mode;
 	uint32_t tile, stipple; // pixmap ids, 0 for none
 	int16_t ts_x, ts_y; // tile and stipple origin
-	uint32_t font;
+	const struct xs_font *font; // what text draws with, NULL for fixed
 	uint8_t subwindow_mode; // 0 ClipByChildren, 1 IncludeInferiors
 	bool graphics_exposures;
 	int16_t clip_x, clip_y; // clip origin
@@ -337,6 +337,7 @@ struct flame_xserver {
 	struct wl_list transfers, selection_requests, selection_selects;
 	uint32_t flame_window_ids;
 	struct wl_list gcs; // xs_gc.link
+	struct wl_list fonts; // font.c's, the fonts clients opened
 	struct wl_list shm_segments; // xs_shm_segment.link
 	// RENDER, see render.c: pictures, glyph set ids, and pixman's glyph cache
 	struct wl_list pictures, glyphset_ids;
