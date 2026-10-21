@@ -1,0 +1,6 @@
+#!/bin/sh
+# flamewm.run with test input on: flamectl pointer and key drive the real
+# screen (FLAME_TEST_INPUT=1), for chasing bugs on real hardware. same
+# rebuild and debug log in /tmp/flamewm.log
+export FLAME_TEST_INPUT=1
+exec "$(dirname "$0")/flamewm.run" "$@"

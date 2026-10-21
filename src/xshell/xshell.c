@@ -885,6 +885,8 @@ static void show(struct xlayer *layer, struct xpresent *xp) {
 		wl_list_remove(&old->link);
 		retire(layer, old);
 	} else {
+		wlr_log(WLR_DEBUG, "xshell: 0x%x in 0x%x shows a picture at %d,%d", layer->id,
+			layer->window->id, layer->node->node.x, layer->node->node.y);
 		core_update(layer->window);
 	}
 }
@@ -1168,6 +1170,8 @@ static void layer_destroy(struct xlayer *layer) {
 // layer goes with it, what it shows and all
 static void layer_move(struct xlayer *layer, struct flame_xwindow *to) {
 	struct flame_xwindow *from = layer->window;
+	wlr_log(WLR_DEBUG, "xshell: 0x%x goes from 0x%x to 0x%x%s", layer->id, from->id, to->id,
+		layer->shown ? ", its picture with it" : "");
 	wl_list_remove(&layer->link);
 	wl_list_insert(to->layers.prev, &layer->link);
 	layer->window = to;
@@ -1769,8 +1773,8 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 		window->view.float_wanted = x_wants_float(xshell, x);
 		desktop_map_view(&server->desktop, &window->view);
 	}
-	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s", x->id,
-		window->floating ? "floats" : "is a window");
+	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s at %d,%d %dx%d", x->id,
+		window->floating ? "floats" : "is a window", x->x, x->y, x->width, x->height);
 	// drawn into before flame got to it: what's there already shows
 	if (x->backing && x->painted) {
 		pixman_region32_t all;
@@ -1867,6 +1871,7 @@ void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 
 static void window_destroy(struct flame_xwindow *window) {
 	struct flame_xshell *xshell = window->xshell;
+	wlr_log(WLR_DEBUG, "xshell: X window 0x%x leaves flame", window->id);
 	if (xshell->pointer_window == window->id) {
 		xshell->pointer_window = 0;
 	}
@@ -2042,6 +2047,11 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 			if (!window) {
 				window_create(xshell, x);
 			} else if (window->floating) {
+				if (window->float_tree->node.x != from_x(xshell, x->x)
+						|| window->float_tree->node.y != from_x(xshell, x->y)) {
+					wlr_log(WLR_DEBUG, "xshell: floating 0x%x moves to %d,%d", x->id, x->x,
+						x->y);
+				}
 				scene_node_set_position(&window->float_tree->node, from_x(xshell, x->x),
 					from_x(xshell, x->y));
 			} else {
@@ -2150,6 +2160,7 @@ void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t ty
 }
 
 void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *x) {
+	wlr_log(WLR_DEBUG, "xshell: 0x%x unmapped", x->id);
 	struct flame_xwindow *window;
 	wl_list_for_each(window, &xshell->windows, link) {
 		struct xlayer *layer;
