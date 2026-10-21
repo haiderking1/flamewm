@@ -46,6 +46,7 @@ libdisplay-info, lcms2, vulkan loader and some xcb utils. pacman handles those.
 | libxkbcommon-x11 (comes with `libxkbcommon`) | `xkbcommon-x11` | the XKB test reads the keymap back the way kitty and alacritty do |
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland drag and drop client |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
+| foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
 
 ## runtime
 

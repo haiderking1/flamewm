@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 #include <wlr/backend.h>
+#include <wlr/backend/headless.h>
+#include <wlr/backend/multi.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/util/log.h>
@@ -169,4 +171,29 @@ struct flame_output *outputs_primary(struct flame_outputs *outputs) {
 	}
 	struct flame_output *output = wl_container_of(outputs->list.next, output, link);
 	return output;
+}
+
+void outputs_test_unplug(struct flame_outputs *outputs) {
+	struct flame_output *output, *tmp;
+	wl_list_for_each_safe(output, tmp, &outputs->list, link) {
+		wlr_output_destroy(output->wlr);
+	}
+}
+
+static void find_headless(struct wlr_backend *backend, void *data) {
+	struct wlr_backend **found = data;
+	if (!*found && wlr_backend_is_headless(backend)) {
+		*found = backend;
+	}
+}
+
+bool outputs_test_plug(struct flame_outputs *outputs) {
+	struct wlr_backend *headless = NULL;
+	struct wlr_backend *backend = outputs->server->backend.wlr;
+	if (wlr_backend_is_multi(backend)) {
+		wlr_multi_for_each_backend(backend, find_headless, &headless);
+	} else if (wlr_backend_is_headless(backend)) {
+		headless = backend;
+	}
+	return headless && wlr_headless_add_output(headless, 1280, 720);
 }
