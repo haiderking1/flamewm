@@ -161,9 +161,9 @@ void anim_start(struct flame_anims *anims, struct flame_anim *anim, int duration
 	watch(anims);
 }
 
-void anims_tick(struct flame_anims *anims, int64_t target) {
+bool anims_tick(struct flame_anims *anims, int64_t target) {
 	if (wl_list_empty(&anims->running)) {
-		return;
+		return false;
 	}
 	anims->last_tick = now_ns();
 	// steps can start, cancel and free animations: one at a time, each
@@ -186,7 +186,11 @@ void anims_tick(struct flame_anims *anims, int64_t target) {
 		}
 		anim->step(anim, curve_ease(&anim->curve, t), t);
 	}
-	if (!wl_list_empty(&anims->running)) {
-		outputs_schedule_frame(&anims->server->outputs);
+	if (wl_list_empty(&anims->running)) {
+		return false;
 	}
+	// from the watchdog this asks for frames. from a render it's lost, the
+	// render asks again when it hears true
+	outputs_schedule_frame(&anims->server->outputs);
+	return true;
 }

@@ -12,10 +12,10 @@
 
 // a mouse resize lands right before the frame that shows it, animations
 // step to where they'll be when it's on screen
-static void before_render(void *data, int64_t target) {
+static bool before_render(void *data, int64_t target) {
 	struct flame_output *output = data;
 	drag_frame(&output->server->input.drag);
-	anims_tick(&output->server->anims, target);
+	return anims_tick(&output->server->anims, target);
 }
 
 // windows a transaction waits on may be hidden, they still need callbacks to

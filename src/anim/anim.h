@@ -54,8 +54,9 @@ void anim_cancel(struct flame_anim *anim);
 void anim_finish(struct flame_anim *anim);
 bool anim_running(const struct flame_anim *anim);
 
-// a frame is about to be built for target (ns): everything steps there
-void anims_tick(struct flame_anims *anims, int64_t target);
+// a frame is about to be built for target (ns): everything steps there.
+// true: some are still running, they want the next frame
+bool anims_tick(struct flame_anims *anims, int64_t target);
 
 // a + (b - a) * t
 double lerp(double a, double b, double t);

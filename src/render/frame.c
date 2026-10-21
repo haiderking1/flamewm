@@ -690,13 +690,14 @@ static void keep_scanout_buffer(struct flame_frame *frame,
 static void render(struct flame_frame *frame, int64_t now) {
 	struct wlr_output *output = frame->output;
 	struct schedule *schedule = &frame->schedule;
+	bool again = false;
 	if (frame->hooks.before_render) {
 		// the refresh this frame is going for: after the pending one, if any
 		int64_t target = schedule_next_vblank(schedule, now);
 		if (schedule->pending) {
 			target = schedule_next_vblank(schedule, target);
 		}
-		frame->hooks.before_render(frame->hooks.data, target);
+		again = frame->hooks.before_render(frame->hooks.data, target);
 	}
 
 	struct flame_render_target target;
@@ -776,6 +777,10 @@ static void render(struct flame_frame *frame, int64_t now) {
 		schedule_empty(schedule, now);
 	}
 	swap_lists(frame);
+	if (again) {
+		// still animating: the refresh after this one too
+		schedule_request_redraw(schedule);
+	}
 	if (submitted_now) {
 		// apps that can't draw a frame between the flip and the deadline get
 		// the next cycle's turn now: they keep their frame rate, everyone
