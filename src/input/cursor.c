@@ -242,9 +242,7 @@ static void handle_button(struct wl_listener *listener, void *data) {
 	button_event(cursor, data);
 }
 
-static void handle_axis(struct wl_listener *listener, void *data) {
-	struct flame_cursor *cursor = wl_container_of(listener, cursor, axis);
-	struct wlr_pointer_axis_event *event = data;
+static void axis_event(struct flame_cursor *cursor, struct wlr_pointer_axis_event *event) {
 	if (drag_active(&cursor->server->input.drag)) {
 		return;
 	}
@@ -256,6 +254,11 @@ static void handle_axis(struct wl_listener *listener, void *data) {
 	wlr_seat_pointer_notify_axis(cursor->server->input.seat, event->time_msec,
 		event->orientation, event->delta, event->delta_discrete, event->source,
 		event->relative_direction);
+}
+
+static void handle_axis(struct wl_listener *listener, void *data) {
+	struct flame_cursor *cursor = wl_container_of(listener, cursor, axis);
+	axis_event(cursor, data);
 }
 
 static void handle_frame(struct wl_listener *listener, void *data) {
@@ -379,6 +382,20 @@ void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool press
 		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED,
 	};
 	button_event(cursor, &event);
+	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
+}
+
+void cursor_test_scroll(struct flame_cursor *cursor, double delta) {
+	// a wheel: 15 a notch, 120ths for the discrete steps
+	struct wlr_pointer_axis_event event = {
+		.time_msec = now_msec(),
+		.source = WL_POINTER_AXIS_SOURCE_WHEEL,
+		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+		.delta = delta,
+		.delta_discrete = (int32_t)(delta / 15 * 120),
+	};
+	axis_event(cursor, &event);
 	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
 }
 

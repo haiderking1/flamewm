@@ -38,6 +38,8 @@ void cursor_refresh(struct flame_cursor *cursor);
 // FLAME_TEST_INPUT=1): to a layout point, a button (linux code)
 void cursor_test_move(struct flame_cursor *cursor, double x, double y);
 void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool pressed);
+// a vertical wheel scroll, 15 a notch
+void cursor_test_scroll(struct flame_cursor *cursor, double delta);
 // a theme cursor by name, "default", "grabbing", "nw-resize"...
 void cursor_set_name(struct flame_cursor *cursor, const char *name);
 
