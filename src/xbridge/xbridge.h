@@ -99,6 +99,8 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server);
 // the X server starts listening, $FLAMEWM_X11_DISPLAY says where. flame runs
 // fine without it
 void xbridge_start(struct flame_xbridge *xbridge);
+// init.lua reloaded: X follows what changed for it
+void xbridge_config_changed(struct flame_xbridge *xbridge);
 void xbridge_finish(struct flame_xbridge *xbridge);
 
 // a new toplevel from client: bridged when its process is claimed

@@ -57,6 +57,7 @@ const struct flame_config flame_default_config = {
 
 	.drag_modifier = MOD,
 	.focus_follows_mouse = true,
+	.x_zero_scaling = false,
 
 	.cursor_theme = NULL,
 	.cursor_size = 24,

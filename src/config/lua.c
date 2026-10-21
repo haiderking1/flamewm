@@ -19,6 +19,7 @@
 //   flame.set{ gap = 6, border_width = 2, border_color = "#2a2a2a",
 //     border_focused_color = "#ff6a00", background = "#111111",
 //     repeat_rate = 30, repeat_delay = 250, focus_follows_mouse = true,
+//     x_zero_scaling = false,
 //     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
 //     keyboard = { layout = "us,ara", variant = "", model = "",
 //       options = "grp:alt_shift_toggle", rules = "" } }
@@ -281,6 +282,8 @@ static int l_set(lua_State *L) {
 			config->cursor_size = (uint32_t)luaL_checkinteger(L, value);
 		} else if (!strcmp(key, "focus_follows_mouse")) {
 			config->focus_follows_mouse = lua_toboolean(L, value);
+		} else if (!strcmp(key, "x_zero_scaling")) {
+			config->x_zero_scaling = lua_toboolean(L, value);
 		} else if (!strcmp(key, "border_color")) {
 			ok = parse_color(lua_tostring(L, value), config->border_color);
 		} else if (!strcmp(key, "border_focused_color")) {

@@ -12,6 +12,10 @@ flame.set {
 	repeat_rate = 30, -- keys a second
 	repeat_delay = 250, -- ms
 	focus_follows_mouse = true,
+	-- on a scaled screen: X apps draw at its real pixels and scale themselves
+	-- (sharp, told the dpi), instead of being stretched (blurry). apps that
+	-- ignore dpi look small
+	x_zero_scaling = false,
 	drag_modifier = "super", -- held: left drag moves, right drag resizes
 	cursor_size = 24,
 	-- cursor_theme = "Adwaita",

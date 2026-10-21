@@ -265,8 +265,11 @@ void xbridge_window_placed(struct flame_xbridge_window *window, struct wlr_box b
 			|| primary_view(process, top) != window->index) {
 		return;
 	}
-	xserver_move_window(&process->xbridge->xserver, top, box.x, box.y,
-		MAX(box.width, 1), MAX(box.height, 1));
+	struct flame_xshell *xshell = &process->xbridge->server->xshell;
+	int x0 = xshell_to_x(xshell, box.x), y0 = xshell_to_x(xshell, box.y);
+	xserver_move_window(&process->xbridge->xserver, top, x0, y0,
+		MAX(xshell_to_x(xshell, box.x + box.width) - x0, 1),
+		MAX(xshell_to_x(xshell, box.y + box.height) - y0, 1));
 }
 
 // ---- toplevels ----
@@ -581,14 +584,19 @@ static void hook_focus_changed(void *data, uint32_t focus) {
 static void hook_pointer(void *data, double *x, double *y) {
 	struct flame_xbridge *xbridge = data;
 	struct wlr_cursor *cursor = xbridge->server->input.cursor.wlr;
-	*x = cursor->x;
-	*y = cursor->y;
+	*x = xshell_to_x(&xbridge->server->xshell, cursor->x);
+	*y = xshell_to_x(&xbridge->server->xshell, cursor->y);
 }
 
 // X sees flame's outputs where the layout has them, in its coordinates. the
 // one at the origin is primary, else the first
 static void update_screen(struct flame_xbridge *xbridge) {
 	struct wlr_output_layout *layout = xbridge->server->outputs.layout;
+	struct flame_xshell *xshell = &xbridge->server->xshell;
+	// a scale change moves X's coordinates first, the monitors are in them
+	if (xbridge->running) {
+		xshell_rescale(xshell);
+	}
 	struct xs_monitor monitors[16];
 	size_t len = 0;
 	struct wlr_output_layout_output *lo;
@@ -599,11 +607,12 @@ static void update_screen(struct flame_xbridge *xbridge) {
 			continue;
 		}
 		struct xs_monitor *m = &monitors[len++];
+		int x0 = xshell_to_x(xshell, box.x), y0 = xshell_to_x(xshell, box.y);
 		*m = (struct xs_monitor){
-			.x = box.x,
-			.y = box.y,
-			.width = box.width,
-			.height = box.height,
+			.x = x0,
+			.y = y0,
+			.width = xshell_to_x(xshell, box.x + box.width) - x0,
+			.height = xshell_to_x(xshell, box.y + box.height) - y0,
 			.mm_width = lo->output->phys_width,
 			.mm_height = lo->output->phys_height,
 			.refresh = lo->output->refresh,
@@ -664,6 +673,12 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 	listener_connect(&xbridge->desktop_changed, &server->desktop.events.changed,
 		handle_desktop_changed);
 	return true;
+}
+
+void xbridge_config_changed(struct flame_xbridge *xbridge) {
+	if (xbridge->running) {
+		update_screen(xbridge); // x_zero_scaling may have flipped
+	}
 }
 
 void xbridge_start(struct flame_xbridge *xbridge) {

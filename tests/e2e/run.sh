@@ -220,6 +220,25 @@ set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | g
 [ \$1 -gt \$((fx + 20)) ] && [ \$2 -gt \$((fy + 10)) ] && echo headerbar moved it" \
 	"headerbar moved it"
 
+printf 'flame.output("*", { scale = 2 })\nflame.set { x_zero_scaling = true }\n' > "$WORK/zero.lua"
+CASE_ARGS="-c $WORK/zero.lua"
+case_run "X apps at scale 2, drawing at its pixels: dpi told, input lands, headerbars drag" "
+export DISPLAY=\$FLAMEWM_X11_DISPLAY
+$BIN/xewmh dpi
+GDK_BACKEND=x11 $BIN/gtkcsd dialog dialog > /dev/null 2>&1 &
+sleep 1.5
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+fx=\$1; fy=\$2
+$CTL pointer move \$((fx + 100)) \$((fy + 12)) > /dev/null
+$CTL pointer button left press > /dev/null
+for i in 1 2 3 4 5 6 7 8 9 10; do $CTL pointer move \$((fx + 100 + i * 4)) \$((fy + 12 + i * 3)) > /dev/null; sleep 0.03; done
+$CTL pointer button left release > /dev/null
+sleep 0.3
+set -- \$($CTL state | grep -o '\"floating\":true,\"x\":[0-9]*,\"y\":[0-9]*' | grep -o '[0-9]*')
+[ \$1 -gt \$((fx + 15)) ] && [ \$2 -gt \$((fy + 10)) ] && echo headerbar moved it" \
+	"Xft.dpi:	192" "xsettings: yes" "screen 1280x720" "headerbar moved it"
+CASE_ARGS=
+
 case_run "GL on X: a multisampled srgb config, made current, frames swapped and seen" "
 $BIN/glx > glx.out 2>&1 &
 sleep 0.9
