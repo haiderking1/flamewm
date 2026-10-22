@@ -10,6 +10,7 @@
 
 #include "config/config.h"
 #include "core/server.h"
+#include "image/image.h"
 #include "util/strbuf.h"
 
 // one key a line in settings.lua, its key after it as a comment so the next
@@ -28,6 +29,7 @@ enum kind {
 static const char *const x_keys_names[] = {"never", "modifiers", "combos", "always", NULL};
 static const char *const vrr_names[] = {"off", "fullscreen", "always", NULL};
 static const char *const pace_names[] = {"off", "vrr", "always", NULL};
+static const char *const wallpaper_modes[] = {"fill", "fit", "center", "stretch", NULL};
 
 struct setting {
 	const char *key;
@@ -42,6 +44,8 @@ static const struct setting settings[] = {
 	{"border_color", KIND_COLOR, 0, 0, NULL},
 	{"border_focused_color", KIND_COLOR, 0, 0, NULL},
 	{"background", KIND_COLOR, 0, 0, NULL},
+	{"wallpaper", KIND_STRING, 0, 0, NULL},
+	{"wallpaper_mode", KIND_ENUM, 0, 0, wallpaper_modes},
 	{"focus_follows_mouse", KIND_BOOL, 0, 0, NULL},
 	{"repeat_rate", KIND_INT, 1, 200, NULL},
 	{"repeat_delay", KIND_INT, 50, 2000, NULL},
@@ -117,6 +121,10 @@ static void write_value(struct strbuf *out, const struct flame_config *c, const 
 		write_color(out, c->border_focused_color);
 	} else if (!strcmp(key, "background")) {
 		write_color(out, c->background_color);
+	} else if (!strcmp(key, "wallpaper")) {
+		strbuf_json_string(out, c->wallpaper ? c->wallpaper : "");
+	} else if (!strcmp(key, "wallpaper_mode")) {
+		strbuf_json_string(out, wallpaper_modes[c->wallpaper_mode]);
 	} else if (!strcmp(key, "focus_follows_mouse")) {
 		strbuf_printf(out, "%s", c->focus_follows_mouse ? "true" : "false");
 	} else if (!strcmp(key, "repeat_rate")) {
@@ -400,6 +408,12 @@ bool settings_set(struct flame_server *server, const char *key, const char *valu
 	strbuf_init(&lit);
 	strbuf_init(&line);
 	bool ok = literal(s, value, &lit, error);
+	// a wallpaper is a picture flame reads, or "" for none
+	if (ok && !strcmp(key, "wallpaper") && *value
+			&& (value[0] != '/' || image_sniff(value) == IMAGE_NONE)) {
+		*error = value[0] != '/' ? "not a full path" : "not a jpeg, png or webp it can read";
+		ok = false;
+	}
 	if (ok) {
 		line_for(&line, key, output, lit.data ? lit.data : "");
 		ok = !line.failed && rewrite(key, line.data, error);

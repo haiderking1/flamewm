@@ -42,7 +42,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& picker_init(&server->picker, server)
 		&& screencast_init(&server->screencast, server)
 		&& portal_init(&server->portal, server)
-		&& eyecandy_init(&server->eyecandy, server);
+		&& eyecandy_init(&server->eyecandy, server)
+		&& wallpaper_init(&server->wallpaper, server);
 }
 
 static void server_keymap_names(struct flame_server *server);
@@ -117,6 +118,7 @@ static void server_apply_config(struct flame_server *server) {
 	wl_list_for_each(output, &server->outputs.list, link) {
 		scene_rect_set_color(output->background, server->config->background_color);
 	}
+	wallpaper_config_changed(&server->wallpaper);
 	keyboards_apply_config(&server->input);
 	server_keymap_names(server);
 	outputs_apply_config(&server->outputs);
@@ -191,6 +193,8 @@ void server_finish(struct flame_server *server) {
 	// up after them while the scene is still alive
 	backend_finish(&server->backend);
 	signals_finish(&server->signals);
+	// its screens went with the outputs, the worker and textures go now
+	wallpaper_finish(&server->wallpaper);
 
 	render_unhook(&server->render);
 	// globals, seat and output layout go with the display

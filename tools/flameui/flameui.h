@@ -53,6 +53,8 @@ bool fui_has_glass(const struct fui *ui);
 // called once, ms from now
 void fui_redraw(struct fui *ui);
 void fui_after(struct fui *ui, int ms, void (*f)(struct fui *ui, void *data), void *data);
+// from any thread: draw another frame soon (work done elsewhere is ready)
+void fui_wake(struct fui *ui);
 
 // ---- inside frame ----
 

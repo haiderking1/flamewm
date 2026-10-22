@@ -23,6 +23,7 @@
 #include "xbridge/xbridge.h"
 #include "xselection/xselection.h"
 #include "xshell/xshell.h"
+#include "wallpaper/wallpaper.h"
 
 struct flame_config;
 
@@ -53,6 +54,7 @@ struct flame_server {
 	struct flame_picker picker;
 	struct flame_screencast screencast;
 	struct flame_eyecandy eyecandy;
+	struct flame_wallpaper wallpaper;
 	struct flame_portal portal;
 	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;

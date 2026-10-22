@@ -42,7 +42,8 @@ it's up, debug logs.
 
 none needed. **flamesettings** (`super+,`) changes things live, on flame's
 glass, so does `flamectl set gap 8` (`flamectl settings` lists them all).
-flame keeps them in `~/.config/flame/settings.lua`.
+flame keeps them in `~/.config/flame/settings.lua`. the wallpaper too: flame
+draws it itself, pick one in flamesettings or `flamectl set wallpaper ~/walls/x.jpg`.
 
 for more, lua at `~/.config/flame/init.lua`, see
 [examples/init.lua](examples/init.lua). what it sets wins over settings.lua.

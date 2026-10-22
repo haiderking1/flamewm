@@ -66,6 +66,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	listener_disconnect(&output->destroy);
 
 	layers_output_gone(&output->server->layers, output);
+	wallpaper_output_gone(&output->server->wallpaper, output);
 	scene_surfaces_output_gone(&output->server->render.surfaces, output->wlr);
 	frame_finish(&output->frames);
 	scene_node_destroy(&output->background->node);
@@ -209,6 +210,7 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 		scene_node_set_position(&output->background->node, output->box.x, output->box.y);
 		scene_rect_set_size(output->background, output->box.width, output->box.height);
 		layers_arrange(&outputs->server->layers, output);
+		wallpaper_output_changed(&outputs->server->wallpaper, output);
 		render_snapshot_warm(&output->frames);
 	}
 

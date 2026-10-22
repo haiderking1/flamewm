@@ -705,6 +705,29 @@ sleep 1.2
 grim -t ppm blur.ppm
 $ROUGH candy.ppm candy
 $ROUGH blur.ppm blur" "glass up" "candy smooth over sharp" "blur smooth over sharp"
+# the color in the middle of a ppm screenshot, by name
+CENTER="python3 -I -c \"
+import sys
+d = open(sys.argv[1], 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+i = ((h // 2) * w + w // 2) * 3
+r, g, b = px[i], px[i + 1], px[i + 2]
+print(sys.argv[2], 'red' if r > 200 and g < 40 and b < 40 else 'blue' if b > 200 and r < 40 else (r, g, b))
+\""
+case_run "wallpaper: flame draws a png or a jpeg over the background, refuses what isn't a picture, unset takes it off" "
+$CTL set background '#ff0000' > /dev/null; sleep 0.5
+grim red.png; grim -t jpeg red.jpg
+$CTL set background '#0000ff' > /dev/null; sleep 0.4
+$CTL set wallpaper \$PWD/red.png; sleep 1.2
+grim -t ppm a.ppm; $CENTER a.ppm png
+$CTL set wallpaper \$PWD/red.jpg > /dev/null; sleep 1.2
+grim -t ppm b.ppm; $CENTER b.ppm jpeg
+$CTL set wallpaper /etc/passwd
+$CTL settings | python3 -I -c \"import json, sys; print('still', json.load(sys.stdin)['values']['wallpaper'].endswith('red.jpg'))\"
+$CTL unset wallpaper > /dev/null; sleep 1.2
+grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
+	"not a jpeg, png or webp it can read" "still True" "none blue"
 case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
 $CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
 $CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null

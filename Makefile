@@ -12,7 +12,7 @@ CC := clang
 
 # every lib here has to be in deps.md too
 PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1 egl libdrm xshmfence lua5.4 pangocairo \
-	libpipewire-0.3 libsystemd
+	libpipewire-0.3 libsystemd libturbojpeg libpng libwebp
 
 # clean shouldn't need any deps installed
 ifeq ($(filter clean,$(MAKECMDGOALS)),)
@@ -68,7 +68,7 @@ UI_PROTOCOLS := $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
 UI_PROTO_NAMES := $(basename $(notdir $(UI_PROTOCOLS)))
 UI_PROTO_HEADERS := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-client-protocol.h)
 UI_PROTO_CODE := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-protocol.c)
-UI_PKGS := wayland-client pangocairo xkbcommon
+UI_PKGS := wayland-client pangocairo xkbcommon libturbojpeg libpng libwebp
 
 define ui_protocol
 $(CLIENT_GEN)/$(basename $(notdir $(1)))-client-protocol.h: $(1)
@@ -83,12 +83,13 @@ $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 
 $(SETTINGS): tools/flamesettings/main.c tools/flamesettings/json.c tools/flamesettings/json.h \
 		tools/flameui/window.c tools/flameui/ui.c tools/flameui/flameui.h \
-		tools/flameui/internal.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
+		tools/flameui/internal.h src/image/image.c src/image/image.h \
+		$(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
 	@mkdir -p $(dir $@)
-	$(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) $(SAN) $(CFLAGS) \
+	$(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
 		$(LDFLAGS) -o $@ tools/flamesettings/main.c tools/flamesettings/json.c \
-		tools/flameui/window.c tools/flameui/ui.c $(UI_PROTO_CODE) \
-		$(shell pkg-config --cflags --libs $(UI_PKGS)) -lm
+		tools/flameui/window.c tools/flameui/ui.c src/image/image.c $(UI_PROTO_CODE) \
+		$(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c

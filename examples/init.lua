@@ -9,6 +9,8 @@ flame.set {
 	border_color = "#2a2a2a",
 	border_focused_color = "#ff6a00",
 	background = "#111111",
+	-- wallpaper = "~/walls/sea.jpg", -- a jpeg, png or webp over the background
+	-- wallpaper_mode = "fill", -- "fit", "center", "stretch"
 	repeat_rate = 30, -- keys a second
 	repeat_delay = 250, -- ms
 	focus_follows_mouse = true,
