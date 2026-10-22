@@ -779,7 +779,7 @@ void xs_request(struct xs_client *client, uint8_t opcode, const struct xin *in) 
 	struct flame_xserver *xserver = client->xserver;
 	struct xs_window *window;
 	struct xout out;
-	if (xserver->trace) {
+	if (xserver->trace && (!strcmp(xserver->trace, "1") || !strcmp(xserver->trace, client->comm))) {
 		wlr_log(WLR_INFO, "xserver: %s #%u: %u.%u, %zu bytes", client->comm,
 			(unsigned)client->seq, opcode, opcode >= 128 ? xin8(in, 1) : 0, in->len);
 	}

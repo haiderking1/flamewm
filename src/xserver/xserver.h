@@ -440,7 +440,9 @@ struct flame_xserver {
 	uint8_t keys_down[32]; // what QueryKeymap tells, a bit a keycode
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
-	bool trace; // FLAME_X_TRACE=1: every request in the log
+	// FLAME_X_TRACE: every request in the log, "1" from every client, else
+	// from the ones named that (FLAME_X_TRACE=re4.exe). NULL: off
+	const char *trace;
 	// which GL library glvnd loads for apps: "nvidia" or "mesa"
 	char glx_vendor[16];
 	uint64_t slots[4]; // client id ranges in use
