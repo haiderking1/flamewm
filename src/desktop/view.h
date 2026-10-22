@@ -48,6 +48,8 @@ struct flame_view_impl {
 	// optional: the size it draws at on its own, whatever flame shows of it.
 	// where a floating window starts
 	void (*natural_size)(struct flame_view *view, int *width, int *height);
+	// optional: the smallest content it can draw, 0 where it doesn't say
+	void (*min_size)(struct flame_view *view, int *width, int *height);
 };
 
 enum flame_border_side {

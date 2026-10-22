@@ -127,6 +127,12 @@ static void impl_natural_size(struct flame_view *view, int *width, int *height) 
 	*height = geometry.height;
 }
 
+static void impl_min_size(struct flame_view *view, int *width, int *height) {
+	struct wlr_xdg_toplevel_state *state = &from_view(view)->xdg->current;
+	*width = state->min_width;
+	*height = state->min_height;
+}
+
 static struct wlr_box impl_window_geometry(struct flame_view *view, bool pending) {
 	struct wlr_xdg_surface *base = from_view(view)->xdg->base;
 	return pending ? base->pending.geometry : base->current.geometry;
@@ -230,6 +236,7 @@ static const struct flame_view_impl toplevel_impl = {
 	.set_display_size = impl_set_display_size,
 	.content_size = impl_content_size,
 	.natural_size = impl_natural_size,
+	.min_size = impl_min_size,
 	.window_geometry = impl_window_geometry,
 	.set_activated = impl_set_activated,
 	.set_resizing = impl_set_resizing,
@@ -465,6 +472,17 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 		// fullscreen asked for before the first commit is honored right away
 		toplevel->view.fullscreen_wanted = xdg->requested.fullscreen;
 		toplevel->view.float_wanted = wants_float(xdg);
+		// the user's rules too (applied again on map): a window they float
+		// picks its own size from the start, not its tile's
+		struct flame_window_rule rule;
+		config_window_rules(toplevel->view.desktop->server->config, xdg->app_id, xdg->title,
+			&rule);
+		if (rule.floating_set) {
+			toplevel->view.float_wanted = rule.floating;
+		}
+		if (rule.fullscreen) {
+			toplevel->view.fullscreen_wanted = true;
+		}
 		wlr_xdg_toplevel_set_wm_capabilities(xdg, WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
 		configure_unmapped(toplevel);
 		return;
