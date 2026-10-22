@@ -231,9 +231,9 @@ $BIN/glxfull 2 vsyncoff > full.out 2>&1 &
 sleep 0.6
 $CTL pointer move 300 300 > /dev/null
 sleep 0.8
-$CTL state | grep -o '\"tearing\":[a-z]*,\"vrr\":[a-z]*'
+$CTL state | grep -o '\"tearing\":[a-z]*,\"vrr\":[a-z]*,\"vrr_capable\":[a-z]*'
 wait
-cat full.out" '"tearing":false,"vrr":false' "kept going: yes"
+cat full.out" '"tearing":false,"vrr":false,"vrr_capable":false' "kept going: yes"
 CASE_ARGS=
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &

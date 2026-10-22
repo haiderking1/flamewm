@@ -35,11 +35,12 @@ static void write_outputs(struct flame_server *server, struct strbuf *out) {
 	wl_list_for_each(output, &server->outputs.list, link) {
 		strbuf_printf(out, "%s{\"name\":", first ? "" : ",");
 		strbuf_json_string(out, output->wlr->name);
-		strbuf_printf(out, ",\"scanout\":%s,\"tearing\":%s,\"vrr\":%s}",
+		strbuf_printf(out, ",\"scanout\":%s,\"tearing\":%s,\"vrr\":%s,\"vrr_capable\":%s}",
 			output->frames.scanout.active ? "true" : "false",
 			output->frames.sync.tearing ? "true" : "false",
 			output->wlr->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED
-				? "true" : "false");
+				? "true" : "false",
+			output->wlr->adaptive_sync_supported ? "true" : "false");
 		first = false;
 	}
 	strbuf_printf(out, "]");

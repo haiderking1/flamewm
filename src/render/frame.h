@@ -153,5 +153,8 @@ void frame_finish(struct flame_frame *frame);
 
 // something wants a frame: the schedule decides when
 void frame_request(struct flame_frame *frame);
+// the output's mode or what its display can do changed: tearing and vrr
+// get tried again, refused before or not
+void frame_display_changed(struct flame_frame *frame);
 
 #endif
