@@ -46,10 +46,14 @@ static int W = 1000, H = 640;
 #define F_SMALL "Inter 9"
 #define F_HEAD "Inter Semi-Bold 8.5"
 
-#define CELL_W 112
-#define CELL_H 118
-#define ICON 64
-#define ROW_H 24
+// the zoom: icons (and their cells round them) and list rows, as big as
+// they are right now, easing toward what's asked
+#define ICON (app->icon)
+#define CELL_W (app->icon + 48)
+#define CELL_H (app->icon + 54)
+#define ROW_H (app->row)
+#define ICON_DEFAULT 64
+#define ROW_DEFAULT 24
 #define LIST_HEAD 28
 #define GRID_PAD 14
 
@@ -78,6 +82,7 @@ struct app {
 	char query[64], searched[64]; // searched: what's shown is for it
 	double scroll;
 	int cols; // icon columns last frame, for the arrows
+	double icon, icon_want, row, row_want;
 
 	// a name being typed over
 	bool renaming;
@@ -747,6 +752,74 @@ static void scroll_to(struct app *app, size_t i) {
 	}
 }
 
+// ---- zoom, and what's kept of it ----
+
+static void zoom(struct app *app, double by) {
+	if (app->list_view) {
+		app->row_want = fmax(20, fmin(app->row_want * by, 48));
+	} else {
+		app->icon_want = fmax(32, fmin(app->icon_want * by, 256));
+	}
+	fui_redraw(app->ui);
+}
+
+static void zoom_reset(struct app *app) {
+	if (app->list_view) {
+		app->row_want = ROW_DEFAULT;
+	} else {
+		app->icon_want = ICON_DEFAULT;
+	}
+	fui_redraw(app->ui);
+}
+
+// how it's shown, kept from one run to the next: $XDG_CONFIG_HOME/flame/files.conf
+static void prefs_path(char *out, size_t size) {
+	const char *config = getenv("XDG_CONFIG_HOME");
+	if (config && *config == '/') {
+		snprintf(out, size, "%s/flame/files.conf", config);
+	} else {
+		snprintf(out, size, "%s/.config/flame/files.conf", home_dir());
+	}
+}
+
+static void prefs_load(struct app *app) {
+	char path[PATH_MAX], line[128];
+	prefs_path(path, sizeof(path));
+	FILE *f = fopen(path, "re");
+	while (f && fgets(line, sizeof(line), f)) {
+		double v;
+		if (sscanf(line, "icon=%lf", &v) == 1) {
+			app->icon_want = fmax(32, fmin(v, 256));
+		} else if (sscanf(line, "row=%lf", &v) == 1) {
+			app->row_want = fmax(20, fmin(v, 48));
+		} else if (!strncmp(line, "view=list", 9)) {
+			app->list_view = true;
+		} else if (!strncmp(line, "hidden=1", 8)) {
+			app->hidden = true;
+		}
+	}
+	if (f) {
+		fclose(f);
+	}
+}
+
+static void prefs_save(struct app *app) {
+	char path[PATH_MAX];
+	prefs_path(path, sizeof(path));
+	char *slash = strrchr(path, '/');
+	if (slash) {
+		*slash = '\0';
+		mkdir(path, 0755);
+		*slash = '/';
+	}
+	FILE *f = fopen(path, "we");
+	if (f) {
+		fprintf(f, "view=%s\nicon=%.0f\nrow=%.0f\nhidden=%d\n", app->list_view ? "list" : "icons",
+			app->icon_want, app->row_want, app->hidden);
+		fclose(f);
+	}
+}
+
 // ---- keys ----
 
 static void move_cursor(struct app *app, long by) {
@@ -836,6 +909,18 @@ static void keys(struct app *app) {
 	}
 	if (fui_key_pressed(ui, XKB_KEY_2, FUI_CTRL)) {
 		app->list_view = true;
+	}
+	if (fui_key_pressed(ui, XKB_KEY_equal, FUI_CTRL) || fui_key_pressed(ui, XKB_KEY_plus,
+			FUI_CTRL | FUI_SHIFT) || fui_key_pressed(ui, XKB_KEY_plus, FUI_CTRL)
+			|| fui_key_pressed(ui, XKB_KEY_KP_Add, FUI_CTRL)) {
+		zoom(app, 1.25);
+	}
+	if (fui_key_pressed(ui, XKB_KEY_minus, FUI_CTRL) || fui_key_pressed(ui, XKB_KEY_KP_Subtract,
+			FUI_CTRL)) {
+		zoom(app, 0.8);
+	}
+	if (fui_key_pressed(ui, XKB_KEY_0, FUI_CTRL) || fui_key_pressed(ui, XKB_KEY_KP_0, FUI_CTRL)) {
+		zoom_reset(app);
 	}
 	if (fui_key_pressed(ui, XKB_KEY_f, FUI_CTRL)) {
 		fui_focus(ui, fui_id("search", 0), app->query);
@@ -1031,7 +1116,9 @@ static void file_icon(struct app *app, const struct file *f, double x, double y,
 	}
 	if (f->kind == KIND_IMAGE) {
 		bool failed;
-		cairo_surface_t *thumb = fui_thumb_fit(app->ui, path, size > 40 ? 160 : 48, &failed);
+		// a few sizes only: zooming doesn't read every picture again at every step
+		int want = size <= 24 ? 48 : size <= 48 ? 96 : size <= 96 ? 192 : 384;
+		cairo_surface_t *thumb = fui_thumb_fit(app->ui, path, want, &failed);
 		if (thumb) {
 			icon_picture(app->ui, x, y, size, thumb);
 			return;
@@ -1178,22 +1265,23 @@ static void list_view(struct app *app, double top) {
 		}
 		cairo_t *cr = fui_cairo(ui);
 		cairo_push_group(cr);
-		file_icon(app, f, x0 + 6, y + 3, 18);
+		double is = ROW_H - 6, ty = y + (ROW_H - 15) / 2;
+		file_icon(app, f, x0 + 6, y + 3, is);
 		bool renaming_this = app->renaming && !strcmp(f->name, app->rename_from);
 		if (renaming_this) {
-			rename_field(app, x0 + 30, y - 2, name_w - 40);
+			rename_field(app, x0 + is + 12, y + (ROW_H - 28) / 2, name_w - is - 22);
 		} else {
-			fui_text(ui, x0 + 32, y + 4, f->name, F_TEXT, sel ? 0xffffffff : TEXT, FUI_LEFT,
-				name_w - 40);
+			fui_text(ui, x0 + is + 14, ty, f->name, F_TEXT, sel ? 0xffffffff : TEXT, FUI_LEFT,
+				name_w - is - 22);
 		}
 		uint32_t dimmed = sel ? 0xffffffd0 : TEXT_DIM;
 		char text[64];
 		format_date(f->mtime, text, sizeof(text));
-		fui_text(ui, x0 + name_w + 8, y + 4, text, F_TEXT, dimmed, FUI_LEFT, date_w - 16);
+		fui_text(ui, x0 + name_w + 8, ty, text, F_TEXT, dimmed, FUI_LEFT, date_w - 16);
 		format_size(f, text, sizeof(text));
-		fui_text(ui, x0 + name_w + date_w + 8, y + 4, text, F_TEXT, dimmed, FUI_LEFT, size_w - 16);
+		fui_text(ui, x0 + name_w + date_w + 8, ty, text, F_TEXT, dimmed, FUI_LEFT, size_w - 16);
 		if (kind_w > 0) {
-			fui_text(ui, x0 + name_w + date_w + size_w + 8, y + 4, f->kind_name, F_TEXT, dimmed,
+			fui_text(ui, x0 + name_w + date_w + size_w + 8, ty, f->kind_name, F_TEXT, dimmed,
 				FUI_LEFT, kind_w - 16);
 		}
 		cairo_pop_group_to_source(cr);
@@ -1256,7 +1344,15 @@ static void view(struct app *app) {
 	cairo_t *cr = fui_cairo(ui);
 	double view_h = VIEW_BOTTOM - VIEW_TOP;
 	if (fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, view_h)) {
-		app->scroll += fui_scrolled(ui);
+		double wheel = fui_scrolled(ui);
+		if (fui_mods(ui) & FUI_CTRL) {
+			// ctrl and the wheel: bigger up, smaller down
+			if (wheel != 0) {
+				zoom(app, pow(1.015, -wheel));
+			}
+		} else {
+			app->scroll += wheel;
+		}
 	}
 	double most = content_height(app) - view_h;
 	app->scroll = fmax(0, fmin(app->scroll, fmax(most, 0)));
@@ -1564,6 +1660,8 @@ static void frame(struct fui *ui, void *data) {
 	W = fui_width(ui);
 	H = fui_height(ui);
 	cairo_t *cr = fui_cairo(ui);
+	app->icon = fui_ease(ui, fui_id("zoom icon", 0), app->icon_want, 20);
+	app->row = fui_ease(ui, fui_id("zoom row", 0), app->row_want, 20);
 	job_check(app);
 	// the window: frosted glass, the desktop glowing through the sidebar,
 	// the files on solid dark
@@ -1638,7 +1736,8 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-	struct app app = {.status = 0};
+	struct app app = {.status = 0, .icon = ICON_DEFAULT, .icon_want = ICON_DEFAULT,
+		.row = ROW_DEFAULT, .row_want = ROW_DEFAULT};
 	const char *start = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--pick")) {
@@ -1662,6 +1761,7 @@ int main(int argc, char **argv) {
 	}
 	folder_init(&app.folder);
 	places_load(&app);
+	prefs_load(&app);
 	app.ui = fui_create(&(struct fui_config){
 		// a chooser floats over what asked for it (flame's rule for it)
 		.app_id = app.pick ? "flamefiles-chooser" : "flamefiles",
@@ -1705,6 +1805,7 @@ int main(int argc, char **argv) {
 		fui_watch(app.ui, app.folder.inotify, folder_watch, &app);
 	}
 	int status = fui_run(app.ui);
+	prefs_save(&app);
 	if (app.job) {
 		ops_job_free(app.job); // stopped where it is
 	}

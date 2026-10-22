@@ -740,6 +740,9 @@ $CTL pointer button left press > /dev/null; $CTL pointer button left release > /
 sleep 0.6
 $CTL settings | python3 -I -c \"import json, sys; print('picked', json.load(sys.stdin)['values']['wallpaper'].split('/')[-1])\"" \
 	"picked blue.png"
+# flamefiles keeps how it shows things in XDG_CONFIG_HOME, the trash in
+# XDG_DATA_HOME: never the user's
+CASE_ENV="XDG_CONFIG_HOME=$WORK/flamefiles/config XDG_DATA_HOME=$WORK/flamefiles/data"
 case_run "flamefiles: super+e opens it, a new folder named, a copy pasted into it, the trash and back" "
 $CTL key Super_L press > /dev/null; $CTL key e press > /dev/null
 $CTL key e release > /dev/null; $CTL key Super_L release > /dev/null
@@ -749,7 +752,7 @@ $CTL key Super_L press > /dev/null; $CTL key c press > /dev/null
 $CTL key c release > /dev/null; $CTL key Super_L release > /dev/null
 sleep 0.5
 mkdir box; echo hi > box/notes.txt; echo x > box/a.txt
-export XDG_DATA_HOME=\$PWD/data
+export XDG_DATA_HOME=\$PWD/data XDG_CONFIG_HOME=\$PWD/config
 $(dirname $CTL)/flamefiles \$PWD/box > /dev/null 2>&1 &
 sleep 2
 key() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done; }
@@ -774,6 +777,7 @@ echo back \$(ls box | grep -c notes) \$(ls data/Trash/files | wc -l)" \
 	"back 1 0"
 case_run "flamefiles --pick: only what it asks for can be picked, a double click prints its path" "
 mkdir pics; grim pics/shot.png; echo hi > pics/a.txt
+export XDG_DATA_HOME=\$PWD/data XDG_CONFIG_HOME=\$PWD/config
 $(dirname $CTL)/flamefiles --pick --images \$PWD/pics > picked.txt &
 pick=\$!
 sleep 2
@@ -785,6 +789,7 @@ dbl 614 184
 wait \$pick; echo exit \$?
 echo picked \$(basename \$(cat picked.txt))" "flamefiles-chooser True" "still choosing" "exit 0" \
 	"picked shot.png"
+CASE_ENV=
 case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
 $CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
 $CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null

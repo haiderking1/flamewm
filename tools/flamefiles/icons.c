@@ -315,21 +315,21 @@ void icon_file(struct fui *ui, double x, double y, double s, enum file_kind kind
 void icon_picture(struct fui *ui, double x, double y, double s, cairo_surface_t *thumb) {
 	cairo_t *cr = fui_cairo(ui);
 	double tw = cairo_image_surface_get_width(thumb), th = cairo_image_surface_get_height(thumb);
-	// fit in the box, a white border round it like a print
-	double border = s >= 40 ? s * 0.035 : 0.6;
-	double scale = fmin((s - 2 * border) / tw, (s - 2 * border) / th);
+	// the picture itself in the box, its corners a little round, a shadow
+	// under it and a hairline round it so a dark one still has an edge
+	double scale = fmin(s / tw, s / th);
 	double w = tw * scale, h = th * scale;
 	double px = x + (s - w) / 2, py = y + (s - h) / 2;
+	double r = fmax(2, fmin(s * 0.05, 6));
 	if (s >= 40) {
-		rounded(cr, px - border + 0.5, py - border + 1.5, w + 2 * border, h + 2 * border, 2);
-		rgba(cr, 0x00000040);
-		cairo_fill(cr);
+		for (int i = 3; i > 0; i--) {
+			rounded(cr, px - i * 0.5, py + i * 0.6, w + i, h + i * 0.5, r + i * 0.5);
+			rgba(cr, 0x00000018);
+			cairo_fill(cr);
+		}
 	}
-	rounded(cr, px - border, py - border, w + 2 * border, h + 2 * border, 2);
-	rgba(cr, 0xf5f5f7ff);
-	cairo_fill(cr);
 	cairo_save(cr);
-	cairo_rectangle(cr, px, py, w, h);
+	rounded(cr, px, py, w, h, r);
 	cairo_clip(cr);
 	cairo_translate(cr, px, py);
 	cairo_scale(cr, scale, scale);
@@ -337,4 +337,8 @@ void icon_picture(struct fui *ui, double x, double y, double s, cairo_surface_t 
 	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
 	cairo_paint(cr);
 	cairo_restore(cr);
+	rounded(cr, px + 0.5, py + 0.5, w - 1, h - 1, r);
+	rgba(cr, 0xffffff1f);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
 }
