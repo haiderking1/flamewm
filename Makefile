@@ -168,6 +168,10 @@ $(E2E)/wlgame: tests/e2e/wlgame.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-c
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlgame.c $(E2E)/xdg-shell-protocol.c \
 		$(E2E)/tearing-control-v1-protocol.c $(shell pkg-config --cflags --libs wayland-client)
 
+$(E2E)/wlstall: tests/e2e/wlstall.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
+	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlstall.c $(E2E)/xdg-shell-protocol.c \
+		$(shell pkg-config --cflags --libs wayland-client)
+
 $(E2E)/wldnd: tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c $(E2E)/xdg-shell-client-protocol.h
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wldnd.c $(E2E)/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client)
@@ -202,7 +206,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

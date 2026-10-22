@@ -18,6 +18,10 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		return false;
 	}
 	server->loop = wl_display_get_event_loop(server->display);
+	// what flame has for an app that's busy, not reading, waits here. past
+	// libwayland's default 4kB the app is cut off and dies (a browser stuck
+	// for a few seconds with the mouse moving over it), 1MB rides that out
+	wl_display_set_default_max_buffer_size(server->display, 1024 * 1024);
 
 	// order matters: each step only uses what came before it
 	return signals_init(&server->signals, server)

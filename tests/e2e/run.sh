@@ -235,6 +235,8 @@ $CTL state | grep -o '\"tearing\":[a-z]*,\"vrr\":[a-z]*,\"vrr_capable\":[a-z]*'
 wait
 cat full.out" '"tearing":false,"vrr":false,"vrr_capable":false' "kept going: yes"
 CASE_ARGS=
+case_run "an app busy for a while while flame has lots to tell it: still connected after" "
+$BIN/wlstall 20000" "mapped" "after the stall: still connected"
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5
