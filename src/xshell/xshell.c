@@ -213,6 +213,9 @@ void xshell_syncobj_destroyed(struct flame_xshell *xshell, struct xs_syncobj *sy
 
 // ---- presents ----
 
+// a swapchain's images, a few spare for apps juggling more
+#define PACE_IMAGES 8
+
 // an X window that presents, in its top-level's picture: the top-level
 // itself, or a window in it with its own pictures (a browser's web view, a
 // game's client window). shown where X has it, clipped to it and what it's
@@ -247,14 +250,18 @@ struct xlayer {
 	struct pacer *pacer;
 	int64_t release_at; // INT64_MAX: it got its one for this frame
 	struct wl_list held_back; // xpresent.held_link, oldest first
-	// presents in a row with nothing let go since the one before: the game
-	// draws into a spare buffer of its own, and given one a frame it stays a
-	// frame ahead for good (lag). once that's clear the next release is
-	// skipped, the spare gets used up
-	int spare_frames;
-	bool skip_release;
-	bool released; // a buffer went back since its last present
 	int64_t last_present; // when it last presented, a game stuck on us hasn't
+	// the pixmaps it presents (its swapchain): one it never presented before
+	// is a new swapchain, the old one's held buffers go back at once. only
+	// these are ever held, an old swapchain's go back as they come, the game
+	// waits on them before it's done with it
+	uint32_t images[PACE_IMAGES];
+	int images_len;
+	// resized: the game builds a new swapchain and waits for the old one's
+	// buffers first, nothing's held till a frame of the new one comes, or
+	// till then (some keep their buffers across a resize). paced or not yet:
+	// pacing starts with the first frame after going fullscreen
+	int64_t swapping_until;
 };
 
 struct xpresent {
@@ -535,26 +542,36 @@ static void arm_msc_timer(struct flame_xshell *xshell);
 
 // ---- pacing the game, see game/pacer.h ----
 
-// no frame for this long with buffers held: the game waits on one,
-// whatever the pacer thinks, they go back. it never freezes on us
-#define PACE_STUCK_NS 100000000LL
+// no frame for this many paces (and at least PACE_STUCK_MIN_NS) with
+// buffers held: the game waits on one, whatever the pacer thinks, they all
+// go back. flame never holds a game up longer than that
+#define PACE_STUCK_PACES 5 / 2
+#define PACE_STUCK_MIN_NS 25000000LL
 // a slot this close is due, the timer isn't finer
 #define PACE_EARLY_NS 200000LL
-// presents in a row on a spare before the game counts as a frame ahead
-#define PACE_SPARE_FRAMES 4
+// after a resize nothing's held till the new swapchain shows, this long at most
+#define PACE_SWAP_NS 500000000LL
+
+// when a game waiting on held buffers counts as stuck on us
+static int64_t pace_stuck_after(const struct xlayer *layer) {
+	int64_t after = layer->pacer->interval * PACE_STUCK_PACES;
+	return after > PACE_STUCK_MIN_NS ? after : PACE_STUCK_MIN_NS;
+}
 
 // paced: the game has its one buffer for this frame, the rest wait for the
 // release. true: xp waits
 static bool pace_holds(struct xpresent *xp) {
 	struct xlayer *layer = xp->layer;
-	if (!layer->pacer || xp->back_paced) {
+	int64_t now = now_ns();
+	if (!layer->pacer || xp->back_paced || now < layer->swapping_until) {
 		return false;
 	}
-	int64_t now = now_ns();
-	if (layer->skip_release && now >= layer->release_at) {
-		// due now, but it has a spare: this frame it goes without
-		layer->skip_release = false;
-		layer->release_at = INT64_MAX;
+	bool current = false;
+	for (int i = 0; i < layer->images_len; i++) {
+		current |= layer->images[i] == xp->pixmap_id;
+	}
+	if (!current) {
+		return false;
 	}
 	if (now < layer->release_at) {
 		if (!xp->back_held) {
@@ -567,7 +584,6 @@ static bool pace_holds(struct xpresent *xp) {
 	}
 	// the release was due before this one was free: it's the one
 	layer->release_at = INT64_MAX;
-	layer->released = true;
 	if (!layer->pacer->released) {
 		pacer_released(layer->pacer, now, false);
 	}
@@ -581,7 +597,6 @@ static void pace_release(struct xlayer *layer, int64_t now) {
 	wl_list_init(&xp->held_link);
 	xp->back_held = false;
 	xp->back_paced = true;
-	layer->released = true;
 	if (layer->pacer) {
 		layer->release_at = INT64_MAX;
 		if (!layer->pacer->released) {
@@ -596,24 +611,23 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 	if (wl_list_empty(&layer->held_back)) {
 		return;
 	}
-	if (now - layer->last_present >= PACE_STUCK_NS) {
+	if (now - layer->last_present >= pace_stuck_after(layer)) {
 		// it waits on us, whatever we think: everything goes back
 		struct flame_frame *frame = layer->window->xshell->clock.frame;
 		if (frame) {
 			frame->timing.pace_stuck++;
 		}
-		wlr_log(WLR_DEBUG, "xshell: 0x%x waited on its buffers, all of them go back", layer->id);
+		int held = wl_list_length(&layer->held_back);
+		wlr_log(WLR_DEBUG, "xshell: 0x%x waited on its buffers, all of them go back "
+			"(%d held, release %s %.1f ms, queued %d, %s)", layer->id, held,
+			layer->release_at == INT64_MAX ? "given, next frame" : "due in",
+			layer->release_at == INT64_MAX ? 0.0 : (layer->release_at - now) / 1e6,
+			wl_list_length(&layer->queue), now < layer->swapping_until ? "swapping" : "steady");
 		while (!wl_list_empty(&layer->held_back)) {
 			pace_release(layer, now);
 		}
 	} else if (now >= layer->release_at) {
-		if (layer->skip_release) {
-			// it's drawing into its spare: this frame it goes without
-			layer->skip_release = false;
-			layer->release_at = INT64_MAX;
-		} else {
-			pace_release(layer, now);
-		}
+		pace_release(layer, now);
 	}
 }
 
@@ -622,7 +636,7 @@ static int64_t pace_next_release(const struct xlayer *layer) {
 	if (wl_list_empty(&layer->held_back)) {
 		return 0;
 	}
-	int64_t stuck = layer->last_present + PACE_STUCK_NS;
+	int64_t stuck = layer->last_present + pace_stuck_after(layer);
 	return layer->release_at < stuck ? layer->release_at : stuck;
 }
 
@@ -1534,28 +1548,36 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 			layer->drawing = false;
 		}
 		deliver_held(layer);
-		layer->last_present = now_ns();
+		int64_t now = now_ns();
+		// the game's own frames, not the screen's: what a hitch in it is
+		struct flame_frame *clock = xshell->clock.frame;
+		if (clock && layer->last_present && layer->window->view.fullscreen_shown
+				&& xshell->server->desktop.focused == &layer->window->view) {
+			timing_game_gap(&clock->timing, now - layer->last_present);
+		}
+		layer->last_present = now;
 		pace_update(layer);
-		struct xs_pixmap *pixmap = present->pixmap;
-		if (layer->pacer && !wl_list_empty(&layer->held_back)) {
-			struct xpresent *held = wl_container_of(layer->held_back.next, held, held_link);
-			if (held->pixmap->width != pixmap->width || held->pixmap->height != pixmap->height) {
-				// a new swapchain (fullscreen, a resize): the old one's buffers
-				// go back now, the game waits on them before it's done with it
-				while (!wl_list_empty(&layer->held_back)) {
-					pace_release(layer, now_ns());
-				}
-			}
+		bool known = false;
+		for (int i = 0; i < layer->images_len; i++) {
+			known |= layer->images[i] == present->pixmap->id;
 		}
-		if (layer->pacer && layer->pacer->last_shown) {
-			if (layer->released) {
-				layer->spare_frames = 0;
-			} else if (++layer->spare_frames >= PACE_SPARE_FRAMES) {
-				layer->spare_frames = 0;
-				layer->skip_release = true;
+		if (!known) {
+			// a new swapchain (fullscreen again, a resize): what's held of the
+			// old one goes back now, the game waits on it before it's done
+			// with it. its first images come this way too, harmless. from
+			// here on it's paced again
+			if (now < layer->swapping_until) {
+				layer->images_len = 0; // a new swapchain: the old one's are old
 			}
+			layer->swapping_until = 0;
+			while (layer->pacer && !wl_list_empty(&layer->held_back)) {
+				pace_release(layer, now);
+			}
+			if (layer->images_len == PACE_IMAGES) {
+				layer->images_len = 0;
+			}
+			layer->images[layer->images_len++] = present->pixmap->id;
 		}
-		layer->released = false;
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);
@@ -1878,6 +1900,20 @@ static struct flame_xwindow *from_view(struct flame_view *view) {
 	return window;
 }
 
+// a new size makes a game build a new swapchain, and it waits for the old
+// one's buffers first: what the pacer holds of it goes back now, and
+// nothing's held till the new one shows
+static void pace_resized(struct flame_xwindow *window) {
+	struct xlayer *layer;
+	int64_t now = now_ns();
+	wl_list_for_each(layer, &window->layers, link) {
+		layer->swapping_until = now + PACE_SWAP_NS;
+		while (layer->pacer && !wl_list_empty(&layer->held_back)) {
+			pace_release(layer, now);
+		}
+	}
+}
+
 // what flame shows of it (inside the shadow) to X's size and back
 static int x_width(const struct flame_xwindow *window, int width) {
 	return width + window->ext_left + window->ext_right;
@@ -1895,6 +1931,7 @@ static uint32_t xview_configure(struct flame_view *view, int width, int height,
 	height = x_height(window, xshell_to_x(window->xshell, height));
 	if (x && width > 0 && height > 0 && (x->width != width || x->height != height)) {
 		xserver_move_window(window->xshell->xserver, x, x->x, x->y, width, height);
+		pace_resized(window);
 	}
 	window->width = width;
 	window->height = height;

@@ -42,6 +42,9 @@ struct flame_frame_timing {
 	struct timing_stat draw, empty, gpu, flip, dispatch;
 	// a client's new buffer handed over -> the flip that first showed it
 	struct timing_stat wayland_latency, x11_latency;
+	// the focused fullscreen X game's own present to present: a hitch in
+	// the game, flips include an idle desktop's
+	struct timing_stat game_gap;
 	// a composited frame handed to KMS -> our gpu work for it done: what KMS
 	// waits for, the wait behind other apps' gpu work included
 	struct timing_stat gpu_done;
@@ -99,6 +102,8 @@ void timing_late_app_frames(struct flame_frame_timing *timing, uint32_t count);
 // a client buffer reached the screen ns after it was handed over: a wayland
 // commit, or an X11 PresentPixmap
 void timing_latency(struct flame_frame_timing *timing, bool x11, int64_t ns);
+// the fullscreen game presented ns after its last present
+void timing_game_gap(struct flame_frame_timing *timing, int64_t ns);
 // gpu_time_collect's longest finished measurement
 void timing_gpu(struct flame_frame_timing *timing, double max_ms);
 void timing_gpu_done(struct flame_frame_timing *timing, int64_t ns);
