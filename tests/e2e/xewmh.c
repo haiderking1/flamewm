@@ -1,6 +1,7 @@
 // flame as X's window manager, the EWMH way an app sees it
-// usage: xewmh check | fullscreen | startfull | activate | steal | close | dpi | configure |
-//   subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL | grabaway FLAMECTL
+// usage: xewmh check | fullscreen | startfull | activate | steal | wayland CMD | close | dpi |
+//   configure | subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL |
+//   grabaway FLAMECTL | away FLAMECTL | iconify
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +258,47 @@ int main(int argc, char **argv) {
 		printf("its own window back: %s\n",
 			first32(s->root, "_NET_ACTIVE_WINDOW") == a ? "yes" : "no");
 		(void)a2;
+	} else if (!strcmp(mode, "wayland") && argc > 2) {
+		// a wayland window in front: X apps hear another app is active
+		// (flame's window), not None. wine keeps its game in front on None
+		xcb_window_t w = window(false);
+		settle();
+		printf("active is this one: %s\n",
+			first32(s->root, "_NET_ACTIVE_WINDOW") == w ? "yes" : "no");
+		if (system(argv[2]) != 0) {
+			return 1;
+		}
+		settle();
+		settle();
+		uint32_t active = first32(s->root, "_NET_ACTIVE_WINDOW");
+		uint32_t check = first32(s->root, "_NET_SUPPORTING_WM_CHECK");
+		printf("a wayland window in front, active is: %s\n",
+			active && active == check ? "flame's window" : active == w ? "still this one" : "none");
+	} else if (!strcmp(mode, "iconify")) {
+		// ICCCM's minimize, wine's way (XIconifyWindow): flame has none, the
+		// app hears WM_STATE is still Normal, it's never left waiting
+		xcb_window_t w = window(false);
+		settle();
+		xcb_generic_event_t *ev;
+		while ((ev = xcb_poll_for_event(c))) {
+			free(ev); // the WM_STATE it got when it was taken on
+		}
+		wm_message(w, "WM_CHANGE_STATE", 3, 0, 0);
+		settle();
+		bool told = false;
+		while ((ev = xcb_poll_for_event(c))) {
+			if ((ev->response_type & 0x7f) == XCB_PROPERTY_NOTIFY
+					&& ((xcb_property_notify_event_t *)ev)->atom == atom("WM_STATE")) {
+				told = true;
+			}
+			free(ev);
+		}
+		printf("iconify: told %s, WM_STATE %u\n", told ? "yes" : "no", first32(w, "WM_STATE"));
+		xcb_get_window_attributes_reply_t *attrs = xcb_get_window_attributes_reply(c,
+			xcb_get_window_attributes(c, w), NULL);
+		printf("still shown: %s\n",
+			attrs && attrs->map_state == XCB_MAP_STATE_VIEWABLE ? "yes" : "no");
+		free(attrs);
 	} else if (!strcmp(mode, "wmstate")) {
 		// ICCCM: Normal once managed, Withdrawn once the app unmaps it
 		xcb_window_t w = window(false);
