@@ -82,9 +82,9 @@ $(BUILD)/tests/pacer_test: tests/pacer_test.c src/game/pacer.c
 
 # flame's renderer against wlroots' on a real gpu. no sanitizers: gpu
 # drivers trip them on their own
-$(BUILD)/tests/gl_test: tests/gl_test.c src/gl/gl.c src/gl/pass.c
+$(BUILD)/tests/gl_test: tests/gl_test.c src/gl/gl.c src/gl/pass.c src/gl/glass.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c17 -O1 -g $(WARN) $(DEFS) -Isrc $(PKG_CFLAGS) -o $@ $^ $(PKG_LIBS)
+	$(CC) -std=c17 -O1 -g $(WARN) $(DEFS) -Isrc $(PKG_CFLAGS) -o $@ $^ $(PKG_LIBS) -lm
 
 # flame's X server on its own, a test client against it through the harness.
 # the clients are plain xcb (test-only deps, see deps.md)

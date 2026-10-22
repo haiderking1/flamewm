@@ -22,6 +22,7 @@ enum flame_node_type {
 	FLAME_NODE_RECT,
 	FLAME_NODE_SURFACE,
 	FLAME_NODE_BUFFER,
+	FLAME_NODE_GLASS,
 };
 
 struct flame_scene;
@@ -64,6 +65,24 @@ struct flame_rect {
 	struct flame_node node;
 	int width, height;
 	float color[4]; // premultiplied
+};
+
+// how frosted glass looks, lengths in layout units
+struct flame_glass_style {
+	double radius; // its corners
+	double blur; // how far what's behind it smears
+	float tint[4]; // laid over the blur, premultiplied
+	float saturation; // 1 keeps the colors behind it, more makes them vivid
+	float edge; // light caught on its rim, 0 for none
+	double refraction; // how far its rim bends what's behind it, 0 for none
+};
+
+// glass: what's behind it blurred, tinted and lit at the rim, in a rounded
+// rectangle. flame's renderer draws it, without GL it's just its tint
+struct flame_glass {
+	struct flame_node node;
+	int width, height;
+	struct flame_glass_style style;
 };
 
 // a client surface and its subsurfaces, drawn in protocol order
@@ -155,6 +174,8 @@ struct flame_surface_node *scene_surface_create(struct flame_tree *parent,
 	struct wlr_surface *surface);
 struct flame_buffer_node *scene_buffer_create(struct flame_tree *parent,
 	const struct flame_buffer_node_impl *impl, void *data);
+struct flame_glass *scene_glass_create(struct flame_tree *parent, int width, int height,
+	const struct flame_glass_style *style);
 
 // trees take their children with them
 void scene_node_destroy(struct flame_node *node);
@@ -168,6 +189,8 @@ bool scene_node_coords(struct flame_node *node, int *lx, int *ly);
 
 void scene_rect_set_size(struct flame_rect *rect, int width, int height);
 void scene_rect_set_color(struct flame_rect *rect, const float color[4]);
+void scene_glass_set_size(struct flame_glass *glass, int width, int height);
+void scene_glass_set_style(struct flame_glass *glass, const struct flame_glass_style *style);
 // NULL or an empty box shows all of it
 void scene_surface_set_clip(struct flame_surface_node *node, const struct wlr_box *clip);
 // a new picture: texture (NULL for none) drawn at width x height, readable
@@ -181,7 +204,8 @@ void scene_buffer_set_source(struct flame_buffer_node *node, const struct wlr_fb
 struct flame_tree *scene_tree_from_node(struct flame_node *node);
 
 // topmost enabled node under a layout point. surface/sx/sy are set when it's
-// client content that takes input there, NULL for rects (borders, backdrops).
+// client content that takes input there, NULL for rects and glass (borders,
+// backdrops, flame's own controls).
 // buffer nodes come back with surface NULL and sx/sy inside them
 struct flame_node *scene_node_at(struct flame_scene *scene, double lx, double ly,
 	struct wlr_surface **surface, double *sx, double *sy);

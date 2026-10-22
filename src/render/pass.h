@@ -27,6 +27,13 @@ bool pass_begin(struct flame_pass *pass, struct flame_render *render,
 void pass_rect(struct flame_pass *pass, struct wlr_box box, const float color[4],
 	const pixman_region32_t *clip, bool blend);
 void pass_texture(struct flame_pass *pass, const struct gl_texture_options *options);
+// frosted glass over what's drawn so far (see gl_pass_glass), only its tint
+// without flame's renderer
+void pass_glass(struct flame_pass *pass, const struct gl_glass_options *options);
+// a scene glass's look at an output's scale, faded to alpha
+struct flame_glass_style;
+void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,
+	struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha);
 bool pass_submit(struct flame_pass *pass);
 
 #endif

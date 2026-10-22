@@ -7,6 +7,8 @@
 #include <wayland-server-protocol.h>
 #include <wlr/util/box.h>
 
+#include "scene/scene.h"
+
 struct flame_buffer_node;
 struct flame_scene;
 struct wlr_drm_syncobj_timeline;
@@ -24,6 +26,9 @@ enum flame_element_type {
 	// a surface destroyed after the list was built: only its id and boxes
 	// are left, for the damage diff. nothing to draw or call back
 	FLAME_ELEMENT_GONE,
+	// frosted glass over what's below it: drawn from what's already in the
+	// buffer, so wherever it's drawn everything under its reach has to be
+	FLAME_ELEMENT_GLASS,
 };
 
 struct flame_element {
@@ -35,6 +40,8 @@ struct flame_element {
 	struct wlr_box clip; // layout coords, the part of box allowed to show
 
 	float color[4]; // rects, premultiplied
+	// glass, lengths in layout units scaled like the box
+	struct flame_glass_style glass;
 
 	struct wlr_surface *surface; // surfaces
 	struct wlr_texture *texture;
@@ -94,6 +101,10 @@ uint64_t elements_look(const struct flame_element_list *list, struct wlr_box are
 
 // fills visible and opaque, top down
 void elements_occlude(struct flame_element_list *list);
+
+// how far around its box glass reads what's behind it (blur and
+// refraction), layout units
+int elements_glass_reach(const struct flame_element *element);
 
 // the same element in another frame's list, NULL when it wasn't there. hint
 // is where to look first, lists barely change between frames

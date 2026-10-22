@@ -54,20 +54,30 @@ static void mat_transform(float m[9], enum wl_output_transform transform) {
 	mat_multiply(m, m, transforms[transform & 7]);
 }
 
-// the unit square onto box, in the buffer
-static void set_proj(const struct gl_pass *pass, int location, struct wlr_box box) {
+void gl_target_proj(float proj[9], int width, int height) {
+	// pixels to clip space, the top row first in memory: y down maps
+	// straight onto GL's y up, no flip
+	mat_identity(proj);
+	proj[0] = 2.0f / width;
+	proj[2] = -1;
+	proj[4] = 2.0f / height;
+	proj[5] = -1;
+}
+
+void gl_box_proj(const float proj[9], int location, struct wlr_box box) {
 	float m[9];
 	mat_identity(m);
 	mat_translate(m, box.x, box.y);
 	mat_scale(m, box.width, box.height);
-	mat_multiply(m, pass->proj, m);
+	mat_multiply(m, proj, m);
 	fglUniformMatrix3fv(location, 1, GL_FALSE, m);
 }
 
-// the unit square of dst onto the texture's src, normalized, turned. a
-// quarter turn goes the other way on textures, their origin differs
-static void set_tex_proj(int location, enum wl_output_transform transform,
-		struct wlr_fbox src) {
+static void set_proj(const struct gl_pass *pass, int location, struct wlr_box box) {
+	gl_box_proj(pass->proj, location, box);
+}
+
+void gl_tex_proj(int location, enum wl_output_transform transform, struct wlr_fbox src) {
 	float m[9];
 	mat_identity(m);
 	mat_translate(m, src.x, src.y);
@@ -82,7 +92,7 @@ static void set_tex_proj(int location, enum wl_output_transform transform,
 #define MAX_QUADS 86 // a batch of quads, 6 vertices of 2 floats each
 
 // the parts of box inside clip, as quads in box's unit square
-static void draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
+void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
 	pixman_region32_t region;
 	pixman_region32_init_rect(&region, box.x, box.y, box.width, box.height);
 	if (clip) {
@@ -140,13 +150,7 @@ bool gl_pass_begin(struct gl_pass *pass, struct flame_gl *gl, struct wlr_buffer 
 	pass->height = buffer->height;
 	pass->signal = signal;
 	pass->signal_point = point;
-	// buffer pixels to clip space, the top row first in memory: y down
-	// maps straight onto GL's y up, no flip
-	mat_identity(pass->proj);
-	pass->proj[0] = 2.0f / buffer->width;
-	pass->proj[2] = -1;
-	pass->proj[4] = 2.0f / buffer->height;
-	pass->proj[5] = -1;
+	gl_target_proj(pass->proj, buffer->width, buffer->height);
 	fglBindFramebuffer(GL_FRAMEBUFFER, fbo);
 	fglViewport(0, 0, buffer->width, buffer->height);
 	fglBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -171,7 +175,7 @@ void gl_pass_rect(struct gl_pass *pass, struct wlr_box box, const float color[4]
 	fglUseProgram(program->program);
 	set_proj(pass, program->proj, box);
 	fglUniform4f(program->color, color[0], color[1], color[2], color[3]);
-	draw_box(box, clip, program->pos);
+	gl_draw_box(box, clip, program->pos);
 }
 
 // the gpu waits (not us) for point on timeline before what comes after
@@ -232,8 +236,8 @@ void gl_pass_texture(struct gl_pass *pass, const struct gl_texture_options *opti
 	fglUniform1i(program->tex, 0);
 	fglUniform1f(program->alpha, options->alpha);
 	set_proj(pass, program->proj, options->dst);
-	set_tex_proj(program->tex_proj, options->transform, src);
-	draw_box(options->dst, options->clip, program->pos);
+	gl_tex_proj(program->tex_proj, options->transform, src);
+	gl_draw_box(options->dst, options->clip, program->pos);
 	fglBindTexture(attribs.target, 0);
 }
 

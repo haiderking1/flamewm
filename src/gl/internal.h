@@ -10,6 +10,9 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <pixman.h>
+#include <wayland-server-protocol.h>
+#include <wlr/util/box.h>
 
 #define FLAME_GL_PROCS(X) \
 	X(PFNGLACTIVETEXTUREPROC, ActiveTexture) \
@@ -73,7 +76,19 @@ FLAME_EGL_PROCS(FLAME_EGL_DECLARE)
 #undef FLAME_EGL_DECLARE
 
 struct flame_gl;
+struct gl_blur;
 // the renderer's context, current from here on
 void gl_make_current(struct flame_gl *gl);
+// glass.c's textures go
+void gl_blur_finish(struct gl_blur *blur);
+
+// pass.c's drawing, for glass.c. proj: pixels of a width x height target
+// to clip space. box_proj: the unit square onto box through proj.
+// tex_proj: the unit square onto src (texture coords), turned
+void gl_target_proj(float proj[9], int width, int height);
+void gl_box_proj(const float proj[9], int location, struct wlr_box box);
+void gl_tex_proj(int location, enum wl_output_transform transform, struct wlr_fbox src);
+// the parts of box in clip (NULL: all of it), as quads
+void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos);
 
 #endif

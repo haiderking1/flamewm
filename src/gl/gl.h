@@ -21,6 +21,21 @@ struct gl_program {
 	unsigned program;
 	int proj, tex_proj, tex, alpha, color; // uniforms, -1 for none
 	int pos; // the vertex attribute
+	// glass and blur
+	int texel, offset, bounds, box, reach, radius, tint, saturation, edge, refraction,
+		rim;
+};
+
+// what glass reads from: what's behind it, copied out, then shrunk and
+// grown back level by level (dual kawase), the blur ends up in level 0.
+// kept between frames, grown when a bigger glass needs more
+#define GL_BLUR_LEVELS 7
+struct gl_blur {
+	unsigned texture[GL_BLUR_LEVELS], fbo[GL_BLUR_LEVELS];
+	int width[GL_BLUR_LEVELS], height[GL_BLUR_LEVELS]; // allocated
+	// the copy itself: rgb, an output's buffer often has no alpha to copy
+	unsigned copy;
+	int copy_width, copy_height;
 };
 
 struct flame_gl {
@@ -30,6 +45,8 @@ struct flame_gl {
 	bool external; // GL_OES_EGL_image_external: dmabufs as external textures
 	bool fences; // EGL_ANDROID_native_fence_sync + EGL_KHR_wait_sync
 	struct gl_program quad, tex_rgba, tex_rgbx, tex_ext;
+	struct gl_program blur_down, blur_up, glass;
+	struct gl_blur blur;
 };
 
 // false (and unusable) when renderer isn't GLES2 or its GL lacks what
@@ -71,6 +88,23 @@ struct gl_texture_options {
 };
 
 void gl_pass_texture(struct gl_pass *pass, const struct gl_texture_options *options);
+
+// buffer pixels, like everything else in a pass
+struct gl_glass_options {
+	struct wlr_box box;
+	const pixman_region32_t *clip; // NULL for all of box
+	float radius, blur, refraction;
+	float tint[4]; // premultiplied
+	float saturation, edge;
+	float rim; // how wide the lit rim is
+	float alpha; // the whole pane faded, 1 for not at all
+};
+
+// glass over what this pass drew so far. it reads box grown by
+// gl_glass_reach: all of that has to be drawn already, this frame
+void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options);
+// how far around its box glass reads, buffer pixels
+int gl_glass_reach(float blur, float refraction);
 // false: the gpu can't be trusted with what it drew
 bool gl_pass_submit(struct gl_pass *pass);
 

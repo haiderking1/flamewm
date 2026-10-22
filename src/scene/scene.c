@@ -84,6 +84,35 @@ struct flame_rect *scene_rect_create(struct flame_tree *parent, int width, int h
 	return rect;
 }
 
+struct flame_glass *scene_glass_create(struct flame_tree *parent, int width, int height,
+		const struct flame_glass_style *style) {
+	struct flame_glass *glass = calloc(1, sizeof(*glass));
+	if (!glass) {
+		return NULL;
+	}
+	node_init(&glass->node, FLAME_NODE_GLASS, parent->node.scene, parent);
+	glass->width = width;
+	glass->height = height;
+	glass->style = *style;
+	scene_changed(glass->node.scene);
+	return glass;
+}
+
+void scene_glass_set_size(struct flame_glass *glass, int width, int height) {
+	if (glass->width != width || glass->height != height) {
+		glass->width = width;
+		glass->height = height;
+		scene_changed(glass->node.scene);
+	}
+}
+
+void scene_glass_set_style(struct flame_glass *glass, const struct flame_glass_style *style) {
+	if (memcmp(&glass->style, style, sizeof(*style))) {
+		glass->style = *style;
+		scene_changed(glass->node.scene);
+	}
+}
+
 // the surface's record points back at the node drawing it, so its commits
 // know whether they're on a visible workspace
 static void unlink_state(struct flame_surface_node *node) {
@@ -174,6 +203,7 @@ void scene_node_destroy(struct flame_node *node) {
 		break;
 	case FLAME_NODE_RECT:
 	case FLAME_NODE_BUFFER:
+	case FLAME_NODE_GLASS:
 		break;
 	}
 
@@ -303,6 +333,14 @@ static struct flame_node *node_at(struct flame_node *node, int x, int y, double 
 		struct flame_rect *rect = wl_container_of(node, rect, node);
 		struct wlr_box box = {x, y, rect->width, rect->height};
 		if (wlr_box_contains_point(&box, lx, ly)) {
+			*surface = NULL;
+			return node;
+		}
+		return NULL;
+	case FLAME_NODE_GLASS:;
+		struct flame_glass *glass = wl_container_of(node, glass, node);
+		struct wlr_box glass_box = {x, y, glass->width, glass->height};
+		if (wlr_box_contains_point(&glass_box, lx, ly)) {
 			*surface = NULL;
 			return node;
 		}
