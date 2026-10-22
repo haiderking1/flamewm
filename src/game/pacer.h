@@ -32,8 +32,9 @@ struct pacer {
 	int64_t fixed; // a pace from the config, 0: follow the game
 	int64_t interval; // the pace now: ns between frames on screen
 
-	// let go -> picture ready on the gpu: how far ahead of its slot to let
-	// the game go. up at once, down slowly
+	// how far ahead of its slot to let the game go: what it needs from
+	// getting its buffer to its picture being ready on the gpu. up at once
+	// when a frame's late for it, down slowly while they're early
 	int64_t lead;
 
 	int64_t released; // when the game was let go for the frame it's on, 0 none
@@ -47,11 +48,16 @@ struct pacer {
 void pacer_init(struct pacer *pacer, int64_t fastest, int64_t fixed);
 // the display or the config changed
 void pacer_set_limits(struct pacer *pacer, int64_t fastest, int64_t fixed);
+// paced again after a break (another workspace): the pace and lead learned
+// before go on, the frames start over. pacer is fresh from pacer_init
+void pacer_resume(struct pacer *pacer, const struct pacer *before);
 // the game is let go for its next frame at t. held: it was waiting for
 // that (it got its buffer at our release), not let go the moment it could
 void pacer_released(struct pacer *pacer, int64_t t, bool held);
-// a frame came: presented at presented, its gpu work done at ready
-void pacer_frame(struct pacer *pacer, int64_t presented, int64_t ready);
+// a frame came: presented at presented, its gpu work done at ready. true:
+// it was ready before its release could have made it, the game drew it on a
+// buffer it already had (it runs a frame ahead, that's lag)
+bool pacer_frame(struct pacer *pacer, int64_t presented, int64_t ready);
 // when a frame ready at ready goes on screen: on its slot, or right away
 // when it's late for it (the slots start over from there)
 int64_t pacer_slot(const struct pacer *pacer, int64_t ready);
