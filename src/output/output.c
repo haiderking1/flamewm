@@ -12,6 +12,7 @@
 
 #include "config/config.h"
 #include "core/server.h"
+#include "output/mode.h"
 #include "render/snapshot.h"
 #include "util/listener.h"
 
@@ -69,15 +70,47 @@ static float configured_scale(const struct flame_config *config, const char *nam
 	return oc && oc->scale > 0 ? oc->scale : 1;
 }
 
+// the display's native size at its fastest refresh (output/mode.h)
+static struct wlr_output_mode *best_mode(struct wlr_output *wlr_output) {
+	size_t count = (size_t)wl_list_length(&wlr_output->modes);
+	struct mode_info *infos = count ? calloc(count, sizeof(*infos)) : NULL;
+	if (!infos) {
+		return NULL;
+	}
+	size_t i = 0;
+	struct wlr_output_mode *mode;
+	wl_list_for_each(mode, &wlr_output->modes, link) {
+		infos[i++] = (struct mode_info){mode->width, mode->height, mode->refresh,
+			mode->preferred};
+	}
+	int pick = mode_pick(infos, count);
+	free(infos);
+	i = 0;
+	wl_list_for_each(mode, &wlr_output->modes, link) {
+		if ((int)i++ == pick) {
+			return mode;
+		}
+	}
+	return NULL;
+}
+
 static bool output_enable(struct wlr_output *wlr_output, const struct flame_config *config) {
 	struct wlr_output_state state;
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
 	wlr_output_state_set_scale(&state, configured_scale(config, wlr_output->name));
 
-	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+	// the preferred mode when the fastest one won't light up (a cable or a
+	// gpu port that can't carry it)
+	struct wlr_output_mode *preferred = wlr_output_preferred_mode(wlr_output);
+	struct wlr_output_mode *mode = best_mode(wlr_output);
 	if (mode) {
 		wlr_output_state_set_mode(&state, mode);
+		if (mode != preferred && preferred && !wlr_output_test_state(wlr_output, &state)) {
+			wlr_log(WLR_INFO, "%s: %dx%d@%.3fHz won't light up, the preferred mode then",
+				wlr_output->name, mode->width, mode->height, mode->refresh / 1000.0);
+			wlr_output_state_set_mode(&state, preferred);
+		}
 	}
 	// tests: a headless screen the size of a real one, FLAME_HEADLESS_SIZE=WxH
 	const char *size = getenv("FLAME_HEADLESS_SIZE");
