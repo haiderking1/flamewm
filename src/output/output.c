@@ -24,13 +24,22 @@ static bool before_render(void *data, int64_t target) {
 	return anims_tick(&output->server->anims, target);
 }
 
-// the workspace showing has a window fullscreen on screen. workspaces are laid
-// out on the primary output, the others never have one
-static bool fullscreen_shown(void *data) {
+// a window is fullscreen on one of the workspaces, shown or not: a game
+// that's open. vrr follows that, not what's on screen: switching it costs
+// nvidia ~200ms, a hitch every time the user came back to the game.
+// workspaces are laid out on the primary output, the others never have one
+static bool fullscreen_open(void *data) {
 	struct flame_output *output = data;
+	if (output != outputs_primary(&output->server->outputs)) {
+		return false;
+	}
 	struct flame_desktop *desktop = &output->server->desktop;
-	struct flame_view *view = desktop->active ? desktop->active->fullscreen : NULL;
-	return view && view->fullscreen_shown && output == outputs_primary(&output->server->outputs);
+	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
+		if (desktop->workspaces[i].fullscreen) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // windows a transaction waits on may be hidden, they still need callbacks to
@@ -163,7 +172,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 		.data = output,
 		.before_render = before_render,
 		.callbacks_sent = callbacks_sent,
-		.fullscreen = fullscreen_shown,
+		.fullscreen = fullscreen_open,
 	};
 	if (!output->background || !frame_init(&output->frames, &server->render, wlr_output,
 			server->backend.session, &output->box, hooks)) {

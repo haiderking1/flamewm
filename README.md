@@ -54,15 +54,17 @@ never tear.
 
 vrr (adaptive sync) lets the display wait for frames. with it on, flame
 sends every frame the moment it's ready instead of at the repaint window.
-it comes on half a second into fullscreen and goes off 20 seconds after:
-a quick look at another workspace and back to the game switches nothing
-(a switch costs nvidia a ~200ms hitch).
+with vrr = "fullscreen" it follows a fullscreen window being open, on any
+workspace, not it being on screen: it comes on half a second after a game
+goes fullscreen and goes off 2 seconds after it's closed (or windowed).
+going to the browser and back switches nothing (a switch costs nvidia a
+~200ms hitch). the log says what each switch took.
 switching it rides on a frame and gets a KMS test first, so a display that
 won't switch never costs one, it just stays how it is.
 
 ```lua
 flame.set { allow_tearing = true, vrr = "fullscreen" } -- the defaults
--- vrr: "off", "fullscreen" (while something fullscreen shows), "always"
+-- vrr: "off", "fullscreen" (while a window is fullscreen, shown or not), "always"
 ```
 
 `flamectl state` says per output whether it's scanning out, tearing and

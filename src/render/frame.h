@@ -46,8 +46,9 @@ struct flame_frame_hooks {
 	// refresh. anything re-requesting frames from here has to wait for one, a
 	// revisit comes right after every empty pass and would loop
 	void (*callbacks_sent)(void *data, const struct timespec *now, bool new_cycle);
-	// a fullscreen window shows on this output right now (vrr's fullscreen
-	// policy). NULL: never
+	// a fullscreen window is open on this output, shown or on a workspace
+	// that isn't (vrr's fullscreen policy: a game in the background keeps
+	// it, switching costs a hitch). NULL: never
 	bool (*fullscreen)(void *data);
 };
 
@@ -96,6 +97,9 @@ struct flame_frame {
 	// the fullscreen game paced on this output (game/pacer.h), at this many
 	// frames a second. 0: none
 	double pace_fps;
+	// a vrr switch went out then (its KMS test first), till it's on screen:
+	// the log says what it cost
+	int64_t vrr_switch_since;
 	bool tearing_logged; // KMS refusing it was said once
 	bool vrr_logged;
 

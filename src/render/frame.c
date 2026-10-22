@@ -152,6 +152,11 @@ static void handle_output_present(struct wl_listener *listener, void *data) {
 	const struct wlr_output_event_present *event = data;
 	// a flip without a timestamp anchors on dispatch time instead
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
+	if (frame->vrr_switch_since && event->presented) {
+		wlr_log(WLR_INFO, "%s: the adaptive sync switch was on screen %.1f ms after it went out",
+			frame->output->name, (timespec_ns(&event->when) - frame->vrr_switch_since) / 1e6);
+		frame->vrr_switch_since = 0;
+	}
 	// wayland buffers drawn into that frame made it now
 	int kept = 0;
 	for (int i = 0; i < frame->first_drawn_len; i++) {
@@ -889,7 +894,9 @@ static void render(struct flame_frame *frame, int64_t now) {
 			}
 		}
 
+		int64_t vrr_since = 0;
 		if (ready && vrr_change) {
+			vrr_since = now_ns();
 			vrr_set(frame, &state, vrr_want);
 		}
 		if (!ready) {
@@ -910,7 +917,9 @@ static void render(struct flame_frame *frame, int64_t now) {
 				if (vrr_want != on) {
 					vrr_refused(frame); // took the commit, didn't switch
 				} else {
-					wlr_log(WLR_INFO, "%s: adaptive sync %s", output->name, on ? "on" : "off");
+					wlr_log(WLR_INFO, "%s: adaptive sync %s, test and commit took %.1f ms",
+						output->name, on ? "on" : "off", (now_ns() - vrr_since) / 1e6);
+					frame->vrr_switch_since = vrr_since;
 				}
 			}
 			if (drew) {

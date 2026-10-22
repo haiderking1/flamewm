@@ -92,7 +92,7 @@ struct flame_config {
 	// frames go out the moment they're done, mid refresh
 	bool allow_tearing;
 	// the display waits for frames instead of frames for the display, where
-	// it can: off, fullscreen (while something fullscreen shows), always
+	// it can: off, fullscreen (while a window is fullscreen, shown or not), always
 	enum sync_vrr_policy vrr;
 	// the fullscreen game's frames at an even pace, the fastest it holds
 	// (game/pacer.h): off, vrr (while the display runs it), always. pace_fps

@@ -15,14 +15,14 @@
 // fullscreen has to hold this long before vrr follows it on: a window
 // fullscreen for a moment doesn't make the display switch modes
 #define SYNC_VRR_DEBOUNCE_NS 500000000LL
-// and gone this long before it follows it off: a quick look at another
-// workspace and back to the game switches nothing (nvidia takes ~200ms
-// to switch, a hitch every time the game came back)
-#define SYNC_VRR_OFF_DEBOUNCE_NS 20000000000LL
+// and gone this long before it follows it off: a game handing over from
+// its launcher, or out of fullscreen for a moment, switches nothing.
+// fullscreen counts open on any workspace, not only shown (output.c)
+#define SYNC_VRR_OFF_DEBOUNCE_NS 2000000000LL
 
 enum sync_vrr_policy {
 	SYNC_VRR_OFF,
-	SYNC_VRR_FULLSCREEN, // while something fullscreen shows (a game, a video)
+	SYNC_VRR_FULLSCREEN, // while a window is fullscreen, shown or not (a game, a video)
 	SYNC_VRR_ALWAYS,
 };
 
@@ -52,7 +52,7 @@ bool sync_tearing_wanted(const struct sync *sync, bool allowed, bool app_wants,
 void sync_tearing_result(struct sync *sync, bool refused);
 
 // should vrr be on for the frame at now: the policy, whether the output can,
-// whether something fullscreen shows on it
+// whether a window is fullscreen on it, shown or not
 bool sync_vrr_wanted(struct sync *sync, enum sync_vrr_policy policy, bool supported,
 	bool fullscreen, int64_t now);
 // KMS wouldn't switch vrr (the test or commit failed, or the status didn't
