@@ -149,7 +149,7 @@ static void get_window_attributes(struct xs_client *client, const struct xin *in
 	xout32(&out, 0); // backing pixel
 	xout8(&out, 0); // save under
 	xout8(&out, 1); // map installed
-	xout8(&out, !window->mapped ? 0 : xs_window_viewable(window) ? 2 : 1);
+	xout8(&out, !window->mapped ? 0 : xs_window_shown(window) ? 2 : 1);
 	xout8(&out, window->override_redirect);
 	xout32(&out, window->colormap);
 	xout32(&out, xs_window_all_masks(window));

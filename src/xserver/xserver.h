@@ -62,6 +62,11 @@ struct xs_window {
 	uint16_t class; // 1 InputOutput, 2 InputOnly
 	bool override_redirect;
 	bool mapped;
+	// a top-level on a workspace that doesn't show: apps looking for
+	// windows (GetWindowAttributes, what's under a point) see it and what's
+	// in it unviewable, like with its window manager frame unmapped. it
+	// stays mapped where it is, nothing's sent to it
+	bool wm_hidden;
 	uint32_t colormap;
 	struct xs_cursor *cursor; // what the pointer looks like in it, NULL: the parent's
 	uint16_t do_not_propagate;
@@ -463,6 +468,8 @@ struct xs_window *xserver_window(struct flame_xserver *xserver, uint32_t id);
 bool xs_window_top_level(const struct xs_window *window);
 // mapped, and so is everything up to the root
 bool xs_window_viewable(const struct xs_window *window);
+// viewable, and the way apps see it: not on a hidden workspace
+bool xs_window_shown(const struct xs_window *window);
 // a property by its atom's name, NULL when it isn't set
 struct xs_property *xserver_property(struct flame_xserver *xserver, struct xs_window *window,
 	const char *name);
@@ -504,6 +511,9 @@ void xserver_send_client_message(struct flame_xserver *xserver, uint32_t window,
 	uint32_t type, const uint32_t data[5]);
 // the top-level X has at a root point (its stacking, not flame's), NULL for none
 struct xs_window *xserver_top_level_at(struct flame_xserver *xserver, int x, int y);
+// a top-level's workspace showing or not, see xs_window.wm_hidden
+void xserver_window_set_hidden(struct flame_xserver *xserver, struct xs_window *window,
+	bool hidden);
 void xserver_window_root_position(struct xs_window *window, int *x, int *y);
 // a point, window coords, the window takes input at: inside its bounding and
 // input shapes (toolkits cut their shadows out of them)

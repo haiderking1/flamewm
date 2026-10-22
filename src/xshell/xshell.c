@@ -1665,6 +1665,9 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 			known |= layer->images[i] == present->pixmap->id;
 		}
 		if (!known) {
+			wlr_log(WLR_DEBUG, "xshell: 0x%x presents 0x%x for the first time (%d before it)%s",
+				layer->id, present->pixmap->id, layer->images_len,
+				now < layer->swapping_until ? ", resized: a new swapchain" : "");
 			// a new swapchain (fullscreen again, a resize): what's held of the
 			// old one goes back now, the game waits on it before it's done
 			// with it. its first images come this way too, harmless. from
@@ -2180,7 +2183,6 @@ static void xview_placed(struct flame_view *view, struct wlr_box content) {
 	struct flame_xwindow *window = from_view(view);
 	struct xs_window *x = x_of(window);
 	window->placed = content;
-	window->parked = false; // placed: it's on the workspace that shows
 	// X's window around it, its shadow outside what flame shows. edges
 	// rounded, not sizes: neighbours at a fractional scale don't gap
 	struct flame_xshell *xshell = window->xshell;
@@ -2515,11 +2517,9 @@ static void floats_update(struct flame_xshell *xshell) {
 	}
 }
 
-#define PARKED (-32000)
-
 // X sees the screen the way flame shows it, for apps that look for windows
 // by X's tree (drag and drop targets, QueryPointer): tiled windows on other
-// workspaces parked out of sight, the focused one on top of the tiled ones,
+// workspaces unviewable to them, the focused one on top of the tiled ones,
 // menus and the like above that
 static void x_stack_update(struct flame_xshell *xshell) {
 	struct flame_xserver *xserver = xshell->xserver;
@@ -2530,15 +2530,14 @@ static void x_stack_update(struct flame_xshell *xshell) {
 		if (!x) {
 			continue;
 		}
+		// hidden the way a reparenting window manager hides one, its frame
+		// unmapped: the app's window stays where it is and hears nothing.
+		// moved away instead, wine moves the game there too (-32000 is
+		// where windows go minimized), and back it rebuilds its swapchain
 		bool shown = window->view.workspace && window->view.workspace == desktop->active;
-		if (!shown && !window->parked) {
-			window->parked = true;
-			xserver_move_window(xserver, x, PARKED, PARKED, x->width, x->height);
-		} else if (shown && window->parked && window->placed.width > 0) {
-			window->parked = false;
-			xserver_move_window(xserver, x,
-				xshell_to_x(xshell, window->placed.x) - window->ext_left,
-				xshell_to_x(xshell, window->placed.y) - window->ext_top, x->width, x->height);
+		if (shown == window->hidden) {
+			window->hidden = !shown;
+			xserver_window_set_hidden(xserver, x, window->hidden);
 		}
 	}
 	// only what's out of place moves: this runs on every change, and moving
@@ -2553,7 +2552,7 @@ static void x_stack_update(struct flame_xshell *xshell) {
 	struct xs_window *x;
 	wl_list_for_each(x, &root->children, link) {
 		window = window_of(xshell, x->id);
-		// floats on other workspaces are parked, they go down with the tiles
+		// floats on other workspaces are hidden, they go down with the tiles
 		bool shown_float = window && window->view.floating
 			&& window->view.workspace == desktop->active;
 		if (window && !window->floating && !shown_float && x != focused && len < 512) {
@@ -2615,8 +2614,7 @@ void xshell_windows_changed(struct flame_xshell *xshell) {
 				scene_node_set_position(&window->float_tree->node, from_x(xshell, x->x),
 					from_x(xshell, x->y));
 			} else {
-				if (read_extents(xshell, window, x) && window->placed.width > 0
-						&& !window->parked) {
+				if (read_extents(xshell, window, x) && window->placed.width > 0) {
 					// its shadow changed (a tile has none): X's window moves
 					// around what shows, which stays where it is
 					xview_placed(&window->view, window->placed);
@@ -2686,7 +2684,7 @@ void xshell_rescale(struct flame_xshell *xshell) {
 		if (window->floating && x) {
 			scene_node_set_position(&window->float_tree->node, from_x(xshell, x->x),
 				from_x(xshell, x->y));
-		} else if (window->placed.width > 0 && !window->parked) {
+		} else if (window->placed.width > 0) {
 			xview_placed(&window->view, window->placed);
 		}
 		content_refresh(window);

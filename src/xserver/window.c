@@ -309,7 +309,7 @@ void xs_window_origin(const struct xs_window *window, int *x, int *y) {
 struct xs_window *xs_window_child_at(struct xs_window *window, int x, int y) {
 	struct xs_window *child;
 	wl_list_for_each_reverse(child, &window->children, link) {
-		if (!child->mapped) {
+		if (!child->mapped || child->wm_hidden) {
 			continue;
 		}
 		int cx, cy;
