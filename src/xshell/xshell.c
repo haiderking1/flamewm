@@ -280,6 +280,7 @@ struct xlayer {
 	// in: a gap from there to the next is the game's, not time spent away
 	bool presented_in_game;
 	int64_t valve_at; // when its buffers all went back stuck, 0 none
+	int64_t completed_at; // when it last heard a frame of it was done
 };
 
 struct xpresent {
@@ -521,6 +522,7 @@ static void complete(struct xpresent *xp, uint8_t mode, int64_t when, uint64_t m
 		return;
 	}
 	xp->completed = true;
+	xp->layer->completed_at = now_ns();
 	struct flame_xshell *xshell = xp->layer->window->xshell;
 	xserver_present_complete(xshell->xserver, xp->layer->id, xp->serial, false, mode,
 		(uint64_t)(when / 1000), msc);
@@ -688,20 +690,35 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 }
 
 // a long gap in a game's frames, in the log with what flame did: whether
-// it held its buffers then, so a hitch is either the game's or ours
+// it held its buffers or a complete then, so a hitch is either the game's or ours
 static void pace_hitch(struct xlayer *layer, int64_t gap, int64_t now) {
 	int64_t pace = layer->pacer ? layer->pacer->interval : 0;
 	if (gap < PACE_HITCH_NS || gap < 3 * pace) {
 		return;
 	}
+	// a frame it presented that hasn't heard back: it may wait on that
+	int out = layer->shown && !layer->shown->completed;
+	struct xpresent *xp;
+	wl_list_for_each(xp, &layer->retiring, link) {
+		out += !xp->completed;
+	}
+	char completes[64];
+	if (out) {
+		snprintf(completes, sizeof(completes), "%d complete%s still out", out,
+			out == 1 ? "" : "s");
+	} else {
+		snprintf(completes, sizeof(completes), "its last complete went out %.1f ms before",
+			(now - layer->completed_at) / 1e6);
+	}
 	if (layer->valve_at) {
 		wlr_log(WLR_DEBUG, "xshell: 0x%x hitch: no frame for %.1f ms, it presented %.1f ms "
-			"after its buffers all went back: %s", layer->id, gap / 1e6,
-			(now - layer->valve_at) / 1e6, now - layer->valve_at < 5000000LL
+			"after its buffers all went back, %s: %s", layer->id, gap / 1e6,
+			(now - layer->valve_at) / 1e6, completes, now - layer->valve_at < 5000000LL
 			? "it waited on flame" : "it was busy itself");
 	} else {
-		wlr_log(WLR_DEBUG, "xshell: 0x%x hitch: no frame for %.1f ms, %s, flame never held "
-			"it up: the game's own", layer->id, gap / 1e6, layer->pacer ? "paced" : "not paced");
+		wlr_log(WLR_DEBUG, "xshell: 0x%x hitch: no frame for %.1f ms, %s, %s, flame never "
+			"held its buffers", layer->id, gap / 1e6, layer->pacer ? "paced" : "not paced",
+			completes);
 	}
 }
 
