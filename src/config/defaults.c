@@ -61,6 +61,7 @@ const struct flame_config flame_default_config = {
 	.x_global_keys = FLAME_X_KEYS_ALWAYS,
 	.allow_tearing = true,
 	.vrr = SYNC_VRR_FULLSCREEN,
+	.pace = PACER_VRR,
 
 	.cursor_theme = NULL,
 	.cursor_size = 24,

@@ -235,6 +235,15 @@ $CTL state | grep -o '\"tearing\":[a-z]*,\"vrr\":[a-z]*,\"vrr_capable\":[a-z]*'
 wait
 cat full.out" '"tearing":false,"vrr":false,"vrr_capable":false' "kept going: yes"
 CASE_ARGS=
+printf 'flame.set { pace = "always", pace_fps = 30 }\n' > "$WORK/pace.lua"
+CASE_ARGS="-c $WORK/pace.lua"
+case_run "pacing: an uneven game's frames come out even, at the pace asked" "
+$BIN/glxfull 4 vsyncoff jitter > full.out 2>&1 &
+sleep 2
+$CTL state | grep -oE '\"pace_fps\":[0-9.]+' | awk -F: '{ print \"paced:\", (\$2 > 25 && \$2 < 31) ? \"yes\" : \$2 }'
+wait
+cat full.out" "paced: yes" "even: yes" "kept going: yes"
+CASE_ARGS=
 case_run "an app busy for a while while flame has lots to tell it: still connected after" "
 $BIN/wlstall 20000" "mapped" "after the stall: still connected"
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
