@@ -293,6 +293,19 @@ int main(int argc, char **argv) {
 			g && g->status == XCB_GRAB_STATUS_SUCCESS ? "yes" : "no");
 		free(g);
 		xcb_disconnect(other);
+	} else if (!strcmp(mode, "away") && argc > 2) {
+		// on another workspace a window isn't minimized: chromium stops
+		// drawing on _NET_WM_STATE_HIDDEN and comes back white
+		xcb_window_t w = window(false);
+		settle();
+		char cmd[300];
+		snprintf(cmd, sizeof(cmd), "%s workspace 2 > /dev/null", argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		printf("away, ");
+		print_state(w);
 	} else if (!strcmp(mode, "takefocus") && argc > 2) {
 		// wine's game window: no input hint, WM_TAKE_FOCUS. WM_STATE comes
 		// before the offer (wine drops one that comes first), a click offers
