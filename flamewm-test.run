@@ -3,4 +3,7 @@
 # screen (FLAME_TEST_INPUT=1), for chasing bugs on real hardware. same
 # rebuild and debug log in /tmp/flamewm.log
 export FLAME_TEST_INPUT=1
+# every X request re4 makes in the log too, chasing its hitch coming back
+# to it. FLAME_X_TRACE= ./flamewm-test.run turns it off
+export FLAME_X_TRACE="${FLAME_X_TRACE-re4.exe}"
 exec "$(dirname "$0")/flamewm.run" "$@"
