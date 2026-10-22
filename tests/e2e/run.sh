@@ -36,7 +36,8 @@ wait_below() {
 # one go, a block the others running don't tear up
 run_case() {
 	dir=$1
-	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 $CASE_ENV "$FLAME" $3 \
+	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 \
+		FLAME_SETTINGS="$dir/settings.lua" $CASE_ENV "$FLAME" $3 \
 		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
 	ok=1
 	while IFS= read -r want; do
@@ -670,6 +671,33 @@ case_run "config: a broken init.lua still gets a working flame" "
 $BIN/xdnd target 6 > /dev/null 2>&1 &
 sleep 0.8
 $CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" '"floating":false,"x":6'
+CASE_ARGS=
+
+printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
+CASE_ARGS="-c $WORK/pin.lua"
+case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
+$CTL set border_width 5 > /dev/null
+$CTL set keyboard.layout us,ara > /dev/null
+$CTL set output.HEADLESS-1.scale 1.5 > /dev/null
+echo \"pinned: \$($CTL set gap 9 2>&1)\"
+echo \"too big: \$($CTL set border_width 99 2>&1)\"
+echo \"no such: \$($CTL set nope 1 2>&1)\"
+sleep 0.3
+$CTL settings | python3 -I -c \"
+import json, sys
+d = json.load(sys.stdin)
+v = d['values']
+print('border', v['border_width'], 'layout', v['keyboard.layout'], 'gap', v['gap'])
+print('pinned', d['pinned'], 'scale', d['outputs'][0]['scale'])
+\"
+grep -c 'flame.set' settings.lua
+$CTL unset border_width > /dev/null
+sleep 0.3
+$CTL settings | python3 -I -c \"import json, sys; print('unset', json.load(sys.stdin)['values']['border_width'])\"" \
+	"border 5 layout us,ara gap 4" "pinned ['gap'] scale 1.5" "unset 2" \
+	'pinned: {"ok":false,"error":"init.lua sets it, it wins"}' \
+	'too big: {"ok":false,"error":"not a whole number in range"}' \
+	'no such: {"ok":false,"error":"no such setting"}'
 CASE_ARGS=
 
 # a flame inside this one, its screen 1266 wide: a row of a 24 bit capture

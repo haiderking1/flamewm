@@ -119,6 +119,11 @@ struct flame_config {
 
 	struct flame_output_config *outputs;
 	size_t output_count;
+
+	// what init.lua set ("gap", "keyboard.layout", "output.DP-1.scale"):
+	// settings.lua can't change those, flamesettings shows them locked
+	char **pinned;
+	size_t pinned_count;
 };
 
 extern const struct flame_config flame_default_config;
@@ -131,6 +136,9 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 void config_free(struct flame_config *config);
 // where init.lua is looked for, for messages
 const char *config_default_path(void);
+// settings.lua: what flamesettings (flamectl set) saves, loaded before
+// init.lua. $FLAME_SETTINGS, else next to init.lua
+const char *config_settings_path(void);
 
 // what the rules say about a window that just opened
 struct flame_window_rule {

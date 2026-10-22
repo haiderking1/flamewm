@@ -40,7 +40,11 @@ it's up, debug logs.
 
 ## config
 
-lua, at `~/.config/flame/init.lua`. see [examples/init.lua](examples/init.lua).
+none needed. change things live with `flamectl set gap 8` (`flamectl
+settings` lists them all), flame keeps them in `~/.config/flame/settings.lua`.
+
+for more, lua at `~/.config/flame/init.lua`, see
+[examples/init.lua](examples/init.lua). what it sets wins over settings.lua.
 
 ```lua
 flame.set {

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <strings.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/util/log.h>
@@ -56,7 +57,48 @@ struct flame_lua {
 	// spawn binds' command lines, freed with it
 	char ***argvs;
 	size_t argvs_len, argvs_cap;
+	// init.lua running: what it sets is pinned, settings (flamesettings)
+	// can't change it, see config->pinned
+	bool pinning;
 };
+
+// key ("gap", "keyboard.layout", "output.DP-1.scale") pinned by init.lua
+static void pin(struct flame_lua *lua, const char *key) {
+	struct flame_config *config = lua->config;
+	if (!lua->pinning) {
+		return;
+	}
+	for (size_t i = 0; i < config->pinned_count; i++) {
+		if (!strcmp(config->pinned[i], key)) {
+			return;
+		}
+	}
+	char *copy = strdup(key);
+	char **grown = copy ? realloc(config->pinned, (config->pinned_count + 1) * sizeof(*grown))
+		: NULL;
+	if (!grown) {
+		free(copy);
+		return;
+	}
+	config->pinned = grown;
+	config->pinned[config->pinned_count++] = copy;
+}
+
+// a table's fields, each pinned as "prefix.field"
+static void pin_fields(lua_State *L, struct flame_lua *lua, int table, const char *prefix) {
+	if (!lua->pinning) {
+		return;
+	}
+	lua_pushnil(L);
+	while (lua_next(L, table)) {
+		if (lua_type(L, -2) == LUA_TSTRING) {
+			char key[128];
+			snprintf(key, sizeof(key), "%s.%s", prefix, lua_tostring(L, -2));
+			pin(lua, key);
+		}
+		lua_pop(L, 1);
+	}
+}
 
 static const char prelude[] =
 	"local rules = {}\n"
@@ -329,13 +371,16 @@ static int l_set(lua_State *L) {
 		} else if (!strcmp(key, "keyboard")) {
 			luaL_checktype(L, value, LUA_TTABLE);
 			set_keyboard(L, config, value);
+			pin_fields(L, self(L), value, "keyboard");
 		} else if (!strcmp(key, "animations")) {
 			if (lua_isboolean(L, value)) {
 				config->anim.enabled = lua_toboolean(L, value);
 				config->anim.layers = config->anim.enabled;
+				pin(self(L), "animations.enabled");
 			} else {
 				luaL_checktype(L, value, LUA_TTABLE);
 				set_animations(L, &config->anim, value);
+				pin_fields(L, self(L), value, "animations");
 			}
 		} else {
 			return luaL_error(L, "flame.set: there's no %s", key);
@@ -343,6 +388,9 @@ static int l_set(lua_State *L) {
 		if (!ok) {
 			return luaL_error(L, "flame.set: %s doesn't make sense as %s",
 				lua_tostring(L, value), key);
+		}
+		if (strcmp(key, "keyboard") && strcmp(key, "animations")) {
+			pin(self(L), key);
 		}
 		lua_pop(L, 1);
 	}
@@ -517,6 +565,9 @@ static int l_output(lua_State *L) {
 		out->name = copy;
 	}
 	out->scale = scale;
+	char key[160];
+	snprintf(key, sizeof(key), "output.%s.scale", name);
+	pin(self(L), key);
 	return 0;
 }
 
@@ -611,14 +662,28 @@ static const luaL_Reg functions[] = {
 
 // ---- loading ----
 
-const char *config_default_path(void) {
-	static char path[512];
+static void config_file(char *path, size_t size, const char *name) {
 	const char *xdg = getenv("XDG_CONFIG_HOME");
 	if (xdg && *xdg) {
-		snprintf(path, sizeof(path), "%s/flame/init.lua", xdg);
+		snprintf(path, size, "%s/flame/%s", xdg, name);
 	} else {
-		snprintf(path, sizeof(path), "%s/.config/flame/init.lua", getenv("HOME") ? getenv("HOME")
-			: "");
+		snprintf(path, size, "%s/.config/flame/%s", getenv("HOME") ? getenv("HOME") : "", name);
+	}
+}
+
+const char *config_default_path(void) {
+	static char path[512];
+	config_file(path, sizeof(path), "init.lua");
+	return path;
+}
+
+const char *config_settings_path(void) {
+	static char path[512];
+	const char *env = getenv("FLAME_SETTINGS");
+	if (env && *env) {
+		snprintf(path, sizeof(path), "%s", env);
+	} else {
+		config_file(path, sizeof(path), "settings.lua");
 	}
 	return path;
 }
@@ -661,6 +726,10 @@ void config_free(struct flame_config *config) {
 		free(config->outputs[i].name);
 	}
 	free(config->outputs);
+	for (size_t i = 0; i < config->pinned_count; i++) {
+		free(config->pinned[i]);
+	}
+	free(config->pinned);
 	free(config);
 }
 
@@ -707,12 +776,14 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 	lua->config = config;
 	config->lua = lua;
 
+	// settings.lua (what flamesettings saves) first, init.lua over it. no
+	// files: the defaults, nothing to complain about
 	path = path ? path : config_default_path();
-	FILE *file = fopen(path, "r");
-	if (!file) {
-		return config; // no config: the defaults, nothing to complain about
+	const char *settings = config_settings_path();
+	bool has_init = access(path, R_OK) == 0, has_settings = access(settings, R_OK) == 0;
+	if (!has_init && !has_settings) {
+		return config;
 	}
-	fclose(file);
 
 	lua->L = luaL_newstate();
 	if (!lua->L) {
@@ -729,11 +800,18 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 		*error = message("config: %s%s", lua_tostring(L, -1), "");
 		return config;
 	}
-	if (luaL_dofile(L, path) != LUA_OK) {
-		// what got set before the error stays, the rest is defaults
+	// what got set before an error stays, the rest is defaults
+	if (has_settings && luaL_dofile(L, settings) != LUA_OK) {
 		*error = message("%s%s", lua_tostring(L, -1), "");
 		lua_pop(L, 1);
 	}
+	lua->pinning = true;
+	if (has_init && luaL_dofile(L, path) != LUA_OK) {
+		free(*error);
+		*error = message("%s%s", lua_tostring(L, -1), "");
+		lua_pop(L, 1);
+	}
+	lua->pinning = false;
 	lua->server = server;
 	return config;
 }

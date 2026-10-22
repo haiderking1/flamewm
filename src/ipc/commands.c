@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "bindings/action.h"
+#include "config/settings.h"
 #include "core/server.h"
 #include "input/fake.h"
 #include "ipc/ipc.h"
@@ -137,6 +138,35 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 	}
 	if (!strcmp(name, "pointer")) {
 		pointer_command(client, &save);
+		return;
+	}
+	if (!strcmp(name, "settings")) {
+		struct strbuf out;
+		strbuf_init(&out);
+		settings_write(client->ipc->server, &out);
+		if (!out.failed) {
+			ipc_client_send(client, out.data, out.len);
+		}
+		strbuf_finish(&out);
+		return;
+	}
+	if (!strcmp(name, "set") || !strcmp(name, "unset")) {
+		// set KEY VALUE (the rest of the line, spaces and all), unset KEY
+		const char *key = strtok_r(NULL, " \t\r", &save);
+		const char *value = save;
+		while (value && (*value == ' ' || *value == '\t')) {
+			value++;
+		}
+		const char *error = NULL;
+		bool set = !strcmp(name, "set");
+		if (!key || (set && (!value || !*value))) {
+			reply_error(client, set ? "set KEY VALUE" : "unset KEY");
+		} else if (set ? settings_set(client->ipc->server, key, value, &error)
+				: settings_unset(client->ipc->server, key, &error)) {
+			reply_ok(client);
+		} else {
+			reply_error(client, error);
+		}
 		return;
 	}
 	if (!strcmp(name, "share-pick")) {
