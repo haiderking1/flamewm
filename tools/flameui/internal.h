@@ -129,6 +129,35 @@ struct fui {
 	struct fui_watch watches[FUI_WATCHES];
 	struct fui_thumbs *thumbs; // thumbs.c, NULL till the first's asked for
 
+	// drag and drop (dnd.c): the drag over the window, a drop being read, a
+	// drop read for the app this frame, a drag of ours
+	struct wl_data_device_manager *data_manager;
+	struct wl_data_device *data_device;
+	uint32_t press_serial; // the left button's last press: a drag starts off it
+	struct wl_data_offer *dnd_offer;
+	uint32_t dnd_serial;
+	double dnd_x, dnd_y;
+	enum fui_dnd_action dnd_told;
+	struct wl_data_offer *drop_offer;
+	char *drop_buf;
+	size_t drop_len;
+	double drop_x, drop_y;
+	enum fui_dnd_action drop_action;
+	char **dropped;
+	size_t dropped_len;
+	bool dropped_ready;
+	// what's dragged over, read while it's over
+	int peek_fd;
+	char *peek_buf;
+	size_t peek_len;
+	char **peeked;
+	size_t peeked_len;
+	bool peeked_ready;
+	struct wl_data_source *drag_source;
+	struct wl_surface *drag_icon;
+	struct fui_buffer drag_buffer;
+	char *drag_uris, *drag_paths;
+
 	// the menu open, 0 for none: where, and where it was drawn last frame
 	uint64_t menu;
 	double menu_x, menu_y;
@@ -148,6 +177,13 @@ void fui_frame_begin(struct fui *ui, cairo_t *cr);
 void fui_frame_end(struct fui *ui);
 void fui_fonts_free(struct fui *ui);
 void fui_thumbs_free(struct fui *ui);
+// window.c's shared memory buffers, the drag icon's too
+bool fui_buffer_make(struct fui *ui, struct fui_buffer *b, int width, int height);
+void fui_buffer_free(struct fui_buffer *b);
+// dnd.c
+void fui_dnd_init(struct fui *ui);
+void fui_dnd_frame_end(struct fui *ui);
+void fui_dnd_finish(struct fui *ui);
 
 // video.c: a video's (or a song's cover) frame, fit in max_width x
 // max_height. fui_media_name: a name like a video's or a song's

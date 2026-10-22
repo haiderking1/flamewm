@@ -10,6 +10,7 @@
 
 #include <cairo.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 struct fui;
@@ -166,6 +167,35 @@ cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int heig
 cairo_surface_t *fui_thumb_fit(struct fui *ui, const char *path, int size, bool *failed);
 // the ones asked for so far and not started aren't wanted (another folder)
 void fui_thumbs_forget(struct fui *ui);
+
+// ---- drag and drop ----
+
+enum fui_dnd_action {
+	FUI_DND_NONE,
+	FUI_DND_COPY,
+	FUI_DND_MOVE,
+};
+
+// files dragged over the window: where the pointer is (window coords).
+// false for no drag of files
+bool fui_dnd_over(struct fui *ui, double *x, double *y);
+// the files being dragged over (their paths), once they've been read: NULL
+// till then. a drop's action can be picked by where they're from
+char **fui_dnd_files(struct fui *ui, size_t *len);
+// what a drop there would do, said every frame the drag's over
+void fui_dnd_accept(struct fui *ui, enum fui_dnd_action action);
+// files dropped this frame (their paths), what to do with them and where:
+// NULL for none. good till the frame's over
+char **fui_dnd_dropped(struct fui *ui, size_t *len, enum fui_dnd_action *action, double *x,
+	double *y);
+// paths dragged out of the window, off the press that's held: wherever
+// they're dropped (another app, this one) gets them as file uris. the
+// icon under the pointer icon_width x icon_height, drawn by draw_icon with
+// fui_* as in a frame. false when it can't start
+bool fui_drag_files(struct fui *ui, char *const *paths, size_t len, int icon_width,
+	int icon_height, void (*draw_icon)(struct fui *ui, void *data), void *data);
+// a drag of ours is on
+bool fui_dragging(const struct fui *ui);
 
 // a menu over everything at a point, like a right click opens: open it, then
 // every frame draw it last with fui_menu. a click outside closes it

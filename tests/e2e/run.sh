@@ -789,6 +789,28 @@ dbl 614 184
 wait \$pick; echo exit \$?
 echo picked \$(basename \$(cat picked.txt))" "flamefiles-chooser True" "still choosing" "exit 0" \
 	"picked shot.png"
+case_run "flamefiles: drag and drop: onto a folder it moves, out to an app as paths, in from one (same drive: moved)" "
+mkdir -p box/docs config/flame; echo a > box/a.txt; echo b > box/b.txt; echo s > src.txt
+printf 'view=list\n' > config/flame/files.conf
+export XDG_DATA_HOME=\$PWD/data XDG_CONFIG_HOME=\$PWD/config XDG_CACHE_HOME=\$PWD/cache
+$(dirname $CTL)/flamefiles \$PWD/box > /dev/null 2>&1 &
+sleep 2
+drag() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.3; $CTL pointer button left press > /dev/null; sleep 0.1
+	shift 2; for p in \"\$@\"; do $CTL pointer move \$p > /dev/null; sleep 0.08; done; sleep 0.5
+	$CTL pointer button left release > /dev/null; sleep 1; }
+drag 300 126 '300 120' '300 112' '300 104' '300 102'
+echo docs \$(ls box/docs) top \$(ls box | tr '\n' ' ')
+$BIN/wldnd target '' 10 > dst.out 2>&1 &
+sleep 1.2
+drag 300 126 '320 140' '500 250' '800 360' '950 360'
+grep -o 'dropped: .*' dst.out
+$BIN/wldnd source \"file://\$PWD/src.txt\" 10 > src.out 2>&1 &
+sleep 1.2
+$CTL pointer move 950 360 > /dev/null; sleep 0.3; $CTL pointer button left press > /dev/null; sleep 0.2
+for p in '900 380' '700 420' '500 460' '300 500'; do $CTL pointer move \$p > /dev/null; sleep 0.1; done; sleep 0.6
+$CTL pointer button left release > /dev/null; sleep 1.2
+echo moved \$(ls box | grep -c src.txt) \$(ls | grep -c src.txt)" "docs a.txt top b.txt docs" \
+	"box/b.txt" "moved 1 0"
 case_run "flamefiles: a video's frame and a song's cover for previews, kept in the thumbnail cache" "
 mkdir media; grim -t jpeg cover.jpg
 ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=30:duration=3 -c:v libx264 -pix_fmt yuv420p media/clip.mp4

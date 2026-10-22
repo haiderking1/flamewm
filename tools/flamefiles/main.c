@@ -106,6 +106,19 @@ struct app {
 	// asking before deleting for good
 	bool confirming;
 
+	// a press on a file: a drag once it moves far enough, else on release
+	// just that one picked (a click on one of several selected)
+	long press_item; // shown index + 1, 0 for none
+	double press_x, press_y;
+	bool press_narrow;
+	// what a drag over the window drops into: a folder shown (index + 1),
+	// a place, the folder open
+	long drop_item;
+	int drop_place;
+	bool drop_here;
+	double view_top; // last frame's: where the files were drawn from
+	double place_y[32];
+
 	// --pick: choosing a file (pictures only), or a folder
 	bool pick, pick_images, pick_folder;
 	int status;
@@ -538,15 +551,20 @@ static bool clipped(struct app *app, const char *name) {
 	return false;
 }
 
-static void start_job(struct app *app, char *const *paths, size_t len, bool move) {
+static void start_job_into(struct app *app, char *const *paths, size_t len, const char *dest,
+		bool move) {
 	if (app->job) {
 		toast(app, "%s", "Still busy with the last one");
 		return;
 	}
-	app->job = ops_job_start(app->ui, paths, len, app->folder.path, move);
+	app->job = ops_job_start(app->ui, paths, len, dest, move);
 	if (!app->job) {
 		toast(app, "%s", "Can't start copying");
 	}
+}
+
+static void start_job(struct app *app, char *const *paths, size_t len, bool move) {
+	start_job_into(app, paths, len, app->folder.path, move);
 }
 
 static void paste(struct app *app) {
@@ -699,10 +717,15 @@ static void click_item(struct app *app, size_t i) {
 	} else if (!app->selected[app->shown[i]]) {
 		select_only(app, i);
 	} else {
+		// one of several selected: they stay for a drag, a click picks it alone
 		app->cursor = i;
 		app->has_cursor = true;
 	}
+	app->press_narrow = !(mods & (FUI_CTRL | FUI_SHIFT)) && selected_count(app) > 1;
+	app->press_item = (long)i + 1;
+	fui_pointer(app->ui, &app->press_x, &app->press_y);
 	if (fui_click_count(app->ui) == 2) {
+		app->press_item = 0;
 		open_file(app, i);
 	}
 }
@@ -749,6 +772,191 @@ static void scroll_to(struct app *app, size_t i) {
 		app->scroll = top;
 	} else if (y + h > app->scroll + view_h) {
 		app->scroll = y + h - view_h + 8;
+	}
+}
+
+// ---- drag and drop ----
+
+static void file_icon(struct app *app, const struct file *f, double x, double y, double size);
+
+// a drag's icon: the first file's, how many on a badge
+static void drag_icon(struct fui *ui, void *data) {
+	struct app *app = data;
+	size_t first = 0, n = 0;
+	for (size_t i = 0; i < app->shown_len; i++) {
+		if (app->selected[app->shown[i]]) {
+			first = n ? first : i;
+			n++;
+		}
+	}
+	if (!n) {
+		return;
+	}
+	file_icon(app, file_at(app, first), 16, 16, 64);
+	if (n > 1) {
+		char count[16];
+		snprintf(count, sizeof(count), "%zu", n);
+		double w = fmax(22, fui_text_width(ui, count, F_HEAD) + 12);
+		fui_fill_rounded(ui, 82 - w / 2, 8, w, 22, 11, 0xff3b30ff);
+		fui_text(ui, 82, 11, count, F_HEAD, 0xffffffff, FUI_CENTER, 0);
+	}
+}
+
+// a press on a file moved far enough: the selection dragged. let go
+// without: a click on one of several picks just it
+static void drag_check(struct app *app) {
+	struct fui *ui = app->ui;
+	if (!app->press_item) {
+		return;
+	}
+	size_t i = (size_t)(app->press_item - 1);
+	if (!fui_button_held(ui)) {
+		if (app->press_narrow && i < app->shown_len) {
+			select_only(app, i);
+		}
+		app->press_item = 0;
+		return;
+	}
+	double px, py;
+	fui_pointer(ui, &px, &py);
+	if (app->renaming || app->pick || hypot(px - app->press_x, py - app->press_y) < 6) {
+		return;
+	}
+	app->press_item = 0;
+	size_t len;
+	char **paths = selected_paths(app, &len);
+	if (len) {
+		fui_drag_files(ui, paths, len, 96, 96, drag_icon, app);
+	}
+	free_paths(paths, len);
+}
+
+// what a drop at x, y goes into: a folder shown, a place in the sidebar,
+// else the folder open. false for nowhere (a chooser takes nothing)
+static bool target_at(struct app *app, double x, double y, char *dir, size_t size, bool *trash) {
+	*trash = false;
+	app->drop_item = 0;
+	app->drop_place = -1;
+	app->drop_here = false;
+	if (app->pick) {
+		return false;
+	}
+	if (x < SIDEBAR_W) {
+		for (int i = 0; i < app->places_len; i++) {
+			if (y >= app->place_y[i] && y < app->place_y[i] + 28 && x >= 10) {
+				*trash = app->places[i].icon == PLACE_TRASH;
+				snprintf(dir, size, "%s", app->places[i].path);
+				app->drop_place = i;
+				return true;
+			}
+		}
+		return false;
+	}
+	if (y < VIEW_TOP || y >= VIEW_BOTTOM) {
+		return false;
+	}
+	for (size_t i = 0; i < app->shown_len; i++) {
+		const struct file *f = file_at(app, i);
+		double bx, by, bw, bh;
+		item_box(app, i, &bx, &by, &bw, &bh);
+		by += app->view_top;
+		bool on;
+		if (app->list_view) {
+			on = x >= bx && x < bx + bw && y >= by && y < by + bh;
+		} else {
+			// the icon and its name, like a click
+			double ix = bx + (bw - ICON) / 2, iy = by + 6;
+			on = (x >= ix - 8 && x < ix + ICON + 8 && y >= iy - 6 && y < iy + ICON + 4)
+				|| (x >= bx + 4 && x < bx + bw - 4 && y >= iy + ICON + 7 && y < iy + ICON + 43);
+		}
+		if (on && f->kind == KIND_FOLDER) {
+			path_of(app, f->name, dir, size);
+			app->drop_item = (long)i + 1;
+			return true;
+		}
+	}
+	*trash = in_trash(app);
+	snprintf(dir, size, "%s", app->folder.path);
+	app->drop_here = true;
+	return true;
+}
+
+// a drop into dir: moved to the trash, moved on the same drive, else
+// copied (ctrl: copied anyway). nothing for a folder onto itself or files
+// where they are
+static enum fui_dnd_action drop_action(struct app *app, const char *dir, bool trash) {
+	if (access(dir, W_OK) < 0) {
+		return FUI_DND_NONE;
+	}
+	if (trash) {
+		return FUI_DND_MOVE;
+	}
+	// whose files, from where: read off the drag itself (another window's,
+	// another app's), else not known yet
+	size_t len;
+	char **files = fui_dnd_files(app->ui, &len);
+	if (!files || !len) {
+		return FUI_DND_COPY;
+	}
+	bool all_here = true;
+	size_t dl = strlen(dir);
+	for (size_t i = 0; i < len; i++) {
+		const char *p = files[i];
+		size_t pl = strlen(p);
+		if (!strncmp(dir, p, pl) && (dir[pl] == '/' || !dir[pl])) {
+			return FUI_DND_NONE; // into itself
+		}
+		const char *slash = strrchr(p, '/');
+		size_t parent = slash ? (size_t)(slash - p) : 0;
+		all_here &= parent == dl ? !strncmp(p, dir, dl) : (parent == 0 && !strcmp(dir, "/"));
+	}
+	if (all_here) {
+		return FUI_DND_NONE;
+	}
+	if (fui_mods(app->ui) & FUI_CTRL) {
+		return FUI_DND_COPY;
+	}
+	struct stat a, b;
+	bool same_drive = stat(dir, &a) == 0 && stat(files[0], &b) == 0 && a.st_dev == b.st_dev;
+	return same_drive ? FUI_DND_MOVE : FUI_DND_COPY;
+}
+
+// a drag over the window: where it'd go lit, what it'd do said. a drop:
+// done
+static void dnd(struct app *app) {
+	struct fui *ui = app->ui;
+	char dir[PATH_MAX];
+	bool trash;
+	size_t len;
+	enum fui_dnd_action action;
+	double x, y;
+	char **paths = fui_dnd_dropped(ui, &len, &action, &x, &y);
+	if (paths) {
+		if (target_at(app, x, y, dir, sizeof(dir), &trash) && action != FUI_DND_NONE) {
+			if (trash) {
+				for (size_t i = 0; i < len; i++) {
+					const char *error;
+					if (!ops_trash(paths[i], &error)) {
+						toast(app, "Can't move it to the trash: %s", error);
+					}
+				}
+				relist(app);
+			} else {
+				start_job_into(app, paths, len, dir, action == FUI_DND_MOVE);
+			}
+		}
+		app->drop_item = 0;
+		app->drop_place = -1;
+		app->drop_here = false;
+		return;
+	}
+	if (fui_dnd_over(ui, &x, &y)) {
+		bool there = target_at(app, x, y, dir, sizeof(dir), &trash);
+		fui_dnd_accept(ui, there ? drop_action(app, dir, trash) : FUI_DND_NONE);
+	} else {
+		app->drop_item = 0;
+		app->drop_place = -1;
+		app->drop_here = false;
 	}
 }
 
@@ -1025,6 +1233,10 @@ static void sidebar(struct app *app) {
 		}
 		bool here = !strcmp(app->folder.path, p->path);
 		bool hover = fui_hover(ui, x, y, w, 28);
+		app->place_y[i] = y;
+		if (app->drop_place == i) {
+			fui_fill_rounded(ui, x, y, w, 28, 7, 0xff7a2a66);
+		}
 		double lit = fui_ease(ui, fui_id(p->path, 3), hover && !here ? 1 : 0, 20);
 		if (here) {
 			fui_fill_rounded(ui, x, y, w, 28, 7, 0xffffff26);
@@ -1154,7 +1366,14 @@ static void icon_view(struct app *app, double top) {
 		cairo_t *cr = fui_cairo(ui);
 		cairo_push_group(cr);
 		double ix = x + (cw - ICON) / 2, iy = y + 6;
-		if (sel) {
+		if (app->drop_item == (long)i + 1) {
+			// what a drop goes into
+			fui_fill_rounded(ui, ix - 7, iy - 5, ICON + 14, ICON + 10, 8, 0xff7a2a59);
+			fui_rounded(ui, ix - 6, iy - 4, ICON + 12, ICON + 8, 7);
+			fui_color(ui, ACCENT);
+			cairo_set_line_width(fui_cairo(ui), 2);
+			cairo_stroke(fui_cairo(ui));
+		} else if (sel) {
 			fui_fill_rounded(ui, ix - 7, iy - 5, ICON + 14, ICON + 10, 8, 0xffffff1c);
 		}
 		file_icon(app, f, ix, iy, ICON);
@@ -1259,7 +1478,13 @@ static void list_view(struct app *app, double top) {
 		bool sel = app->selected[app->shown[i]];
 		bool dim = clipped(app, f->name) || (app->pick && f->kind != KIND_FOLDER
 			&& !pickable(app, f));
-		if (sel) {
+		if (app->drop_item == (long)i + 1) {
+			fui_fill_rounded(ui, x, y, rw, h, 6, 0xff7a2a59);
+			fui_rounded(ui, x + 1, y + 1, rw - 2, h - 2, 5);
+			fui_color(ui, ACCENT);
+			cairo_set_line_width(fui_cairo(ui), 2);
+			cairo_stroke(fui_cairo(ui));
+		} else if (sel) {
 			fui_fill_rounded(ui, x, y, rw, h, 6, ACCENT);
 		} else if (i % 2) {
 			fui_fill_rounded(ui, x, y, rw, h, 6, 0xffffff06);
@@ -1359,6 +1584,7 @@ static void view(struct app *app) {
 	app->scroll = fmax(0, fmin(app->scroll, fmax(most, 0)));
 	double eased = fui_ease(ui, fui_id("scroll", 0), app->scroll, 26);
 	double top = VIEW_TOP - eased;
+	app->view_top = top;
 	cairo_save(cr);
 	cairo_rectangle(cr, VIEW_X, VIEW_TOP, VIEW_W, view_h);
 	cairo_clip(cr);
@@ -1374,6 +1600,13 @@ static void view(struct app *app) {
 	}
 	if (app->banding) {
 		band(app, top);
+	}
+	if (app->drop_here) {
+		// the folder open is where a drop goes
+		fui_rounded(ui, VIEW_X + 4, VIEW_TOP + 2, VIEW_W - 8, view_h - 4, 10);
+		fui_color(ui, 0xff7a2acc);
+		cairo_set_line_width(cr, 2);
+		cairo_stroke(cr);
 	}
 	cairo_restore(cr);
 	// what's left of a click in the view: the empty space between files
@@ -1689,9 +1922,11 @@ static void frame(struct fui *ui, void *data) {
 		keys(app);
 		typeahead(app);
 	}
+	dnd(app);
 	sidebar(app);
 	toolbar(app);
 	view(app);
+	drag_check(app);
 	status_bar(app);
 	menus(app);
 	if (question) {
@@ -1738,7 +1973,7 @@ static void usage(void) {
 
 int main(int argc, char **argv) {
 	struct app app = {.status = 0, .icon = ICON_DEFAULT, .icon_want = ICON_DEFAULT,
-		.row = ROW_DEFAULT, .row_want = ROW_DEFAULT};
+		.row = ROW_DEFAULT, .row_want = ROW_DEFAULT, .drop_place = -1};
 	const char *start = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--pick")) {

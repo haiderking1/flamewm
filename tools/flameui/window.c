@@ -38,7 +38,7 @@ static void buffer_release(void *data, struct wl_buffer *buffer) {
 
 static const struct wl_buffer_listener buffer_listener = {buffer_release};
 
-static void buffer_free(struct fui_buffer *b) {
+void fui_buffer_free(struct fui_buffer *b) {
 	if (b->buffer) {
 		wl_buffer_destroy(b->buffer);
 	}
@@ -48,8 +48,8 @@ static void buffer_free(struct fui_buffer *b) {
 	*b = (struct fui_buffer){0};
 }
 
-static bool buffer_make(struct fui *ui, struct fui_buffer *b, int width, int height) {
-	buffer_free(b);
+bool fui_buffer_make(struct fui *ui, struct fui_buffer *b, int width, int height) {
+	fui_buffer_free(b);
 	int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
 	size_t size = (size_t)stride * (size_t)height;
 	int fd = memfd_create("flameui", MFD_CLOEXEC);
@@ -90,7 +90,7 @@ static struct fui_buffer *buffer_get(struct fui *ui) {
 		if (b->buffer && b->width == width && b->height == height) {
 			return b;
 		}
-		return buffer_make(ui, b, width, height) ? b : NULL;
+		return fui_buffer_make(ui, b, width, height) ? b : NULL;
 	}
 	return NULL;
 }
@@ -302,6 +302,7 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 		ui->last_press_x = ui->mx;
 		ui->last_press_y = ui->my;
 		ui->pressed = true;
+		ui->press_serial = serial;
 	} else {
 		ui->released = true;
 	}
@@ -502,6 +503,9 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wp_cursor_shape_manager_v1_interface.name)) {
 		ui->cursor_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
+		ui->data_manager = wl_registry_bind(registry, name, &wl_data_device_manager_interface,
+			version < 3 ? version : 3);
 	} else if (!strcmp(interface, flame_eyecandy_manager_v1_interface.name)) {
 		ui->eyecandy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface, 1);
 	}
@@ -555,6 +559,7 @@ struct fui *fui_create(const struct fui_config *config) {
 	if (ui->seat) {
 		wl_seat_add_listener(ui->seat, &seat_listener, ui);
 	}
+	fui_dnd_init(ui);
 	ui->surface = wl_compositor_create_surface(ui->compositor);
 	if (ui->fractional_manager && ui->viewporter) {
 		ui->fractional = wp_fractional_scale_manager_v1_get_fractional_scale(
@@ -677,8 +682,9 @@ int fui_run(struct fui *ui) {
 
 void fui_destroy(struct fui *ui) {
 	fui_thumbs_free(ui); // its threads wake the window: gone before it is
+	fui_dnd_finish(ui);
 	for (int i = 0; i < 2; i++) {
-		buffer_free(&ui->buffers[i]);
+		fui_buffer_free(&ui->buffers[i]);
 	}
 	fui_fonts_free(ui);
 	if (ui->xkb_state) {

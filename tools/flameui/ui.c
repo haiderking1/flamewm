@@ -80,6 +80,7 @@ void fui_frame_end(struct fui *ui) {
 	ui->released = false;
 	ui->scroll = 0;
 	ui->keys_len = 0;
+	fui_dnd_frame_end(ui); // a drop's files were the app's this frame
 	if (!ui->button_down) {
 		ui->active = 0;
 	}
