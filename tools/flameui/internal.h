@@ -153,6 +153,25 @@ struct fui {
 	char **peeked;
 	size_t peeked_len;
 	bool peeked_ready;
+	// the clipboard: what's on it (anyone's), ours if it's ours, a paste
+	// being read, what a paste got for the app this frame
+	struct wl_data_offer *clip_offer;
+	struct wl_data_source *clip_source;
+	char *clip_uris, *clip_gnome, *clip_plain;
+	char **clip_paths;
+	size_t clip_paths_len;
+	bool clip_cut;
+	int paste_fd;
+	char *paste_buf;
+	size_t paste_len;
+	uint64_t paste_field; // a field's paste, 0: files
+	bool paste_gnome;
+	char **pasted;
+	size_t pasted_len;
+	bool pasted_ready, pasted_cut;
+	char *pasted_text;
+	bool pasted_text_seen;
+	uint32_t input_serial; // the last key or button press: the clipboard's set off it
 	struct wl_data_source *drag_source;
 	struct wl_surface *drag_icon;
 	struct fui_buffer drag_buffer;

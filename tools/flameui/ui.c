@@ -146,6 +146,37 @@ bool fui_clicked(struct fui *ui, double x, double y, double w, double h) {
 	return false;
 }
 
+// a focused field's clipboard keys: ctrl+v asks for the clipboard's text
+// (it comes a frame or so later), ctrl+c copies what it says. true when k
+// was one of them
+static bool clipboard_key(struct fui *ui, uint64_t id, const struct fui_key *k,
+		const char *text) {
+	if (k->mods != FUI_CTRL) {
+		return false;
+	}
+	if (xkb_keysym_to_lower(k->sym) == XKB_KEY_v) {
+		fui_paste_text(ui, id);
+		return true;
+	}
+	if (xkb_keysym_to_lower(k->sym) == XKB_KEY_c) {
+		fui_copy_text(ui, text);
+		return true;
+	}
+	return false;
+}
+
+// the clipboard's text, there for field id now: it goes in once
+static void take_paste(struct fui *ui, uint64_t id, char *text, int size) {
+	char *pasted = fui_pasted_text(ui, id);
+	if (!pasted) {
+		return;
+	}
+	size_t len = strlen(text);
+	snprintf(text + len, (size_t)size - len, "%s", pasted);
+	free(ui->pasted_text);
+	ui->pasted_text = NULL;
+}
+
 // a key that types something: not a control character (tab, ctrl+f...)
 static bool typable(const struct fui_key *k) {
 	unsigned char c = (unsigned char)k->text[0];
@@ -510,9 +541,12 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 		committed = true; // clicked away: kept
 	}
 	if (focused) {
+		take_paste(ui, id, text, size);
 		for (int i = 0; i < ui->keys_len && !committed; i++) {
 			const struct fui_key *k = &ui->keys[i];
-			if (k->sym == XKB_KEY_Return || k->sym == XKB_KEY_KP_Enter) {
+			if (clipboard_key(ui, id, k, text)) {
+				continue;
+			} else if (k->sym == XKB_KEY_Return || k->sym == XKB_KEY_KP_Enter) {
 				committed = true;
 			} else if (k->sym == XKB_KEY_Escape) {
 				snprintf(text, (size_t)size, "%s", ui->focus_before);
@@ -581,9 +615,14 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 			focused = true;
 		}
 	}
+	if (focused) {
+		take_paste(ui, id, text, size);
+	}
 	for (int i = 0; focused && i < ui->keys_len; i++) {
 		const struct fui_key *k = &ui->keys[i];
-		if (k->sym == XKB_KEY_Escape) {
+		if (clipboard_key(ui, id, k, text)) {
+			continue;
+		} else if (k->sym == XKB_KEY_Escape) {
 			// the search first, then the field
 			if (*text) {
 				text[0] = '\0';

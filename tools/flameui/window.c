@@ -303,6 +303,7 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 		ui->last_press_y = ui->my;
 		ui->pressed = true;
 		ui->press_serial = serial;
+		ui->input_serial = serial;
 	} else {
 		ui->released = true;
 	}
@@ -416,6 +417,9 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
 	struct fui *ui = data;
 	if (!ui->xkb_state) {
 		return;
+	}
+	if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		ui->input_serial = serial;
 	}
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED) {
 		if (ui->repeat_code == key) {
