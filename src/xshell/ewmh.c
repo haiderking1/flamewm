@@ -21,7 +21,6 @@ static const char *const atom_names[EWMH_ATOMS] = {
 	[NET_WM_STATE] = "_NET_WM_STATE",
 	[NET_WM_STATE_FULLSCREEN] = "_NET_WM_STATE_FULLSCREEN",
 	[NET_WM_STATE_FOCUSED] = "_NET_WM_STATE_FOCUSED",
-	[NET_WM_STATE_HIDDEN] = "_NET_WM_STATE_HIDDEN",
 	[NET_WM_STATE_MAXIMIZED_VERT] = "_NET_WM_STATE_MAXIMIZED_VERT",
 	[NET_WM_STATE_MAXIMIZED_HORZ] = "_NET_WM_STATE_MAXIMIZED_HORZ",
 	[NET_FRAME_EXTENTS] = "_NET_FRAME_EXTENTS",
@@ -45,8 +44,7 @@ static const char *const window_types[] = {
 enum {
 	STATE_FULLSCREEN = 1 << 0,
 	STATE_FOCUSED = 1 << 1,
-	STATE_HIDDEN = 1 << 2,
-	STATE_MAXIMIZED = 1 << 3,
+	STATE_MAXIMIZED = 1 << 2,
 };
 
 static uint32_t atom(struct flame_xshell *xshell, enum ewmh_atom which) {
@@ -162,23 +160,20 @@ static uint32_t state_of(struct flame_xshell *xshell, struct flame_xwindow *wind
 	if (desktop->focused == view) {
 		bits |= STATE_FOCUSED;
 	}
-	if (view->workspace != desktop->active) {
-		bits |= STATE_HIDDEN;
-	}
+	// another workspace isn't _NET_WM_STATE_HIDDEN: that's minimized, and
+	// chromium (steam, discord, browsers) stops drawing and drops its
+	// frames on it, back on the workspace it shows white till it redraws
 	return bits;
 }
 
 static void write_state(struct flame_xshell *xshell, struct xs_window *x, uint32_t bits) {
-	uint32_t atoms[5];
+	uint32_t atoms[4];
 	uint32_t n = 0;
 	if (bits & STATE_FULLSCREEN) {
 		atoms[n++] = atom(xshell, NET_WM_STATE_FULLSCREEN);
 	}
 	if (bits & STATE_FOCUSED) {
 		atoms[n++] = atom(xshell, NET_WM_STATE_FOCUSED);
-	}
-	if (bits & STATE_HIDDEN) {
-		atoms[n++] = atom(xshell, NET_WM_STATE_HIDDEN);
 	}
 	if (bits & STATE_MAXIMIZED) {
 		atoms[n++] = atom(xshell, NET_WM_STATE_MAXIMIZED_VERT);
