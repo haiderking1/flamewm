@@ -42,6 +42,9 @@ struct flame_element {
 	float color[4]; // rects, premultiplied
 	// glass, lengths in layout units scaled like the box
 	struct flame_glass_style glass;
+	// glass of an app's: its surface. a surface's panes frost what's behind
+	// the surface, not each other (see pass_glass_group). NULL for flame's own
+	const void *glass_group;
 
 	struct wlr_surface *surface; // surfaces
 	struct wlr_texture *texture;

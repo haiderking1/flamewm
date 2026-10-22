@@ -143,10 +143,12 @@ static const char blur_up_src[] =
 	"}\n";
 
 // the pane: v_texcoord is the buffer pixel. a rounded box by its distance
-// field, the blur behind it bent outward at the rim (what's just past the
-// edge shows in it, like light through a lens's edge), made more vivid,
-// tinted, and lit along the rim: a bright line with a glow inside it,
-// strongest where it faces the light (top left), a little on the far side
+// field, its rim a lens: a lip refraction * 2 wide that pulls what's behind
+// in from further inside, more the nearer the edge, so lines under it
+// curve along the rim. red bends a little more than blue there. then made
+// more vivid, tinted, and lit: a thin bright edge where it faces the light
+// (top left) and where the light comes out again (bottom right), and the
+// lip a little brighter all around
 static const char glass_src[] =
 	PRECISION
 	"varying vec2 v_texcoord;\n"
@@ -161,6 +163,9 @@ static const char glass_src[] =
 	"uniform float refraction;\n"
 	"uniform float rim;\n"
 	"uniform float alpha;\n"
+	"vec4 behind(vec2 at) {\n"
+	"	return texture2D(tex, clamp((at - reach.xy) / reach.zw, bounds.xy, bounds.zw));\n"
+	"}\n"
 	"void main() {\n"
 	"	vec2 p = v_texcoord;\n"
 	"	vec2 half_size = box.zw * 0.5;\n"
@@ -172,19 +177,25 @@ static const char glass_src[] =
 	"		: (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));\n"
 	"	n *= sign(p - c + 0.0001);\n"
 	"	float depth = max(-d, 0.0);\n"
-	"	float bevel = max(refraction * 2.0, 1.0);\n"
-	"	float bend = 1.0 - clamp(depth / bevel, 0.0, 1.0);\n"
-	"	vec2 at = p + n * refraction * bend * bend;\n"
-	"	vec2 uv = clamp((at - reach.xy) / reach.zw, bounds.xy, bounds.zw);\n"
-	"	vec4 col = texture2D(tex, uv);\n"
+	// how far in from the edge, how much: 1 at the edge, 0 past the lip.
+	// which way it bends: along the box rounded at least as much as the lip
+	// is wide, its corners turn smoothly, no seam where two sides' lips meet
+	"	float lip = max(refraction * 2.0, 1.0);\n"
+	"	float t = 1.0 - clamp(depth / lip, 0.0, 1.0);\n"
+	"	float lr = min(max(r, lip), min(half_size.x, half_size.y));\n"
+	"	vec2 lq = max(abs(p - c) - half_size + lr, 0.0);\n"
+	"	vec2 ln = length(lq) > 0.0 ? normalize(lq) * sign(p - c + 0.0001) : vec2(0.0);\n"
+	"	vec2 pull = -ln * refraction * t * t;\n"
+	"	vec4 col = behind(p + pull);\n"
+	"	col.r = behind(p + pull * 1.08).r;\n"
+	"	col.b = behind(p + pull * 0.92).b;\n"
 	"	float luma = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
 	"	col.rgb = clamp(mix(vec3(luma), col.rgb, saturation), 0.0, 1.0) * col.a;\n"
 	"	col = tint + col * (1.0 - tint.a);\n"
-	"	float line = 1.0 - smoothstep(0.0, rim, depth);\n"
-	"	float glow = 1.0 - smoothstep(0.0, rim * 8.0, depth);\n"
+	"	float line = 1.0 - smoothstep(0.0, rim * 2.0, depth);\n"
 	"	float facing = dot(n, normalize(vec2(-0.6, -0.8)));\n"
-	"	float side = 0.25 + 0.75 * max(facing, 0.0) + 0.45 * max(-facing, 0.0);\n"
-	"	float light = edge * side * (line * 0.9 + glow * glow * 0.3);\n"
+	"	float lit = 0.12 + 0.88 * facing * facing;\n"
+	"	float light = edge * (line * lit * 0.85 + t * t * t * lit * 0.2);\n"
 	"	col.rgb = min(col.rgb + vec3(light) * col.a, vec3(col.a));\n"
 	"	gl_FragColor = col * clamp(0.5 - d, 0.0, 1.0) * alpha;\n"
 	"}\n";

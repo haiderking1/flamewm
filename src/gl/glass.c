@@ -100,22 +100,23 @@ void gl_blur_finish(struct gl_blur *blur) {
 	blur->copy_width = blur->copy_height = 0;
 }
 
-// a texture, the part of it in use, and how big it's allocated
+// a texture, the part of it in use (from x, y) and how big it's allocated
 struct level {
 	unsigned texture;
-	int width, height, alloc_width, alloc_height;
+	int x, y, width, height, alloc_width, alloc_height;
 };
 
 static struct level level_of(const struct gl_blur *blur, int i, int width, int height) {
-	return (struct level){blur->texture[i], width, height, blur->width[i], blur->height[i]};
+	return (struct level){blur->texture[i], 0, 0, width, height, blur->width[i],
+		blur->height[i]};
 }
 
 // the used part of a level in its texture's coords, half a texel in:
 // nothing outside it gets sampled
 static void set_bounds(const struct gl_program *program, struct level level) {
 	float tw = (float)level.alloc_width, th = (float)level.alloc_height;
-	fglUniform4f(program->bounds, 0.5f / tw, 0.5f / th, (level.width - 0.5f) / tw,
-		(level.height - 0.5f) / th);
+	fglUniform4f(program->bounds, (level.x + 0.5f) / tw, (level.y + 0.5f) / th,
+		(level.x + level.width - 0.5f) / tw, (level.y + level.height - 0.5f) / th);
 }
 
 // one level into the next, down (bigger to smaller) or up
@@ -132,7 +133,8 @@ static void blur_step(const struct gl_program *program, struct level from, unsig
 	float proj[9];
 	gl_target_proj(proj, to_w, to_h);
 	gl_box_proj(proj, program->proj, (struct wlr_box){0, 0, to_w, to_h});
-	gl_tex_proj(program->tex_proj, WL_OUTPUT_TRANSFORM_NORMAL, (struct wlr_fbox){0, 0,
+	gl_tex_proj(program->tex_proj, WL_OUTPUT_TRANSFORM_NORMAL, (struct wlr_fbox){
+		(double)from.x / from.alloc_width, (double)from.y / from.alloc_height,
 		(double)from.width / from.alloc_width, (double)from.height / from.alloc_height});
 	gl_draw_box((struct wlr_box){0, 0, to_w, to_h}, NULL, program->pos);
 }
@@ -178,16 +180,27 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 			return;
 		}
 	}
-	copy_ready(blur, w[0], h[0]);
-
-	// what's behind it, as drawn so far: the top row of reach is row 0
-	fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
-	fglActiveTexture(GL_TEXTURE0);
-	fglBindTexture(GL_TEXTURE_2D, blur->copy);
-	fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, reach.x, reach.y, reach.width, reach.height);
+	// what's behind it: the backdrop kept, or as drawn so far, copied out with
+	// the top row of reach as row 0
+	struct level behind = {blur->copy, 0, 0, w[0], h[0], 0, 0};
+	struct wlr_box kept;
+	if (wlr_box_intersection(&kept, &pass->backdrop, &reach) && wlr_box_equal(&kept, &reach)) {
+		behind.x = reach.x - pass->backdrop.x;
+		behind.y = reach.y - pass->backdrop.y;
+	} else {
+		// it reads past what's kept: the copy's about to be another one
+		pass->backdrop = (struct wlr_box){0};
+		copy_ready(blur, w[0], h[0]);
+		fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
+		fglActiveTexture(GL_TEXTURE0);
+		fglBindTexture(GL_TEXTURE_2D, blur->copy);
+		fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, reach.x, reach.y, reach.width,
+			reach.height);
+	}
+	behind.alloc_width = blur->copy_width;
+	behind.alloc_height = blur->copy_height;
 
 	// down from the copy, back up into level 0
-	struct level behind = {blur->copy, w[0], h[0], blur->copy_width, blur->copy_height};
 	fglDisable(GL_BLEND);
 	for (int i = 0; i < passes; i++) {
 		struct level from = i == 0 ? behind : level_of(blur, i, w[i], h[i]);
@@ -207,7 +220,8 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	fglUseProgram(program->program);
 	fglBindTexture(GL_TEXTURE_2D, blurred.texture);
 	fglUniform1i(program->tex, 0);
-	fglUniform4f(program->reach, reach.x, reach.y, blurred.alloc_width, blurred.alloc_height);
+	fglUniform4f(program->reach, reach.x - blurred.x, reach.y - blurred.y, blurred.alloc_width,
+		blurred.alloc_height);
 	set_bounds(program, blurred);
 	fglUniform4f(program->box, box.x, box.y, box.width, box.height);
 	fglUniform1f(program->radius, options->radius);
@@ -224,4 +238,24 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 		(struct wlr_fbox){box.x, box.y, box.width, box.height});
 	gl_draw_box(box, options->clip, program->pos);
 	fglBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area) {
+	pass->backdrop = (struct wlr_box){0};
+	struct wlr_box buffer = {0, 0, pass->width, pass->height};
+	if (!pass->gl || !wlr_box_intersection(&area, &area, &buffer)) {
+		return;
+	}
+	struct gl_blur *blur = &pass->gl->blur;
+	copy_ready(blur, area.width, area.height);
+	fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
+	fglActiveTexture(GL_TEXTURE0);
+	fglBindTexture(GL_TEXTURE_2D, blur->copy);
+	fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, area.x, area.y, area.width, area.height);
+	fglBindTexture(GL_TEXTURE_2D, 0);
+	pass->backdrop = area;
+}
+
+void gl_pass_backdrop_end(struct gl_pass *pass) {
+	pass->backdrop = (struct wlr_box){0};
 }

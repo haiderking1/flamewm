@@ -171,6 +171,7 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 		pane->box = pane_box;
 		pane->clip = pane_clip;
 		pane->glass = panes[i].style;
+		pane->glass_group = surface;
 		pane->glass.radius *= collect->t.ax;
 		pane->glass.blur *= collect->t.ax;
 		pane->glass.refraction *= collect->t.ax;

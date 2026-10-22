@@ -3,6 +3,8 @@
 #include <wlr/render/pass.h>
 #include <wlr/render/wlr_renderer.h>
 
+#include "render/coords.h"
+#include "render/elements.h"
 #include "render/render.h"
 #include "scene/scene.h"
 
@@ -67,6 +69,41 @@ void pass_glass(struct flame_pass *pass, const struct gl_glass_options *options)
 		.color = {t[0] * a, t[1] * a, t[2] * a, t[3] * a},
 		.clip = options->clip,
 	});
+}
+
+static const void *group_of(const struct flame_element_list *list, size_t i) {
+	const struct flame_element *element = &list->data[i];
+	return element->type == FLAME_ELEMENT_GLASS ? element->glass_group : NULL;
+}
+
+void pass_glass_group(struct flame_pass *pass, const struct flame_render_target *target,
+		const struct flame_element_list *list, size_t i) {
+	if (pass->wlr) {
+		return;
+	}
+	const void *group = group_of(list, i);
+	if (!group) {
+		gl_pass_backdrop_end(&pass->gl);
+		return;
+	}
+	if (i > 0 && group_of(list, i - 1) == group) {
+		return; // the same surface's, already kept
+	}
+	// everything its panes read: their boxes and around them, as
+	// gl_pass_glass works it out
+	int x1 = INT32_MAX, y1 = INT32_MAX, x2 = INT32_MIN, y2 = INT32_MIN;
+	for (size_t j = i; j < list->len && group_of(list, j) == group; j++) {
+		const struct flame_element *element = &list->data[j];
+		struct wlr_box box = element->box;
+		target_box_to_buffer(target, &box);
+		int grow = gl_glass_reach((float)element->glass.blur * target->scale,
+			(float)element->glass.refraction * target->scale);
+		x1 = box.x - grow < x1 ? box.x - grow : x1;
+		y1 = box.y - grow < y1 ? box.y - grow : y1;
+		x2 = box.x + box.width + grow > x2 ? box.x + box.width + grow : x2;
+		y2 = box.y + box.height + grow > y2 ? box.y + box.height + grow : y2;
+	}
+	gl_pass_backdrop(&pass->gl, (struct wlr_box){x1, y1, x2 - x1, y2 - y1});
 }
 
 void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,
