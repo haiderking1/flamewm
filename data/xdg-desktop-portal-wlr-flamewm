@@ -1,7 +1,9 @@
-# xdg-desktop-portal-wlr on flame (XDG_CURRENT_DESKTOP=flamewm): sharing
-# asks which screen or window in a rofi list, windows by their titles.
-# make install puts this in /etc/xdg/xdg-desktop-portal-wlr/flamewm, a copy in
+# xdg-desktop-portal-wlr on flame (XDG_CURRENT_DESKTOP=flamewm): what to share
+# is picked in flame's own picker, on the windows themselves.
+# flamectl prints the pick the way the portal reads it ("Monitor: NAME",
+# "Window: ID"), nothing when cancelled. make install puts this in
+# /etc/xdg/xdg-desktop-portal-wlr/flamewm, a copy in
 # ~/.config/xdg-desktop-portal-wlr/flamewm wins over it
 [screencast]
-chooser_type=dmenu
-chooser_cmd=rofi -dmenu -i -p share
+chooser_type=simple
+chooser_cmd=flamectl share-pick

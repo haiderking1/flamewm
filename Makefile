@@ -10,7 +10,7 @@ CTL     := $(BUILD)/flamectl
 CC := clang
 
 # every lib here has to be in deps.md too
-PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1 egl libdrm xshmfence lua5.4
+PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1 egl libdrm xshmfence lua5.4 pangocairo
 
 # clean shouldn't need any deps installed
 ifeq ($(filter clean,$(MAKECMDGOALS)),)

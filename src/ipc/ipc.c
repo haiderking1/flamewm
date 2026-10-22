@@ -21,6 +21,7 @@
 #define MAX_PENDING (1 << 20)
 
 static void client_free(struct flame_ipc_client *client) {
+	wl_signal_emit_mutable(&client->events.destroy, client);
 	wl_event_source_remove(client->source);
 	close(client->fd);
 	wl_list_remove(&client->link);
@@ -135,6 +136,7 @@ static int handle_accept(int fd, uint32_t mask, void *data) {
 	client->fd = client_fd;
 	strbuf_init(&client->in);
 	strbuf_init(&client->out);
+	wl_signal_init(&client->events.destroy);
 	client->source = wl_event_loop_add_fd(ipc->server->loop, client_fd,
 		WL_EVENT_READABLE, handle_client, client);
 	if (!client->source) {

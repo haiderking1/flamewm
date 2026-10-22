@@ -24,6 +24,10 @@ struct flame_ipc_client {
 	bool subscribed;
 	// broken or too far behind, freed once nobody is using it anymore
 	bool dead;
+	struct {
+		// it's being freed: whoever owes it an answer lets go
+		struct wl_signal destroy;
+	} events;
 };
 
 struct flame_ipc {

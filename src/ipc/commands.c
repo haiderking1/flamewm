@@ -139,6 +139,12 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 		pointer_command(client, &save);
 		return;
 	}
+	if (!strcmp(name, "share-pick")) {
+		// the answer comes when the user picks, raw for the portal's chooser:
+		// "Monitor: NAME" or "Window: ID", an error when cancelled
+		picker_open(&client->ipc->server->picker, client);
+		return;
+	}
 	if (!strcmp(name, "test")) {
 		// a vt switch where the driver drops the screens: they go and the
 		// keyboards with them, then all of it comes back
