@@ -40,7 +40,6 @@
 
 // a DRI3 pixmap's dmabuf as a wlr_buffer, the fds are its own copies
 static bool grab_honored(const struct flame_xshell *xshell);
-static pid_t view_pid(struct flame_xshell *xshell, struct flame_view *view);
 
 // ---- X's coordinates and flame's ----
 
@@ -1648,7 +1647,7 @@ static void handle_unfocus_idle(void *data) {
 	pid_t pid = xshell->unfocus;
 	xshell->unfocus = 0;
 	struct flame_view *focused = xshell->server->desktop.focused;
-	pid_t now = view_pid(xshell, focused);
+	pid_t now = xshell_view_pid(xshell, focused);
 	if (pid && pid != now) {
 		// out of the app for real: what it held goes (a game's clipped mouse)
 		xserver_break_grabs(xshell->xserver, pid);
@@ -1658,8 +1657,7 @@ static void handle_unfocus_idle(void *data) {
 	}
 }
 
-// the app behind any window, X or wayland (steam's bridged ones), 0 unknown
-static pid_t view_pid(struct flame_xshell *xshell, struct flame_view *view) {
+pid_t xshell_view_pid(struct flame_xshell *xshell, struct flame_view *view) {
 	if (!view) {
 		return 0;
 	}
@@ -1683,7 +1681,7 @@ static bool grab_honored(const struct flame_xshell *xshell) {
 		return false; // a launcher or the like over it has the user
 	}
 	pid_t pid = xserver_pointer_grab_pid(xshell->xserver);
-	return pid && pid == view_pid((struct flame_xshell *)xshell, xshell->server->desktop.focused);
+	return pid && pid == xshell_view_pid((struct flame_xshell *)xshell, xshell->server->desktop.focused);
 }
 
 static void xview_set_activated(struct flame_view *view, bool activated) {
