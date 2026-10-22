@@ -897,8 +897,10 @@ static void render(struct flame_frame *frame, int64_t now) {
 			frame->whole = true;
 		} else if (!schedule->pending) {
 			// a cursor plane change can't ride along an async flip
-			bool tear = !cursor_only && sync_tearing_wanted(&frame->sync, config->allow_tearing,
-				tearing, frame_cursor_dirty(&frame->cursor));
+			// nor a vrr switch: KMS refuses an async flip that changes it
+			bool tear = !cursor_only && !(state.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED)
+				&& sync_tearing_wanted(&frame->sync, config->allow_tearing, tearing,
+					frame_cursor_dirty(&frame->cursor));
 			bool torn = false;
 			drew = commit(frame, &state, kind, tear, &torn);
 			bool vrr_asked = state.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;

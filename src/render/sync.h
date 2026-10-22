@@ -12,9 +12,13 @@
 // a run of refused tearing flips this long and tearing is off for the
 // output till its mode changes or flame comes back from a vt switch
 #define SYNC_TEARING_REFUSALS 8
-// fullscreen has to hold this long before vrr follows it, either way: a
-// window fullscreen for a moment doesn't make the display switch modes
+// fullscreen has to hold this long before vrr follows it on: a window
+// fullscreen for a moment doesn't make the display switch modes
 #define SYNC_VRR_DEBOUNCE_NS 500000000LL
+// and gone this long before it follows it off: a quick look at another
+// workspace and back to the game switches nothing (nvidia takes ~200ms
+// to switch, a hitch every time the game came back)
+#define SYNC_VRR_OFF_DEBOUNCE_NS 20000000000LL
 
 enum sync_vrr_policy {
 	SYNC_VRR_OFF,
