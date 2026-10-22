@@ -7,7 +7,7 @@
 struct flame_desktop;
 struct flame_view;
 
-// raven's rules: one fullscreen window per workspace, covering the whole
+// one fullscreen window per workspace, covering the whole
 // output over black. it only shows up as fullscreen once the client commits
 // the matching size, through the same transaction everything else uses
 

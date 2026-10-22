@@ -7,7 +7,7 @@
 struct wlr_renderer;
 
 // how long the gpu took on our frames, from GL_TIME_ELAPSED queries around
-// each render pass. raven's gpu_time: results are only ever collected once
+// each render pass. results are only ever collected once
 // they're available, nothing waits on the gpu. wlroots has its own timer but
 // it's built on GL timestamps, and nvidia flags those disjoint every frame
 

@@ -13,7 +13,7 @@ struct flame_view;
 // a layout change lands in one frame or not at all. every window keeps
 // showing its old frame, the commit where a client takes its new size gets
 // held, and once everyone is ready (or the deadline hits) all of it is
-// placed and released together. same idea as raven's resize batches
+// placed and released together
 
 // per view bookkeeping, lives inside struct flame_view
 struct flame_view_txn {

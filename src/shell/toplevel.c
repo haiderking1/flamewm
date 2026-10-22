@@ -34,7 +34,7 @@ static bool is_firefox(struct wlr_xdg_toplevel *xdg) {
 
 // firefox's gtk puts its csd shadow margins back after leaving fullscreen
 // even with all four tiled edges set, and those margins show up as a strip.
-// maximized makes gtk drop them for good. raven 57787f2
+// maximized makes gtk drop them for good
 static bool wants_maximized_hint(struct wlr_xdg_toplevel *xdg) {
 	return is_firefox(xdg);
 }

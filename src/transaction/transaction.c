@@ -96,7 +96,7 @@ struct txn_child {
 
 // a held commit's frame callbacks would only fire once we release it, and
 // clients that wait on them (firefox's content) would never draw what we're
-// waiting for. raven df52fc7
+// waiting for
 static void release_pending_callbacks(struct wlr_surface *surface) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
