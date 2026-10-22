@@ -728,6 +728,9 @@ $CTL settings | python3 -I -c \"import json, sys; print('still', json.load(sys.s
 $CTL unset wallpaper > /dev/null; sleep 1.2
 grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
 	"not a jpeg, png or webp it can read" "still True" "none blue"
+# flame's apps keep how they show things in XDG_CONFIG_HOME, the trash in
+# XDG_DATA_HOME, thumbnails in XDG_CACHE_HOME: never the user's
+CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache"
 case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
 mkdir walls
 $CTL set background '#ff0000' > /dev/null; sleep 0.5; grim walls/red.png
@@ -740,9 +743,6 @@ $CTL pointer button left press > /dev/null; $CTL pointer button left release > /
 sleep 0.6
 $CTL settings | python3 -I -c \"import json, sys; print('picked', json.load(sys.stdin)['values']['wallpaper'].split('/')[-1])\"" \
 	"picked blue.png"
-# flamefiles keeps how it shows things in XDG_CONFIG_HOME, the trash in
-# XDG_DATA_HOME: never the user's
-CASE_ENV="XDG_CONFIG_HOME=$WORK/flamefiles/config XDG_DATA_HOME=$WORK/flamefiles/data"
 case_run "flamefiles: super+e opens it, a new folder named, a copy pasted into it, the trash and back" "
 $CTL key Super_L press > /dev/null; $CTL key e press > /dev/null
 $CTL key e release > /dev/null; $CTL key Super_L release > /dev/null
@@ -789,7 +789,23 @@ dbl 614 184
 wait \$pick; echo exit \$?
 echo picked \$(basename \$(cat picked.txt))" "flamefiles-chooser True" "still choosing" "exit 0" \
 	"picked shot.png"
-CASE_ENV=
+case_run "flamefiles: a video's frame and a song's cover for previews, kept in the thumbnail cache" "
+mkdir media; grim -t jpeg cover.jpg
+ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=30:duration=3 -c:v libx264 -pix_fmt yuv420p media/clip.mp4
+ffmpeg -v error -f lavfi -i sine=duration=1 -i cover.jpg -map 0:a -map 1:v -c:a libmp3lame -c:v mjpeg -disposition:v attached_pic media/song.mp3
+ffmpeg -v error -f lavfi -i sine=duration=1 -c:a libmp3lame media/plain.mp3
+export XDG_CACHE_HOME=\$PWD/cache XDG_CONFIG_HOME=\$PWD/config
+$(dirname $CTL)/flamefiles \$PWD/media > /dev/null 2>&1 &
+sleep 3
+python3 -I -c \"
+import hashlib, os, sys
+for name in ['clip.mp4', 'song.mp3', 'plain.mp3']:
+    path = os.path.join(sys.argv[1], 'media', name)
+    uri = 'file://' + path
+    f = os.path.join(sys.argv[1], 'cache/thumbnails/large', hashlib.md5(uri.encode()).hexdigest() + '.png')
+    ok = os.path.exists(f) and ('Thumb::MTime\\0' + str(int(os.stat(path).st_mtime))).encode() in open(f, 'rb').read()
+    print(name, 'kept' if ok else 'none')
+\" \$PWD" "clip.mp4 kept" "song.mp3 kept" "plain.mp3 none"
 case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
 $CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
 $CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
@@ -834,6 +850,7 @@ sleep 0.6
 win squeezed" "found False" "opened 900 600 True" "bigger 1060 640 True" "squeezed 780 480 True"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
+CASE_ENV=
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
 $CTL set border_width 5 > /dev/null
 $CTL set keyboard.layout us,ara > /dev/null

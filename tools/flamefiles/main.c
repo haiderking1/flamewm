@@ -1114,7 +1114,8 @@ static void file_icon(struct app *app, const struct file *f, double x, double y,
 		icon_folder(app->ui, x, y, size, place_of(app, path));
 		return;
 	}
-	if (f->kind == KIND_IMAGE) {
+	// a picture of what's in it: the picture, a video's frame, a song's cover
+	if (f->kind == KIND_IMAGE || f->kind == KIND_VIDEO || f->kind == KIND_AUDIO) {
 		bool failed;
 		// a few sizes only: zooming doesn't read every picture again at every step
 		int want = size <= 24 ? 48 : size <= 48 ? 96 : size <= 96 ? 192 : 384;

@@ -2,10 +2,12 @@
 #define FLAMEUI_INTERNAL_H
 
 #include <pango/pangocairo.h>
+#include <time.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "flameui.h"
+#include "image/image.h"
 
 // flameui on the inside: window.c keeps the wayland side and the input
 // that came in since the last frame, ui.c turns that into frame time state
@@ -146,5 +148,15 @@ void fui_frame_begin(struct fui *ui, cairo_t *cr);
 void fui_frame_end(struct fui *ui);
 void fui_fonts_free(struct fui *ui);
 void fui_thumbs_free(struct fui *ui);
+
+// video.c: a video's (or a song's cover) frame, fit in max_width x
+// max_height. fui_media_name: a name like a video's or a song's
+bool fui_media_name(const char *path);
+bool fui_media_frame(const char *path, int max_width, int max_height, struct image *out);
+// thumbcache.c: the freedesktop thumbnail cache. the size kept for a
+// thumbnail want big (256 or 512), one of path's as it was at mtime
+int fui_cache_size(int want);
+bool fui_cache_read(const char *path, time_t mtime, int size, struct image *out);
+void fui_cache_write(const char *path, time_t mtime, int size, const struct image *thumb);
 
 #endif

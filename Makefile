@@ -69,7 +69,8 @@ UI_PROTOCOLS := $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
 UI_PROTO_NAMES := $(basename $(notdir $(UI_PROTOCOLS)))
 UI_PROTO_HEADERS := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-client-protocol.h)
 UI_PROTO_CODE := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-protocol.c)
-UI_PKGS := wayland-client pangocairo xkbcommon libturbojpeg libpng libwebp
+UI_PKGS := wayland-client pangocairo xkbcommon libturbojpeg libpng libwebp libavformat \
+	libavcodec libswscale libavutil
 
 define ui_protocol
 $(CLIENT_GEN)/$(basename $(notdir $(1)))-client-protocol.h: $(1)
@@ -84,7 +85,7 @@ $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 
 # flame's own apps: flameui, the pictures it reads, its protocols
 FLAMEUI_SRCS := tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c \
-	src/image/image.c
+	tools/flameui/video.c tools/flameui/thumbcache.c src/image/image.c
 FLAMEUI_DEPS := $(FLAMEUI_SRCS) tools/flameui/flameui.h tools/flameui/internal.h \
 	src/image/image.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
 UI_CC = $(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
