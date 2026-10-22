@@ -20,6 +20,8 @@ Xwayland needed, Steam and Proton games included.
   want lights up under the mouse, a glass panel on it, click to share.
   an app asking twice (browsers do) doesn't make you pick twice. flame
   draws everything itself, blur and glass included
+- **its own apps**, on its glass: settings (`super+,`) and a file manager,
+  flamefiles (`super+e`)
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run
@@ -32,7 +34,7 @@ make run        # nested inside your current compositor
 make release    # build-release/flamewm
 make test       # unit tests
 make e2e        # end to end tests on headless flames
-sudo make install  # flamewm, flamectl, and the portal files screen sharing needs
+sudo make install  # flamewm, flamectl, its apps, the portal files screen sharing needs
 ```
 
 `flamewm -c config -s command -d`: a config file, a command to run once
@@ -66,6 +68,7 @@ mod is super.
 | `super+q` / `super+enter` | foot |
 | `super+c` | close window |
 | `super+,` | settings |
+| `super+e` | files |
 | `super+j` / `super+k` | focus next / prev |
 | `super+f` | fullscreen |
 | `super+1..0` | go to workspace |

@@ -145,6 +145,12 @@ bool fui_clicked(struct fui *ui, double x, double y, double w, double h) {
 	return false;
 }
 
+// a key that types something: not a control character (tab, ctrl+f...)
+static bool typable(const struct fui_key *k) {
+	unsigned char c = (unsigned char)k->text[0];
+	return c >= 0x20 && c != 0x7f && !(k->mods & (FUI_CTRL | FUI_ALT | FUI_SUPER));
+}
+
 int fui_click_count(const struct fui *ui) {
 	return ui->click_count;
 }
@@ -181,6 +187,17 @@ bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods) {
 
 bool fui_typing(const struct fui *ui) {
 	return ui->focus != 0;
+}
+
+const char *fui_typed(struct fui *ui) {
+	ui->typed[0] = '\0';
+	for (int i = 0; !ui->focus && i < ui->keys_len; i++) {
+		size_t len = strlen(ui->typed);
+		if (typable(&ui->keys[i]) && len + strlen(ui->keys[i].text) < sizeof(ui->typed)) {
+			strcat(ui->typed, ui->keys[i].text);
+		}
+	}
+	return ui->typed;
 }
 
 void fui_focus(struct fui *ui, uint64_t id, const char *text) {
@@ -474,11 +491,6 @@ static void backspace(char *text) {
 	text[len] = '\0';
 }
 
-// a key that types something: not a control character (tab, ctrl+f...)
-static bool typable(const struct fui_key *k) {
-	unsigned char c = (unsigned char)k->text[0];
-	return c >= 0x20 && c != 0x7f && !(k->mods & (FUI_CTRL | FUI_ALT | FUI_SUPER));
-}
 
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 		int size, const char *placeholder, bool enabled) {
@@ -540,7 +552,7 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 }
 
 bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
-		int size) {
+		int size, bool grab) {
 	const double h = 28;
 	char before[256];
 	snprintf(before, sizeof(before), "%s", text);
@@ -562,7 +574,7 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 		focused = false;
 	}
 	// typing with nothing else taking the keys: that's a search
-	for (int i = 0; i < ui->keys_len && !focused && !ui->focus; i++) {
+	for (int i = 0; grab && i < ui->keys_len && !focused && !ui->focus; i++) {
 		if (typable(&ui->keys[i])) {
 			ui->focus = id;
 			focused = true;

@@ -1,3 +1,4 @@
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,7 @@ struct thumb {
 	struct thumb *queued; // fui_thumbs.queue
 	char *path;
 	int width, height;
+	bool fit; // the whole picture, its longest side width: not cut to cover
 	unsigned generation; // asked for before the last fui_thumbs_forget: not wanted
 	enum thumb_state state; // under lock
 	cairo_surface_t *surface; // set with THUMB_MADE, under lock
@@ -44,12 +46,18 @@ struct fui_thumbs {
 	struct thumb *queue; // asked for, not started, under lock
 };
 
-// the picture cut to cover width x height
-static cairo_surface_t *make(const char *path, int width, int height) {
+// the picture cut to cover width x height, or fit in it whole (never
+// bigger than it is)
+static cairo_surface_t *make(const char *path, int width, int height, bool fit) {
 	struct image image;
 	char why[96];
 	if (!image_load(path, width, height, &image, why, sizeof(why))) {
 		return NULL;
+	}
+	if (fit) {
+		double s = fmin(fmin((double)width / image.width, (double)height / image.height), 1);
+		width = (int)fmax(round(image.width * s), 1);
+		height = (int)fmax(round(image.height * s), 1);
 	}
 	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cairo_surface_t *in = cairo_image_surface_create_for_data((unsigned char *)image.data,
@@ -92,7 +100,7 @@ static void *worker(void *data) {
 		}
 		thumb->state = THUMB_MAKING;
 		pthread_mutex_unlock(&thumbs->lock);
-		cairo_surface_t *surface = make(thumb->path, thumb->width, thumb->height);
+		cairo_surface_t *surface = make(thumb->path, thumb->width, thumb->height, thumb->fit);
 		pthread_mutex_lock(&thumbs->lock);
 		thumb->surface = surface;
 		thumb->state = surface ? THUMB_MADE : THUMB_FAILED;
@@ -156,7 +164,7 @@ static struct fui_thumbs *thumbs_of(struct fui *ui) {
 	return thumbs;
 }
 
-cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int height,
+static cairo_surface_t *get(struct fui *ui, const char *path, int width, int height, bool fit,
 		bool *failed) {
 	*failed = false;
 	struct fui_thumbs *thumbs = thumbs_of(ui);
@@ -167,7 +175,8 @@ cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int heig
 	pthread_mutex_lock(&thumbs->lock);
 	struct thumb **at = &thumbs->thumbs, *thumb = NULL;
 	for (; *at; at = &(*at)->next) {
-		if ((*at)->width == width && (*at)->height == height && !strcmp((*at)->path, path)) {
+		if ((*at)->width == width && (*at)->height == height && (*at)->fit == fit
+				&& !strcmp((*at)->path, path)) {
 			thumb = *at;
 			*at = thumb->next; // to the front: just shown
 			break;
@@ -183,6 +192,7 @@ cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int heig
 		}
 		thumb->width = width;
 		thumb->height = height;
+		thumb->fit = fit;
 		thumbs->len++;
 		enqueue(thumbs, thumb);
 	} else if (thumb->state == THUMB_DROPPED) {
@@ -199,6 +209,15 @@ cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int heig
 	return surface;
 }
 
+
+cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int height,
+		bool *failed) {
+	return get(ui, path, width, height, false, failed);
+}
+
+cairo_surface_t *fui_thumb_fit(struct fui *ui, const char *path, int size, bool *failed) {
+	return get(ui, path, size, size, true, failed);
+}
 
 void fui_thumbs_forget(struct fui *ui) {
 	struct fui_thumbs *thumbs = ui->thumbs;

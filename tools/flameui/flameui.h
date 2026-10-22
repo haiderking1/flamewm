@@ -96,6 +96,8 @@ unsigned fui_mods(const struct fui *ui); // held now
 // any case: ctrl+shift+n is 'n' with FUI_CTRL | FUI_SHIFT
 bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods);
 bool fui_typing(const struct fui *ui); // a field has the keys
+// what was typed this frame (no ctrl, alt or super), "" while a field types
+const char *fui_typed(struct fui *ui);
 // field id has the keys from now on, as if clicked (text: what it says now,
 // escape goes back to it)
 void fui_focus(struct fui *ui, uint64_t id, const char *text);
@@ -151,15 +153,17 @@ bool fui_swatches(struct fui *ui, uint64_t id, double right, double y, const uin
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 	int size, const char *placeholder, bool enabled);
 // a search field, w wide: what's typed is searched as it's typed, true
-// when text changed this frame. typing anywhere with no other field taking
-// the keys types into it, escape clears it
+// when text changed this frame. grab: typing anywhere with no other field
+// taking the keys types into it. escape clears it
 bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
-	int size);
+	int size, bool grab);
 // a picture file's thumbnail (jpeg, png, webp), width x height pixels cut to
 // cover that. worker threads make it, the window redraws when it's there:
 // NULL till then, or when it can't be read (failed). kept a while
 cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int height,
 	bool *failed);
+// the same, the whole picture in its shape, its longest side size pixels
+cairo_surface_t *fui_thumb_fit(struct fui *ui, const char *path, int size, bool *failed);
 // the ones asked for so far and not started aren't wanted (another folder)
 void fui_thumbs_forget(struct fui *ui);
 
