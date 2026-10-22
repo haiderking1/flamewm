@@ -5,6 +5,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include "../flameui/flameui.h"
+#include "browser.h"
 #include "json.h"
 
 // the window's size, what flame made it: read every frame
@@ -129,6 +131,9 @@ struct app {
 	// searching all the pages at once, and how many rows each had last frame
 	char query[64];
 	int matches[8];
+	// the Wallpaper page's folder and thumbnails
+	struct browser browser;
+	bool browsing;
 };
 
 static void refresh(struct app *app) {
@@ -170,7 +175,7 @@ static bool pinned(struct app *app, const char *key) {
 // key to value in flame, kept in our copy right away (flame's answer comes
 // with the next refresh), a refusal shown
 static void set(struct app *app, const char *key, const char *text) {
-	char command[256];
+	char command[PATH_MAX + 128];
 	snprintf(command, sizeof(command), "set %s %s", key, text);
 	char *reply = ipc(command);
 	struct json *answer = reply ? json_parse(reply) : NULL;
@@ -637,9 +642,355 @@ static void page_about(struct page *p) {
 	p->y += 40;
 }
 
+// ---- wallpaper ----
+
+#define THUMB_W 320 // thumbnails' pixels, whatever the tiles: a resize doesn't make them again
+#define THUMB_H 200
+
+static const char *home_dir(void) {
+	const char *home = getenv("HOME");
+	return home && *home ? home : "/";
+}
+
+// where the browser starts: the wallpaper's folder, else ~/walls, ~/Pictures, ~
+static void browse_somewhere(struct app *app) {
+	char dir[PATH_MAX];
+	const char *current = json_str(value(app, "wallpaper"), "");
+	const char *slash = strrchr(current, '/');
+	if (slash && slash > current) {
+		snprintf(dir, sizeof(dir), "%.*s", (int)(slash - current), current);
+		if (browser_open(&app->browser, dir)) {
+			return;
+		}
+	}
+	const char *tries[] = {"walls", "Pictures/Wallpapers", "Pictures", ""};
+	for (size_t i = 0; i < sizeof(tries) / sizeof(tries[0]); i++) {
+		snprintf(dir, sizeof(dir), "%s%s%s", home_dir(), *tries[i] ? "/" : "", tries[i]);
+		if (browser_open(&app->browser, dir)) {
+			return;
+		}
+	}
+}
+
+// a thumbnail (or what stands for it) in a rounded box
+static void picture_in(struct page *p, const char *path, double x, double y, double w, double h,
+		double r) {
+	cairo_t *cr = fui_cairo(p->ui);
+	bool failed = false;
+	cairo_surface_t *thumb = path && *path
+		? browser_thumb(&p->app->browser, path, THUMB_W, THUMB_H, &failed) : NULL;
+	cairo_save(cr);
+	fui_rounded(p->ui, x, y, w, h, r);
+	cairo_clip(cr);
+	if (thumb) {
+		cairo_translate(cr, x, y);
+		cairo_scale(cr, w / THUMB_W, h / THUMB_H);
+		cairo_set_source_surface(cr, thumb, 0, 0);
+		cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+		cairo_paint(cr);
+	} else {
+		fui_color(p->ui, 0xffffff0d);
+		cairo_paint(cr);
+		if (failed) {
+			fui_text(p->ui, x + w / 2, y + h / 2 - 8, "Can't read it", F_SMALL, TEXT_FAINT,
+				FUI_CENTER, w - 8);
+		}
+	}
+	cairo_restore(cr);
+}
+
+static void wallpaper_current(struct page *p) {
+	if (!shown(p, "Wallpaper", "Fill Fit Center Stretch picture desktop", "wallpaper")) {
+		return;
+	}
+	struct fui *ui = p->ui;
+	bool locked = pinned(p->app, "wallpaper");
+	const char *path = json_str(value(p->app, "wallpaper"), "");
+	const double top = p->y, pw = 176, ph = 110, x = CONTENT_X + CARD_PAD;
+	if (*path) {
+		picture_in(p, path, x, top + 14, pw, ph, 8);
+	} else {
+		fui_fill_rounded(ui, x, top + 14, pw, ph, 8, 0xffffff0a);
+		fui_text(ui, x + pw / 2, top + 14 + ph / 2 - 8, "No wallpaper", F_SMALL, TEXT_FAINT,
+			FUI_CENTER, 0);
+	}
+	const double tx = x + pw + 20, room = RIGHT - tx;
+	const char *slash = strrchr(path, '/');
+	fui_text(ui, tx, top + 22, *path ? (slash ? slash + 1 : path) : "Just the background color",
+		F_LABEL, locked ? TEXT_DIM : TEXT, FUI_LEFT, room);
+	if (*path) {
+		char folder[PATH_MAX];
+		snprintf(folder, sizeof(folder), "%.*s", slash ? (int)(slash - path) : 0, path);
+		size_t hl = strlen(home_dir());
+		bool under_home = !strncmp(folder, home_dir(), hl) && hl > 1;
+		char shown_folder[PATH_MAX];
+		snprintf(shown_folder, sizeof(shown_folder), "%s%s", under_home ? "~" : "",
+			folder + (under_home ? hl : 0));
+		fui_text(ui, tx, top + 42, shown_folder, F_SMALL, TEXT_FAINT, FUI_LEFT, room);
+	}
+	if (locked) {
+		fui_text(ui, tx, top + 62, "init.lua sets it", F_SMALL, TEXT_DIM, FUI_LEFT, room);
+	}
+	static const char *const labels[] = {"Fill", "Fit", "Center", "Stretch"};
+	static const char *const modes[] = {"fill", "fit", "center", "stretch"};
+	const char *mode = json_str(value(p->app, "wallpaper_mode"), "fill");
+	int selected = 0;
+	for (int i = 0; i < 4; i++) {
+		if (!strcmp(mode, modes[i])) {
+			selected = i;
+		}
+	}
+	bool mode_locked = pinned(p->app, "wallpaper_mode");
+	double sw = fui_segmented_width(ui, labels, 4);
+	if (fui_segmented(ui, fui_id("wallpaper_mode", 0), tx + sw, top + 92, labels, 4, &selected,
+			!mode_locked && *path)) {
+		set_string(p->app, "wallpaper_mode", modes[selected]);
+	}
+	if (*path && !locked && fui_button(ui, fui_id("wallpaper none", 0), tx + sw + 12, top + 92,
+			"None")) {
+		// back to no wallpaper: flame's default
+		char *reply = ipc("unset wallpaper");
+		free(reply);
+		fui_after(ui, 150, refresh_later, p->app);
+	}
+	p->y = top + ph + 28;
+}
+
+// a folder in a tile
+static void folder_glyph(struct fui *ui, double cx, double cy, double s) {
+	cairo_t *cr = fui_cairo(ui);
+	cairo_new_path(cr);
+	cairo_move_to(cr, cx - 14 * s, cy - 9 * s);
+	cairo_line_to(cr, cx - 4 * s, cy - 9 * s);
+	cairo_line_to(cr, cx - 1 * s, cy - 6 * s);
+	cairo_line_to(cr, cx + 14 * s, cy - 6 * s);
+	cairo_line_to(cr, cx + 14 * s, cy + 10 * s);
+	cairo_line_to(cr, cx - 14 * s, cy + 10 * s);
+	cairo_close_path(cr);
+	fui_color(ui, 0x5aa9f0ff);
+	cairo_fill(cr);
+	fui_fill_rounded(ui, cx - 14 * s, cy - 3 * s, 28 * s, 13 * s, 2 * s, 0x7cc0ffff);
+}
+
+// the open folder: back, where it is (each part a way back up)
+static void wallpaper_path(struct page *p) {
+	struct fui *ui = p->ui;
+	struct browser *b = &p->app->browser;
+	const double y = p->y;
+	bool at_root = !strcmp(b->dir, "/");
+	bool hover = !at_root && fui_hover(ui, CONTENT_X, y, 28, 28);
+	if (hover) {
+		fui_cursor_pointer(ui);
+	}
+	fui_fill_rounded(ui, CONTENT_X, y, 28, 28, 8, hover ? 0xffffff24 : 0xffffff12);
+	cairo_t *cr = fui_cairo(ui);
+	fui_color(ui, at_root ? TEXT_FAINT : TEXT);
+	cairo_set_line_width(cr, 1.8);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_move_to(cr, CONTENT_X + 16, y + 9);
+	cairo_line_to(cr, CONTENT_X + 11, y + 14);
+	cairo_line_to(cr, CONTENT_X + 16, y + 19);
+	cairo_stroke(cr);
+	char go[PATH_MAX] = "";
+	if (!at_root && fui_clicked(ui, CONTENT_X, y, 28, 28)) {
+		snprintf(go, sizeof(go), "%s", b->dir);
+		char *slash = strrchr(go, '/');
+		if (slash == go) {
+			go[1] = '\0';
+		} else if (slash) {
+			*slash = '\0';
+		}
+	}
+	// the parts: Home for the home folder, then each folder down
+	const char *home = home_dir();
+	size_t hl = strlen(home);
+	bool under_home = hl > 1 && !strncmp(b->dir, home, hl) && (!b->dir[hl] || b->dir[hl] == '/');
+	double x = CONTENT_X + 40;
+	const char *rest = b->dir + (under_home ? hl : 0);
+	char upto[PATH_MAX];
+	snprintf(upto, sizeof(upto), "%s", under_home ? home : "");
+	const char *first = under_home ? "Home" : "/";
+	for (int part = 0; x < RIGHT; part++) {
+		const char *name;
+		char piece[NAME_MAX + 1];
+		if (part == 0) {
+			name = first;
+			if (!under_home) {
+				snprintf(upto, sizeof(upto), "/");
+			}
+		} else {
+			while (*rest == '/') {
+				rest++;
+			}
+			if (!*rest) {
+				break;
+			}
+			size_t len = strcspn(rest, "/");
+			snprintf(piece, sizeof(piece), "%.*s", (int)len, rest);
+			name = piece;
+			size_t ul = strlen(upto);
+			snprintf(upto + ul, sizeof(upto) - ul, "%s%s", ul && upto[ul - 1] == '/' ? "" : "/",
+				piece);
+			rest += len;
+		}
+		const char *after = rest;
+		while (*after == '/') {
+			after++;
+		}
+		bool last = !*after;
+		if (part > 0) {
+			x += fui_text(ui, x, y + 6, "›", F_TEXT, TEXT_FAINT, FUI_LEFT, 0) + 8;
+		}
+		double w = fui_text_width(ui, name, last ? F_LABEL : F_TEXT);
+		bool over = !last && fui_hover(ui, x - 4, y, w + 8, 28);
+		if (over) {
+			fui_cursor_pointer(ui);
+		}
+		fui_text(ui, x, y + 6, name, last ? F_LABEL : F_TEXT, last ? TEXT : over ? TEXT
+			: TEXT_DIM, FUI_LEFT, RIGHT - x);
+		if (!last && fui_clicked(ui, x - 4, y, w + 8, 28)) {
+			snprintf(go, sizeof(go), "%s", upto);
+		}
+		x += w + 8;
+	}
+	p->y += 40;
+	if (*go && browser_open(b, go)) {
+		p->app->scroll[p->app->page] = 0;
+	}
+}
+
+// does every word of the search show up in name
+static bool name_matches(const char *name, const char *query) {
+	const char *q = query;
+	while (q && *q) {
+		while (*q == ' ') {
+			q++;
+		}
+		size_t len = strcspn(q, " ");
+		if (len && !has(name, q, len)) {
+			return false;
+		}
+		q += len;
+	}
+	return true;
+}
+
+// the folder's folders and pictures, tiles in rows. searching: only the
+// pictures whose names match
+static void wallpaper_grid(struct page *p) {
+	struct fui *ui = p->ui;
+	struct app *app = p->app;
+	struct browser *b = &app->browser;
+	const char *current = json_str(value(app, "wallpaper"), "");
+	bool locked = pinned(app, "wallpaper");
+	const double gap = 14, label_h = 24;
+	int cols = (int)((CONTENT_W + gap) / (170 + gap));
+	cols = cols < 2 ? 2 : cols;
+	const double tw = (CONTENT_W - (cols - 1) * gap) / cols, th = tw * THUMB_H / THUMB_W;
+	int col = 0, count = 0;
+	double y = p->y;
+	char go[PATH_MAX] = "";
+	for (size_t i = 0; i < b->len; i++) {
+		const struct browser_entry *e = &b->entries[i];
+		if (p->query && (e->folder || !name_matches(e->name, p->query))) {
+			continue;
+		}
+		count++;
+		char path[PATH_MAX];
+		snprintf(path, sizeof(path), "%s%s%s", b->dir, strcmp(b->dir, "/") ? "/" : "", e->name);
+		double x = CONTENT_X + col * (tw + gap);
+		// only what's on screen gets drawn, and thumbnails asked for
+		if (y + th + label_h > 0 && y < H) {
+			bool hover = fui_hover(ui, x, y, tw, th) && (e->folder || !locked);
+			bool picked = !e->folder && !strcmp(path, current);
+			double lift = fui_ease(ui, fui_id(path, 7), hover ? 1 : 0, 18);
+			if (e->folder) {
+				fui_fill_rounded(ui, x, y, tw, th, 10, (uint32_t)(0xffffff0c + (uint32_t)(10 * lift)));
+				folder_glyph(ui, x + tw / 2, y + th / 2, 1.3 + 0.08 * lift);
+			} else {
+				picture_in(p, path, x, y, tw, th, 10);
+			}
+			if (picked || lift > 0.01) {
+				fui_rounded(ui, x - 3, y - 3, tw + 6, th + 6, 13);
+				fui_color(ui, picked ? 0xff7a2aff : (uint32_t)(0xffffff00 | (uint32_t)(0x50 * lift)));
+				cairo_set_line_width(fui_cairo(ui), 2.5);
+				cairo_stroke(fui_cairo(ui));
+			}
+			fui_text(ui, x + tw / 2, y + th + 5, e->name, F_SMALL, picked ? TEXT : TEXT_DIM,
+				FUI_CENTER, tw);
+			if (hover) {
+				fui_cursor_pointer(ui);
+			}
+			if (hover && fui_clicked(ui, x, y, tw, th)) {
+				if (e->folder) {
+					snprintf(go, sizeof(go), "%s", path);
+				} else {
+					set_string(app, "wallpaper", path);
+				}
+			}
+		}
+		if (++col == cols) {
+			col = 0;
+			y += th + label_h + gap;
+		}
+	}
+	if (col) {
+		y += th + label_h + gap;
+	}
+	if (!count && !p->query) {
+		fui_text(ui, CONTENT_X + 4, y, "No pictures or folders here", F_TEXT, TEXT_DIM,
+			FUI_LEFT, 0);
+		y += 30;
+	}
+	p->shown += p->query ? count : 0;
+	p->y = y;
+	if (*go && browser_open(b, go)) {
+		app->scroll[app->page] = 0;
+	}
+}
+
+static void page_wallpaper(struct page *p) {
+	if (!p->app->browsing) {
+		browse_somewhere(p->app);
+		p->app->browsing = true;
+	}
+	card(p, p->query ? "ON THE DESKTOP" : NULL, wallpaper_current);
+	if (p->query) {
+		// the open folder's pictures that match, under whose they are
+		double start = p->y;
+		int before = p->shown;
+		p->y += 22;
+		wallpaper_grid(p);
+		if (p->shown == before) {
+			p->y = start;
+		} else {
+			const char *slash = strrchr(p->app->browser.dir, '/');
+			char title[160];
+			snprintf(title, sizeof(title), "WALLPAPER  ·  %s", slash && slash[1] ? slash + 1
+				: p->app->browser.dir);
+			for (char *c = title; *c; c++) {
+				*c = (char)toupper((unsigned char)*c);
+			}
+			fui_text(p->ui, CONTENT_X + 4, start, title, F_CARD_TITLE, TEXT_DIM, FUI_LEFT, 0);
+		}
+		return;
+	}
+	wallpaper_path(p);
+	wallpaper_grid(p);
+}
+
 // ---- the window ----
 
-enum icon { ICON_DISPLAY, ICON_APPEARANCE, ICON_GAMES, ICON_KEYBOARD, ICON_PRIVACY, ICON_ABOUT };
+enum icon {
+	ICON_DISPLAY,
+	ICON_APPEARANCE,
+	ICON_WALLPAPER,
+	ICON_GAMES,
+	ICON_KEYBOARD,
+	ICON_PRIVACY,
+	ICON_ABOUT,
+};
 
 static const struct {
 	const char *name, *title;
@@ -648,6 +999,7 @@ static const struct {
 	void (*draw)(struct page *p);
 } pages[] = {
 	{"Appearance", "Appearance", ICON_APPEARANCE, 0xa855f7ff, page_appearance},
+	{"Wallpaper", "Wallpaper", ICON_WALLPAPER, 0x14b8a6ff, page_wallpaper},
 	{"Displays", "Displays", ICON_DISPLAY, 0x3b82f6ff, page_displays},
 	{"Games", "Games", ICON_GAMES, 0xef4444ff, page_games},
 	{"Keyboard & Mouse", "Keyboard & Mouse", ICON_KEYBOARD, 0x737a86ff, page_input},
@@ -707,6 +1059,20 @@ static void icon(struct fui *ui, enum icon kind, double x, double y, uint32_t co
 		cairo_fill(cr);
 		cairo_arc(cr, cx, cy - 2, 3.4, M_PI, 2 * M_PI);
 		cairo_stroke(cr);
+		break;
+	case ICON_WALLPAPER:
+		// a picture: hills under a sun
+		fui_rounded(ui, cx - 7, cy - 5.5, 14, 11, 2);
+		cairo_stroke(cr);
+		cairo_move_to(cr, cx - 6.2, cy + 4);
+		cairo_line_to(cr, cx - 2.2, cy - 0.5);
+		cairo_line_to(cr, cx + 0.8, cy + 2.2);
+		cairo_line_to(cr, cx + 2.8, cy + 0.6);
+		cairo_line_to(cr, cx + 6.2, cy + 4);
+		cairo_close_path(cr);
+		cairo_fill(cr);
+		cairo_arc(cr, cx + 3, cy - 2.3, 1.3, 0, 2 * M_PI);
+		cairo_fill(cr);
 		break;
 	case ICON_ABOUT:
 		cairo_arc(cr, cx, cy - 4, 1.2, 0, 2 * M_PI);
@@ -887,7 +1253,9 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "flamesettings: no wayland display\n");
 		return 1;
 	}
+	browser_init(&app.browser, app.ui);
 	int status = fui_run(app.ui);
+	browser_finish(&app.browser);
 	fui_destroy(app.ui);
 	json_free(app.settings);
 	return status;
