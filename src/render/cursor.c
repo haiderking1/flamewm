@@ -148,6 +148,20 @@ bool frame_cursor_build(struct flame_frame_cursor *cursor,
 		list);
 }
 
+bool frame_cursor_push(struct flame_frame_cursor *cursor, struct wlr_box area,
+		struct flame_element_list *list) {
+	struct flame_render_pointer *pointer = &cursor->render->pointer;
+	struct flame_cursor_frame frame = {.kind = FLAME_CURSOR_HIDDEN};
+	if (pointer->image) {
+		cursor_image_get(pointer->image, cursor->output->scale, &frame);
+	}
+	if (frame.kind == FLAME_CURSOR_HIDDEN) {
+		return true;
+	}
+	return push_software(cursor, &frame, pointer->image->generation, pointer->x, pointer->y, area,
+		list);
+}
+
 struct wlr_surface *frame_cursor_surface(struct flame_frame_cursor *cursor) {
 	struct flame_cursor_image *image = cursor->render->pointer.image;
 	// it may have died since the frame was built

@@ -22,9 +22,11 @@ struct flame_render;
 struct wlr_buffer;
 // list (collected for area, layout coords) drawn into buffer at scale, all of
 // buffer cleared first: a window captured on its own (screen sharing one
-// window). false when the gpu said no
+// window). signal reaches point once the gpu's done (NULL: implicit sync).
+// false when the gpu said no
+struct wlr_drm_syncobj_timeline;
 bool render_elements_to_buffer(struct flame_render *render,
 	const struct flame_element_list *list, struct wlr_box area, float scale,
-	struct wlr_buffer *buffer);
+	struct wlr_buffer *buffer, struct wlr_drm_syncobj_timeline *signal, uint64_t point);
 
 #endif

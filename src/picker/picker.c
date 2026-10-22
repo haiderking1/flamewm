@@ -115,26 +115,15 @@ static struct flame_view *view_at(struct flame_picker *picker, double lx, double
 	return view && view->workspace == desktop->active && view->shown ? view : NULL;
 }
 
-// "Window: ID", NULL when the window isn't on the portal's list yet
-static char *answer_for(struct flame_picker *picker) {
-	char buf[256];
-	if (picker->mode == PICKER_SCREEN) {
-		struct flame_output *output;
-		wl_list_for_each(output, &picker->server->outputs.list, link) {
-			if (wlr_box_equal(&output->box, &picker->area)) {
-				snprintf(buf, sizeof(buf), "Monitor: %s", output->wlr->name);
-				return strdup(buf);
-			}
+// the output it's on
+static struct flame_output *picker_output(struct flame_picker *picker) {
+	struct flame_output *output;
+	wl_list_for_each(output, &picker->server->outputs.list, link) {
+		if (wlr_box_equal(&output->box, &picker->area)) {
+			return output;
 		}
-		return NULL;
 	}
-	const char *id = picker->view
-		? capture_identifier(&picker->server->capture, picker->view) : NULL;
-	if (!id) {
-		return NULL;
-	}
-	snprintf(buf, sizeof(buf), "Window: %s", id);
-	return strdup(buf);
+	return NULL;
 }
 
 // ---- how it looks right now ----
@@ -389,48 +378,38 @@ static void fade_done(struct flame_anim *anim, bool finished) {
 	}
 }
 
-static void stop_waiting(struct flame_picker *picker) {
-	if (picker->client) {
-		listener_disconnect(&picker->client_destroy);
-		picker->client = NULL;
-	}
-}
-
-// answer NULL: cancelled
-static void finish(struct flame_picker *picker, const char *answer) {
+// pick NULL: cancelled
+static void finish(struct flame_picker *picker, const struct picker_pick *pick) {
 	if (!picker->open) {
 		return;
 	}
-	if (picker->client) {
-		if (answer) {
-			ipc_client_send(picker->client, answer, strlen(answer));
-		} else {
-			static const char cancelled[] = "{\"ok\":false,\"error\":\"cancelled\"}";
-			ipc_client_send(picker->client, cancelled, sizeof(cancelled) - 1);
-		}
-		stop_waiting(picker);
-	}
-	wlr_log(WLR_DEBUG, "picker: %s", answer ? answer : "cancelled");
+	void (*done)(const struct picker_pick *pick, void *data) = picker->done;
+	void *data = picker->done_data;
+	picker->done = NULL;
+	picker->done_data = NULL;
+	wlr_log(WLR_DEBUG, "picker: %s", !pick ? "cancelled" : pick->mode == PICKER_SCREEN
+		? "a screen" : "a window");
 	picker->open = false;
 	wl_event_source_timer_update(picker->refresh, 0);
 	fade_to(picker, 0, 140, &ease_in);
 	// the pointer and the keyboard go back to whatever's under them
 	cursor_refresh(&picker->server->input.cursor);
+	if (done) {
+		done(pick, data); // may ask again
+	}
 }
 
 // what's lit is shared, if anything is
 static void share(struct flame_picker *picker) {
-	char *answer = answer_for(picker);
-	if (answer) {
-		finish(picker, answer);
-		free(answer);
+	struct picker_pick pick = {.mode = picker->mode};
+	if (picker->mode == PICKER_SCREEN) {
+		pick.output = picker_output(picker);
+	} else {
+		pick.view = picker->view;
 	}
-}
-
-static void handle_client_destroy(struct wl_listener *listener, void *data) {
-	struct flame_picker *picker = wl_container_of(listener, picker, client_destroy);
-	stop_waiting(picker); // nobody to answer: closed like a cancel
-	finish(picker, NULL);
+	if (pick.output || pick.view) {
+		finish(picker, &pick);
+	}
 }
 
 // windows move, resize and close, workspaces switch: what's lit follows,
@@ -478,18 +457,16 @@ static struct flame_output *only_output(struct flame_server *server) {
 	return only;
 }
 
-void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
-		unsigned kinds) {
+void picker_ask(struct flame_picker *picker, unsigned kinds,
+		void (*done)(const struct picker_pick *pick, void *data), void *data) {
 	struct flame_server *server = picker->server;
 	kinds &= PICKER_WINDOWS | PICKER_SCREENS;
 	kinds = kinds ? kinds : PICKER_WINDOWS | PICKER_SCREENS;
 	struct flame_output *only = kinds == PICKER_SCREENS ? only_output(server) : NULL;
 	if (only) {
 		// the app's own "share your screen" already said which
-		char answer[128];
-		snprintf(answer, sizeof(answer), "Monitor: %s", only->wlr->name);
-		wlr_log(WLR_DEBUG, "picker: asked for a screen, there's one: %s", answer);
-		ipc_client_send(client, answer, strlen(answer));
+		wlr_log(WLR_DEBUG, "picker: asked for a screen, there's one: %s", only->wlr->name);
+		done(&(struct picker_pick){.mode = PICKER_SCREEN, .output = only}, data);
 		return;
 	}
 	if (picker->open) {
@@ -500,14 +477,14 @@ void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
 	clear(picker);
 	struct flame_output *output = output_under_pointer(server);
 	if (!output) {
-		static const char none[] = "{\"ok\":false,\"error\":\"no screen to pick on\"}";
-		ipc_client_send(client, none, sizeof(none) - 1);
+		wlr_log(WLR_ERROR, "picker: no screen to pick on");
+		done(NULL, data);
 		return;
 	}
 	picker->area = output->box;
 	picker->scale = output->wlr->scale > 0 ? output->wlr->scale : 1;
-	picker->client = client;
-	listener_connect(&picker->client_destroy, &client->events.destroy, handle_client_destroy);
+	picker->done = done;
+	picker->done_data = data;
 	picker->open = true;
 	picker->shown = 0;
 	picker->kinds = kinds;
@@ -534,6 +511,64 @@ void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
 	picker_pointer_motion(picker, cursor->x, cursor->y);
 	wl_event_source_timer_update(picker->refresh, REFRESH_MS);
 	fade_to(picker, 1, 220, &ease_out);
+}
+
+void picker_forget(struct flame_picker *picker, void *data) {
+	if (picker->open && picker->done_data == data) {
+		picker->done = NULL;
+		picker->done_data = NULL;
+		finish(picker, NULL);
+	}
+}
+
+// ---- flamectl share-pick ----
+
+struct ipc_ask {
+	struct flame_picker *picker;
+	struct flame_ipc_client *client;
+	struct wl_listener client_destroy;
+};
+
+static void ipc_done(const struct picker_pick *pick, void *data) {
+	struct ipc_ask *ask = data;
+	char answer[256] = "";
+	if (pick && pick->output) {
+		snprintf(answer, sizeof(answer), "Monitor: %s", pick->output->wlr->name);
+	} else if (pick && pick->view) {
+		const char *id = capture_identifier(&ask->picker->server->capture, pick->view);
+		if (id) {
+			snprintf(answer, sizeof(answer), "Window: %s", id);
+		}
+	}
+	if (*answer) {
+		ipc_client_send(ask->client, answer, strlen(answer));
+	} else {
+		static const char cancelled[] = "{\"ok\":false,\"error\":\"cancelled\"}";
+		ipc_client_send(ask->client, cancelled, sizeof(cancelled) - 1);
+	}
+	listener_disconnect(&ask->client_destroy);
+	free(ask);
+}
+
+static void handle_client_destroy(struct wl_listener *listener, void *data) {
+	struct ipc_ask *ask = wl_container_of(listener, ask, client_destroy);
+	listener_disconnect(&ask->client_destroy);
+	picker_forget(ask->picker, ask); // nobody to answer: closed like a cancel
+	free(ask);
+}
+
+void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
+		unsigned kinds) {
+	struct ipc_ask *ask = calloc(1, sizeof(*ask));
+	if (!ask) {
+		static const char none[] = "{\"ok\":false,\"error\":\"no memory\"}";
+		ipc_client_send(client, none, sizeof(none) - 1);
+		return;
+	}
+	ask->picker = picker;
+	ask->client = client;
+	listener_connect(&ask->client_destroy, &client->events.destroy, handle_client_destroy);
+	picker_ask(picker, kinds, ipc_done, ask);
 }
 
 bool picker_active(const struct flame_picker *picker) {
@@ -678,7 +713,6 @@ void picker_view_gone(struct flame_picker *picker, struct flame_view *view) {
 
 bool picker_init(struct flame_picker *picker, struct flame_server *server) {
 	picker->server = server;
-	wl_list_init(&picker->client_destroy.link);
 	picker->fade = (struct flame_anim){.step = fade_step, .done = fade_done, .data = picker};
 	wl_list_init(&picker->fade.link);
 	picker->glide = (struct flame_anim){.step = glide_step, .data = picker};
@@ -714,8 +748,15 @@ bool picker_init(struct flame_picker *picker, struct flame_server *server) {
 }
 
 void picker_finish(struct flame_picker *picker) {
-	stop_waiting(picker);
+	// whoever asked hears it's over, nothing fades on the way out
+	void (*done)(const struct picker_pick *pick, void *data) = picker->done;
+	void *data = picker->done_data;
+	picker->done = NULL;
+	picker->done_data = NULL;
 	picker->open = false;
+	if (done) {
+		done(NULL, data);
+	}
 	anim_cancel(&picker->fade);
 	anim_cancel(&picker->glide);
 	if (picker->tree) {

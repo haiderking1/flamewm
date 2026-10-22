@@ -161,7 +161,7 @@ static void source_produce(struct window_source *source) {
 		buffer = wlr_swapchain_acquire(source->swapchain);
 	}
 	if (buffer && render_elements_to_buffer(&capture->server->render, &list, area, scale,
-			buffer)) {
+			buffer, NULL, 0)) {
 		source->look = look;
 		source->sent = now;
 		source->wanted = false;
