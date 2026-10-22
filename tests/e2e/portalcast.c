@@ -300,6 +300,7 @@ struct watch {
 	struct spa_video_info_raw format;
 	int dmabuf;
 	int frames;
+	int64_t asked, first; // when it connected, its first frame
 	uint32_t pixel;
 	int has_pixel;
 };
@@ -337,11 +338,17 @@ static void on_process(void *data) {
 		if (gpu_pixel(b->buffer, (int)watch->format.size.width, (int)watch->format.size.height,
 				watch->format.modifier, &pixel) == 0) {
 			watch->frames++;
+			if (!watch->first) {
+				watch->first = now_ms();
+			}
 			watch->pixel = pixel;
 			watch->has_pixel = 1;
 		}
 	} else if (d->data && d->chunk->size > 0) {
 		watch->frames++;
+		if (!watch->first) {
+			watch->first = now_ms();
+		}
 		int w = (int)watch->format.size.width, h = (int)watch->format.size.height;
 		const uint8_t *row = (const uint8_t *)d->data + d->chunk->offset
 			+ (size_t)(h / 2) * (size_t)d->chunk->stride;
@@ -410,6 +417,7 @@ static void watch_stream(uint32_t node, const char *label) {
 			&SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)),
 		SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(0, 1),
 			&SPA_FRACTION(0, 1), &SPA_FRACTION(1000, 1)));
+	watch.asked = now_ms();
 	pw_stream_connect(watch.stream, PW_DIRECTION_INPUT, node,
 		PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, params, n);
 	struct spa_source *timer = pw_loop_add_timer(pw_main_loop_get_loop(watch.loop), on_timeout,
@@ -422,6 +430,12 @@ static void watch_stream(uint32_t node, const char *label) {
 		watch.dmabuf ? " in gpu buffers" : " in shared memory");
 	if (watch.has_pixel) {
 		printf("%s: middle pixel %06x\n", label, watch.pixel);
+	}
+	if (watch.first) {
+		printf("%s: first frame %s\n", label, watch.first - watch.asked < 500 ? "right away"
+			: "late");
+		fprintf(stderr, "%s: first frame after %lld ms\n", label,
+			(long long)(watch.first - watch.asked));
 	}
 	pw_stream_destroy(watch.stream);
 	pw_core_disconnect(core);
