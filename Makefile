@@ -58,7 +58,7 @@ $(BUILD)/gen/%-protocol.h: protocols/%.xml
 
 # pure logic modules get unit tests, sanitizers on
 TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test $(BUILD)/tests/sync_test \
-	$(BUILD)/tests/mode_test $(BUILD)/tests/pacer_test
+	$(BUILD)/tests/mode_test $(BUILD)/tests/pacer_test $(BUILD)/tests/gl_test
 
 $(BUILD)/tests/schedule_test: tests/schedule_test.c src/render/schedule.c
 	@mkdir -p $(dir $@)
@@ -79,6 +79,12 @@ $(BUILD)/tests/mode_test: tests/mode_test.c src/output/mode.c
 $(BUILD)/tests/pacer_test: tests/pacer_test.c src/game/pacer.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
+
+# flame's renderer against wlroots' on a real gpu. no sanitizers: gpu
+# drivers trip them on their own
+$(BUILD)/tests/gl_test: tests/gl_test.c src/gl/gl.c src/gl/pass.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) $(DEFS) -Isrc $(PKG_CFLAGS) -o $@ $^ $(PKG_LIBS)
 
 # flame's X server on its own, a test client against it through the harness.
 # the clients are plain xcb (test-only deps, see deps.md)

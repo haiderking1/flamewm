@@ -19,6 +19,7 @@
 #include "render/coords.h"
 #include "render/damage.h"
 #include "render/feedback.h"
+#include "render/pass.h"
 #include "render/render.h"
 #include "scene/scene.h"
 #include "util/listener.h"
@@ -455,7 +456,7 @@ static void sampled(struct flame_frame *frame, struct wlr_surface *surface) {
 	}
 }
 
-static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass,
+static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 		const struct flame_render_target *target, const struct flame_element *element,
 		const pixman_region32_t *repaint) {
 	// only the part that shows and changed
@@ -475,16 +476,9 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	if (element->type == FLAME_ELEMENT_RECT) {
 		// premultiplied: fading scales every channel
 		float alpha = element->alpha;
-		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-			.box = dst,
-			.color = {
-				.r = element->color[0] * alpha,
-				.g = element->color[1] * alpha,
-				.b = element->color[2] * alpha,
-				.a = element->color[3] * alpha,
-			},
-			.clip = &region,
-		});
+		const float color[4] = {element->color[0] * alpha, element->color[1] * alpha,
+			element->color[2] * alpha, element->color[3] * alpha};
+		pass_rect(pass, dst, color, &region, true);
 		pixman_region32_fini(&region);
 		return;
 	}
@@ -508,14 +502,14 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 	uint64_t wait_point = sync ? sync->acquire_point : element->wait_point;
 	enum wl_output_transform transform = wlr_output_transform_compose(
 		wlr_output_transform_invert(element->transform), target->transform);
-	wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+	pass_texture(pass, &(struct gl_texture_options){
 		.texture = element->texture,
-		.src_box = element->src,
-		.dst_box = dst,
+		.src = element->src,
+		.dst = dst,
 		.transform = transform,
 		.clip = &region,
-		.alpha = element->alpha < 1.0f ? &element->alpha : NULL,
-		.blend_mode = blend ? WLR_RENDER_BLEND_MODE_PREMULTIPLIED : WLR_RENDER_BLEND_MODE_NONE,
+		.alpha = element->alpha,
+		.blend = blend,
 		.wait_timeline = wait_timeline,
 		.wait_point = wait_point,
 	});
@@ -540,7 +534,7 @@ static void draw_element(struct flame_frame *frame, struct wlr_render_pass *pass
 }
 
 // black where nothing opaque covers the repaint area
-static void draw_background(struct wlr_render_pass *pass,
+static void draw_background(struct flame_pass *pass,
 		const struct flame_render_target *target, const struct flame_element_list *list,
 		const pixman_region32_t *repaint, int width, int height) {
 	pixman_region32_t background;
@@ -560,11 +554,8 @@ static void draw_background(struct wlr_render_pass *pass,
 		wlr_region_expand(&background, &background, 1);
 		pixman_region32_intersect(&background, &background, repaint);
 	}
-	wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-		.box = {.width = width, .height = height},
-		.color = {.r = 0, .g = 0, .b = 0, .a = 1},
-		.clip = &background,
-	});
+	pass_rect(pass, (struct wlr_box){.width = width, .height = height},
+		(const float[4]){0, 0, 0, 1}, &background, false);
 	pixman_region32_fini(&background);
 }
 
@@ -591,25 +582,21 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	frame->draw_id++;
 	// everything this frame asks of the gpu, cursors included
 	gpu_time_begin(&frame->gpu);
-	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(frame->render->renderer,
-		buffer, &(struct wlr_buffer_pass_options){
-			.signal_timeline = frame->in_timeline,
-			.signal_point = frame->in_point,
-		});
-	if (!pass) {
+	struct flame_pass pass;
+	if (!pass_begin(&pass, frame->render, buffer, frame->in_timeline, frame->in_point)) {
 		gpu_time_end(&frame->gpu);
 		pixman_region32_fini(&repaint);
 		wlr_buffer_unlock(buffer);
 		return false;
 	}
 
-	draw_background(pass, target, &frame->cur, &repaint, buffer->width, buffer->height);
+	draw_background(&pass, target, &frame->cur, &repaint, buffer->width, buffer->height);
 	for (size_t i = 0; i < frame->cur.len; i++) {
-		draw_element(frame, pass, target, &frame->cur.data[i], &repaint);
+		draw_element(frame, &pass, target, &frame->cur.data[i], &repaint);
 	}
 	pixman_region32_fini(&repaint);
 
-	bool submitted = wlr_render_pass_submit(pass);
+	bool submitted = pass_submit(&pass);
 	gpu_time_end(&frame->gpu);
 	if (!submitted) {
 		// whatever made it into the buffer can't be trusted
