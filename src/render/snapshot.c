@@ -118,7 +118,7 @@ static void draw(struct flame_pass *pass, const struct flame_render_target *targ
 
 bool render_elements_to_buffer(struct flame_render *render,
 		const struct flame_element_list *list, struct wlr_box area, float scale,
-		struct wlr_buffer *buffer) {
+		struct wlr_buffer *buffer, struct wlr_drm_syncobj_timeline *signal, uint64_t point) {
 	struct flame_render_target target = {
 		.logical = area,
 		.scale = scale,
@@ -127,7 +127,7 @@ bool render_elements_to_buffer(struct flame_render *render,
 		.trans_height = buffer->height,
 	};
 	struct flame_pass pass;
-	if (!pass_begin(&pass, render, buffer, NULL, 0)) {
+	if (!pass_begin(&pass, render, buffer, signal, point)) {
 		return false;
 	}
 	pass_rect(&pass, (struct wlr_box){0, 0, buffer->width, buffer->height},

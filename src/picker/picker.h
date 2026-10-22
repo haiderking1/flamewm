@@ -35,6 +35,13 @@ enum picker_mode {
 #define PICKER_WINDOWS (1u << PICKER_WINDOW)
 #define PICKER_SCREENS (1u << PICKER_SCREEN)
 
+// what was picked: a window, or a screen
+struct picker_pick {
+	enum picker_mode mode;
+	struct flame_view *view; // a window
+	struct flame_output *output; // a screen
+};
+
 // a line of text in the scene
 struct picker_label {
 	struct flame_buffer_node *node;
@@ -76,8 +83,9 @@ struct flame_picker {
 	struct flame_anim fade; // opening and closing
 	double shown, shown_from, shown_to; // 0 closed .. 1 open
 
-	struct flame_ipc_client *client;
-	struct wl_listener client_destroy;
+	// who hears the pick
+	void (*done)(const struct picker_pick *pick, void *data);
+	void *done_data;
 	// windows move, close, the user switches workspaces: what's lit follows
 	struct wl_event_source *refresh;
 	uint8_t eaten[32]; // keys it took the press of, a bit a keycode: their release too
@@ -86,9 +94,15 @@ struct flame_picker {
 bool picker_init(struct flame_picker *picker, struct flame_server *server);
 void picker_finish(struct flame_picker *picker);
 
-// shows it for client, whose answer comes when the user picks or cancels.
-// kinds: what it asked for, 0 for anything. only screens on one screen:
-// that one, no picker. one open already: that one's cancelled
+// asks the user: done hears the pick, or NULL for cancelled. kinds: what
+// the app asked for, 0 for anything. only screens on one screen: that one,
+// done hears it before this returns. one open already: that one's cancelled
+void picker_ask(struct flame_picker *picker, unsigned kinds,
+	void (*done)(const struct picker_pick *pick, void *data), void *data);
+// data's asker gives up (its app went): it closes, done isn't called
+void picker_forget(struct flame_picker *picker, void *data);
+// the same for flamectl share-pick: its answer a line, "Monitor: NAME" or
+// "Window: ID" (ext-foreign-toplevel's identifier), an error for cancelled
 void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
 	unsigned kinds);
 // open and taking the pointer and the keyboard

@@ -2,6 +2,7 @@
 #define FLAME_RENDER_CURSOR_H
 
 #include <stdbool.h>
+#include <wlr/util/box.h>
 
 #include "cursor/plane.h"
 
@@ -39,6 +40,10 @@ void frame_cursor_finish(struct flame_frame_cursor *cursor);
 // list ran out of memory
 bool frame_cursor_build(struct flame_frame_cursor *cursor,
 	const struct flame_render_target *target, struct flame_element_list *list);
+// the pointer pushed onto list as it looks on this output, plane or not: a
+// screen being shared shows it. false when the list ran out of memory
+bool frame_cursor_push(struct flame_frame_cursor *cursor, struct wlr_box area,
+	struct flame_element_list *list);
 // the client cursor surface on the plane right now, NULL for none
 struct wlr_surface *frame_cursor_surface(struct flame_frame_cursor *cursor);
 // the plane changed and needs a commit to show it
