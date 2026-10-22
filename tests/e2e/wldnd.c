@@ -1,5 +1,6 @@
 // wayland drag and drop test client
-//   wldnd source TEXT   a window; press a button in it and it drags TEXT (with an icon)
+//   wldnd source TEXT   a window; press a button in it and it drags TEXT (with an icon),
+//                       a file:// TEXT as a uri list too
 //   wldnd target        a window; accepts text drops, prints "dropped: TEXT", exits
 //   wldnd fixed         a window that only comes in 320x240
 #define _GNU_SOURCE
@@ -118,6 +119,9 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
 	wl_data_source_add_listener(source, &source_listener, NULL);
 	wl_data_source_offer(source, "text/plain;charset=utf-8");
 	wl_data_source_offer(source, "text/plain");
+	if (!strncmp(text, "file://", 7)) {
+		wl_data_source_offer(source, "text/uri-list");
+	}
 	wl_data_source_set_actions(source, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
 		| WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
 	struct wl_surface *icon = wl_compositor_create_surface(compositor);
