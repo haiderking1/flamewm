@@ -9,7 +9,7 @@
 struct schedule;
 struct wlr_output;
 
-// frame timing probes, raven's RAVEN_FRAME_TIMING for flame: start with
+// frame timing probes: start with
 // FLAME_FRAME_TIMING=1 and every two seconds each output logs a
 // "flame: frame-timing" line. observations only, nothing about rendering or
 // pacing changes, constant memory, no logging per frame
@@ -37,8 +37,8 @@ struct flame_frame_timing {
 	// the schedule's timer firing after its deadline, and before it
 	struct timing_stat timer_late;
 	uint32_t timer_early;
-	// gpu: the longest finished measurement per collection, like raven's
-	// gpu_batch_max_ms. not per frame, results arrive a frame or two late
+	// gpu: the longest finished measurement per collection, not per
+	// frame, results arrive a frame or two late
 	struct timing_stat draw, empty, gpu, flip, dispatch;
 	// a client's new buffer handed over -> the flip that first showed it
 	struct timing_stat wayland_latency, x11_latency;

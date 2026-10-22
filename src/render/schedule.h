@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// raven's display deadline scheduler. it owns opaque frame tickets and
+// flame's display deadline scheduler. it owns opaque frame tickets and
 // knows nothing about wayland, buffers, fences or KMS. there's one KMS
 // pending slot and at most one rendered successor, never a backlog.
 // times are CLOCK_MONOTONIC nanoseconds

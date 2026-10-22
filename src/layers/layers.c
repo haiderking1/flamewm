@@ -13,7 +13,7 @@
 #include "util/macros.h"
 
 // a top surface that grabs the keyboard is a launcher: it has to show over a
-// fullscreen window, a bar doesn't (raven's rule, no per-app lists)
+// fullscreen window, a bar doesn't (no per-app lists)
 static struct flame_tree *scene_layer(struct flame_server *server,
 		enum zwlr_layer_shell_v1_layer layer, bool grabs_keyboard) {
 	switch (layer) {

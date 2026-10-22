@@ -10,7 +10,7 @@ struct flame_view;
 struct tree_node;
 
 // mod + mouse on a floating window moves it (left) or resizes it from the
-// nearest corner (right). on a tiled window, like hyprland and raven:
+// nearest corner (right). on a tiled window, like hyprland:
 // - left drag picks it up, it rides the cursor on top of everything, its slot
 //   stays empty, and dropping it on another window swaps the two
 // - right drag resizes in place: the edges nearest to where you grabbed follow
