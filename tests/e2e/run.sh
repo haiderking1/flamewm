@@ -3,44 +3,103 @@
 # (flamectl pointer, FLAME_TEST_INPUT=1). the clipboard and drag and drop,
 # every way between X and wayland apps. make e2e
 # usage: run.sh FLAMEWM FLAMECTL CLIENTS_DIR
+# ONLY='share picker*' runs just the cases matching that pattern
 FLAME=$(realpath "$1")
 CTL=$(realpath "$2")
 BIN=$(realpath "$3")
 WORK=$(mktemp -d /tmp/flame-e2e.XXXXXX)
 failed=0
 
+# cases run side by side, JOBS at a time (each its own headless flame, its
+# own dir: a copy of $WORK's files as they were when the case was set up).
+# the ones timing frames run alone, nothing else on the cpu and gpu then
+JOBS=${JOBS:-6}
+n=0
+
+alone() {
+	case "$1" in
+	pacing:*|tearing:*|allow_tearing*|"a fullscreen X game shows its own buffers"*) return 0 ;;
+	"an app busy for a while"*|"sharing a wayland window on a hidden workspace"*) return 0 ;;
+	esac
+	return 1
+}
+
+# till fewer than $1 cases are running
+wait_below() {
+	while [ "$(jobs -p | wc -l)" -ge "$1" ]; do
+		sleep 0.1
+	done
+}
+
+# the case in dir $1, named $2, flame's args $3. its result printed in one
+# go, a block the others running don't tear up
+run_case() {
+	dir=$1
+	timeout 30 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 "$FLAME" $3 \
+		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
+	ok=1
+	while IFS= read -r want; do
+		grep -qF -- "$want" "$dir/out" || ok=0
+	done < "$dir/wants"
+	if grep -qa "ERROR: AddressSanitizer\|runtime error" "$dir/flame.log"; then
+		ok=0
+	fi
+	if [ $ok = 1 ]; then
+		echo "ok   $2"
+		rm -rf "$dir"
+		return
+	fi
+	{
+		echo "FAIL $2"
+		sed 's/^/    /' "$dir/out"
+		grep -a -A8 "ERROR: AddressSanitizer\|runtime error" "$dir/flame.log" | sed 's/^/    /'
+	} > "$dir/result"
+	touch "$WORK/failed"
+	cat "$dir/result"
+}
+
 # one case: the script runs inside flame, its output gets checked for every
 # string after the name
 case_run() {
 	name=$1
-	script=$2
+	case "$name" in ${ONLY:-*}) ;; *) return ;; esac
+	n=$((n + 1))
+	dir="$WORK/case.$n"
+	mkdir "$dir"
+	# $WORK's files as they are now, paths into it pointing at the copies.
+	# big ones just linked, nothing points into them
+	for f in "$WORK"/*; do
+		[ -f "$f" ] || continue
+		if [ "$(wc -c < "$f")" -lt 65536 ]; then
+			sed "s|$WORK/|$dir/|g" "$f" > "$dir/${f##*/}"
+			chmod --reference="$f" "$dir/${f##*/}"
+		else
+			ln -s "$f" "$dir/${f##*/}"
+		fi
+	done
+	script=$(printf '%s\n' "$2" | sed "s|$WORK/|$dir/|g")
+	args=$(printf '%s' "$CASE_ARGS" | sed "s|$WORK/|$dir/|g")
 	shift 2
-	cat > "$WORK/case.sh" <<EOF
+	: > "$dir/wants"
+	for want in "$@"; do
+		printf '%s\n' "$want" >> "$dir/wants"
+	done
+	cat > "$dir/case.sh" <<EOF
 #!/bin/sh
-exec > "$WORK/out" 2>&1
+exec > "$dir/out" 2>&1
 sleep 0.5
-cd "$WORK"
+cd "$dir"
 $script
 $CTL quit > /dev/null 2>&1
 EOF
-	chmod +x "$WORK/case.sh"
-	: > "$WORK/out"
-	timeout 30 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 "$FLAME" $CASE_ARGS \
-		-s "$WORK/case.sh" > "$WORK/flame.log" 2>&1
-	ok=1
-	for want in "$@"; do
-		grep -qF -- "$want" "$WORK/out" || ok=0
-	done
-	if grep -qa "ERROR: AddressSanitizer\|runtime error" "$WORK/flame.log"; then
-		ok=0
-	fi
-	if [ $ok = 1 ]; then
-		echo "ok   $name"
+	chmod +x "$dir/case.sh"
+	: > "$dir/out"
+	if alone "$name"; then
+		wait
+		run_case "$dir" "$name" "$args"
 	else
-		echo "FAIL $name"
-		sed 's/^/    /' "$WORK/out"
-		grep -a -A8 "ERROR: AddressSanitizer\|runtime error" "$WORK/flame.log" | sed 's/^/    /'
-		failed=1
+		wait_below "$JOBS"
+		run_case "$dir" "$name" "$args" &
 	fi
 }
 
@@ -566,5 +625,7 @@ WLR_BACKENDS=wayland timeout 20 $FLAME -s $WORK/inner.sh > inner.log 2>&1
 cat grim.out" "captured"
 CASE_ARGS=
 
+wait
+[ -e "$WORK/failed" ] && failed=1
 rm -rf "$WORK"
 exit $failed
