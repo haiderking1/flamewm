@@ -268,6 +268,9 @@ $BIN/xewmh wayland '$BIN/wlgame 3 > /dev/null 2>&1 &'" "active is this one: yes"
 	"a wayland window in front, active is: flame's window"
 case_run "a minimize request (wine's on losing focus): refused out loud, WM_STATE stays Normal" "
 $BIN/xewmh iconify" "iconify: told yes, WM_STATE 1" "still shown: yes"
+case_run "a fullscreen game dropping fullscreen as the user leaves stays fullscreen (wine)" "
+$BIN/xewmh keepfull $CTL" "away, asked out of it: state: FULLSCREEN" "back: geometry 0,0 1280x720" \
+	"in it, asked out: state: FOCUSED MAXIMIZED_VERT MAXIMIZED_HORZ"
 case_run "WM_TAKE_FOCUS windows (wine's): WM_STATE first, a click offers focus again" "
 $BIN/xewmh takefocus $CTL" "WM_STATE before the offer: yes" \
 	"offers on a click, not taken: 1" "offers on a click, taken: 0"
