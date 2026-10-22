@@ -678,7 +678,7 @@ static void picture_in(struct page *p, const char *path, double x, double y, dou
 	cairo_t *cr = fui_cairo(p->ui);
 	bool failed = false;
 	cairo_surface_t *thumb = path && *path
-		? browser_thumb(&p->app->browser, path, THUMB_W, THUMB_H, &failed) : NULL;
+		? fui_thumb(p->ui, path, THUMB_W, THUMB_H, &failed) : NULL;
 	cairo_save(cr);
 	fui_rounded(p->ui, x, y, w, h, r);
 	cairo_clip(cr);

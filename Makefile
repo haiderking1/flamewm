@@ -84,13 +84,14 @@ $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 $(SETTINGS): tools/flamesettings/main.c tools/flamesettings/json.c tools/flamesettings/json.h \
 		tools/flamesettings/browser.c tools/flamesettings/browser.h \
 		tools/flameui/window.c tools/flameui/ui.c tools/flameui/flameui.h \
-		tools/flameui/internal.h src/image/image.c src/image/image.h \
+		tools/flameui/internal.h tools/flameui/thumbs.c src/image/image.c src/image/image.h \
 		$(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
 		$(LDFLAGS) -o $@ tools/flamesettings/main.c tools/flamesettings/json.c \
 		tools/flamesettings/browser.c \
-		tools/flameui/window.c tools/flameui/ui.c src/image/image.c $(UI_PROTO_CODE) \
+		tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c src/image/image.c \
+		$(UI_PROTO_CODE) \
 		$(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
 
 # the ipc client, plain libc

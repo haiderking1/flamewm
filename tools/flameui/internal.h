@@ -26,7 +26,15 @@ struct fui_ease_slot {
 struct fui_key {
 	xkb_keysym_t sym;
 	char text[8]; // what it types, utf-8, empty for none
+	unsigned mods; // enum fui_mod, held as it went down
 };
+
+struct fui_watch {
+	int fd; // -1 for unused
+	void (*f)(struct fui *ui, int fd, void *data);
+	void *data;
+};
+#define FUI_WATCHES 8
 
 struct fui_timer {
 	double at; // fui_now seconds, 0 for unused
@@ -79,6 +87,9 @@ struct fui {
 	double mx, my;
 	bool pointer_in, button_down;
 	bool pressed, released; // the left button went down / up
+	bool right_pressed, right_used;
+	int click_count; // this press's place in a quick run of them
+	double last_press, last_press_x, last_press_y;
 	double scroll;
 	uint32_t pointer_serial;
 	int cursor_shape, cursor_shown; // wp_cursor_shape_device_v1 shapes
@@ -109,6 +120,14 @@ struct fui {
 	bool panes_dirty;
 
 	struct fui_timer timers[FUI_TIMERS];
+	struct fui_watch watches[FUI_WATCHES];
+	struct fui_thumbs *thumbs; // thumbs.c, NULL till the first's asked for
+
+	// the menu open, 0 for none: where, and where it was drawn last frame
+	uint64_t menu;
+	double menu_x, menu_y;
+	double menu_box[4];
+	bool menu_press; // this frame's press landed in it
 
 	struct {
 		char name[64];
@@ -122,5 +141,6 @@ double fui_now(void);
 void fui_frame_begin(struct fui *ui, cairo_t *cr);
 void fui_frame_end(struct fui *ui);
 void fui_fonts_free(struct fui *ui);
+void fui_thumbs_free(struct fui *ui);
 
 #endif
