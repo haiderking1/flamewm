@@ -81,6 +81,12 @@ struct portal_session {
 	bool cancel, close;
 };
 
+// who it's for in the log: an app with no id (a script calling the portal
+// straight) has a blank one
+static const char *who(const struct portal_session *session) {
+	return *session->app_id ? session->app_id : "an app";
+}
+
 static void restore_clear(struct restore *restore) {
 	free(restore->output);
 	free(restore->app_id);
@@ -209,7 +215,7 @@ static void later(struct portal_session *session) {
 
 static int method_session_close(sd_bus_message *m, void *data, sd_bus_error *error) {
 	struct portal_session *session = data;
-	wlr_log(WLR_DEBUG, "portal: %s closes its share", session->app_id);
+	wlr_log(WLR_DEBUG, "portal: %s closes its share", who(session));
 	session->close = true;
 	later(session);
 	return sd_bus_reply_method_return(m, "");
@@ -410,14 +416,14 @@ static void answer_streams(struct portal_session *session, uint32_t node) {
 static void handle_ready(struct cast_stream *stream, uint32_t node, int width, int height,
 		void *data) {
 	struct portal_session *session = data;
-	wlr_log(WLR_DEBUG, "portal: %s's share is node %u, %dx%d", session->app_id, node, width,
+	wlr_log(WLR_DEBUG, "portal: %s's share is node %u, %dx%d", who(session), node, width,
 		height);
 	answer_streams(session, node);
 }
 
 static void handle_ended(struct cast_stream *stream, void *data) {
 	struct portal_session *session = data;
-	wlr_log(WLR_DEBUG, "portal: %s's share ended", session->app_id);
+	wlr_log(WLR_DEBUG, "portal: %s's share ended", who(session));
 	struct flame_portal *portal = session->portal;
 	if (session->start) {
 		answer(session, RESPONSE_FAILED);
@@ -470,7 +476,7 @@ static void handle_picked(const struct picker_pick *pick, void *data) {
 	struct portal_session *session = data;
 	session->asking = false;
 	if (!pick) {
-		wlr_log(WLR_DEBUG, "portal: %s's share cancelled", session->app_id);
+		wlr_log(WLR_DEBUG, "portal: %s's share cancelled", who(session));
 		answer(session, RESPONSE_CANCELLED);
 		return;
 	}
@@ -551,7 +557,7 @@ static int method_create_session(sd_bus_message *m, void *data, sd_bus_error *er
 		return sd_bus_reply_method_return(m, "ua{sv}", (uint32_t)RESPONSE_FAILED, 0);
 	}
 	wl_list_insert(&portal->sessions, &session->link);
-	wlr_log(WLR_DEBUG, "portal: %s starts a share", *app_id ? app_id : "an app");
+	wlr_log(WLR_DEBUG, "portal: %s starts a share", who(session));
 	return sd_bus_reply_method_return(m, "ua{sv}", (uint32_t)RESPONSE_OK, 0);
 }
 
@@ -571,7 +577,7 @@ static int method_select_sources(sd_bus_message *m, void *data, sd_bus_error *er
 	}
 	session->types &= SOURCE_MONITOR | SOURCE_WINDOW;
 	session->types = session->types ? session->types : SOURCE_MONITOR;
-	wlr_log(WLR_DEBUG, "portal: %s wants %s, cursor %s, %s", session->app_id,
+	wlr_log(WLR_DEBUG, "portal: %s wants %s, cursor %s, %s", who(session),
 		session->types == SOURCE_MONITOR ? "a screen" : session->types == SOURCE_WINDOW
 		? "a window" : "a screen or a window", session->cursor_mode == CURSOR_EMBEDDED
 		? "in it" : "hidden", session->restore.has ? "an earlier pick to restore"
@@ -599,7 +605,7 @@ static int method_start(sd_bus_message *m, void *data, sd_bus_error *error) {
 	struct picker_pick pick;
 	if (restored(session, &pick)) {
 		wlr_log(WLR_DEBUG, "portal: %s gets its earlier pick again, no picker",
-			session->app_id);
+			who(session));
 		stream_start(session, &pick);
 		return 1;
 	}
