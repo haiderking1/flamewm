@@ -39,7 +39,9 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& xselection_init(&server->xselection, server, &server->xbridge.xserver)
 		&& ext_workspaces_init(&server->ext_workspaces, server)
 		&& capture_init(&server->capture, server)
-		&& picker_init(&server->picker, server);
+		&& picker_init(&server->picker, server)
+		&& screencast_init(&server->screencast, server)
+		&& portal_init(&server->portal, server);
 }
 
 static void server_keymap_names(struct flame_server *server);
@@ -170,6 +172,8 @@ void server_finish(struct flame_server *server) {
 	xselection_finish(&server->xselection);
 	xbridge_finish(&server->xbridge);
 	xshell_finish(&server->xshell);
+	portal_finish(&server->portal);
+	screencast_finish(&server->screencast);
 	picker_finish(&server->picker);
 	capture_finish(&server->capture);
 	ext_workspaces_finish(&server->ext_workspaces);

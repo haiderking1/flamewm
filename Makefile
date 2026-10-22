@@ -10,7 +10,8 @@ CTL     := $(BUILD)/flamectl
 CC := clang
 
 # every lib here has to be in deps.md too
-PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1 egl libdrm xshmfence lua5.4 pangocairo
+PKGS := wlroots-0.20 wayland-server xkbcommon pixman-1 egl libdrm xshmfence lua5.4 pangocairo \
+	libpipewire-0.3 libsystemd
 
 # clean shouldn't need any deps installed
 ifeq ($(filter clean,$(MAKECMDGOALS)),)
@@ -211,12 +212,18 @@ $(E2E)/xkeys: tests/e2e/xkeys.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xinput)
 
+$(E2E)/portalcast: tests/e2e/portalcast.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -D_GNU_SOURCE -o $@ $< \
+		$(shell pkg-config --cflags --libs libpipewire-0.3 libsystemd egl glesv2 libdrm)
+
 $(E2E)/%: tests/e2e/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
+		$(E2E)/portalcast
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -237,13 +244,15 @@ clangd: $(PROTO_HEADERS)
 	@printf '%s\n' -xc $(filter-out -MMD -MP,$(FLAME_CFLAGS)) > compile_flags.txt
 	@echo "wrote compile_flags.txt"
 
+# xdg-desktop-portal reads backends from its own data dir only, whatever
+# PREFIX is
+PORTALDIR ?= /usr/share/xdg-desktop-portal
+
 install: release
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
-	install -Dm644 data/flamewm-portals.conf \
-		$(DESTDIR)$(PREFIX)/share/xdg-desktop-portal/flamewm-portals.conf
-	install -Dm644 data/xdg-desktop-portal-wlr-flamewm \
-		$(DESTDIR)/etc/xdg/xdg-desktop-portal-wlr/flamewm
+	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
+	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
 
 clean:
 	rm -rf build build-asan build-release
