@@ -88,8 +88,10 @@ it's all on flame's side of the X server, no injecting into the game: a
 game starts its next frame when it gets a buffer back, so flame hands one
 back just in time for the frame to be ready at its slot (the input it
 draws is the freshest it can be, like reflex), and shows it on the slot. a
-game's frames lining up for their slots drop to the newest (a frame ahead
-is lag). a new swapchain (fullscreen, a resize) gets its old buffers
+game's frames lining up for their slots drop to the newest, and a game
+that keeps a frame ahead (vsync on with a buffer of its own: lag) gets one
+release held back as a probe. it makes its next slot anyway: the spare's
+used up. it doesn't: the buffer goes back that moment, no probe for 5s. a new swapchain (fullscreen, a resize) gets its old buffers
 back at once, and a game that goes 2.5 frames without presenting while flame
 holds buffers gets them all back (`pace_stuck` in frame timing counts that).
 
