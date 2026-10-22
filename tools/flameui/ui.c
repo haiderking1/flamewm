@@ -48,12 +48,35 @@ void fui_frame_begin(struct fui *ui, cairo_t *cr) {
 	}
 	ui->moving = false;
 	ui->click_used = false;
+	ui->right_used = false;
+	ui->menu_press = false;
 	ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+	// a menu open takes the press before anything under it. outside it, it
+	// closes: a left click goes nowhere else, a right one opens the next menu
+	if (ui->menu && (ui->pressed || ui->right_pressed)) {
+		const double *b = ui->menu_box;
+		bool inside = ui->mx >= b[0] && ui->mx < b[0] + b[2] && ui->my >= b[1]
+			&& ui->my < b[1] + b[3];
+		if (inside) {
+			ui->menu_press = ui->pressed;
+			ui->click_used = ui->right_used = true;
+		} else {
+			ui->menu = 0;
+			ui->click_used = ui->pressed;
+		}
+	}
+	for (int i = 0; ui->menu && i < ui->keys_len; i++) {
+		if (ui->keys[i].sym == XKB_KEY_Escape) {
+			ui->menu = 0;
+			ui->keys_len = 0; // that escape was the menu's
+		}
+	}
 }
 
 void fui_frame_end(struct fui *ui) {
 	// input is spent
 	ui->pressed = false;
+	ui->right_pressed = false;
 	ui->released = false;
 	ui->scroll = 0;
 	ui->keys_len = 0;
@@ -120,6 +143,50 @@ bool fui_clicked(struct fui *ui, double x, double y, double w, double h) {
 		return true;
 	}
 	return false;
+}
+
+int fui_click_count(const struct fui *ui) {
+	return ui->click_count;
+}
+
+bool fui_right_clicked(struct fui *ui, double x, double y, double w, double h) {
+	if (ui->right_pressed && !ui->right_used && fui_hover(ui, x, y, w, h)) {
+		ui->right_used = true;
+		return true;
+	}
+	return false;
+}
+
+void fui_pointer(const struct fui *ui, double *x, double *y) {
+	*x = ui->mx;
+	*y = ui->my;
+}
+
+bool fui_button_held(const struct fui *ui) {
+	return ui->button_down;
+}
+
+bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods) {
+	if (ui->focus) {
+		return false; // the field's
+	}
+	for (int i = 0; i < ui->keys_len; i++) {
+		const struct fui_key *k = &ui->keys[i];
+		if (xkb_keysym_to_lower(k->sym) == xkb_keysym_to_lower(sym) && k->mods == mods) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool fui_typing(const struct fui *ui) {
+	return ui->focus != 0;
+}
+
+void fui_focus(struct fui *ui, uint64_t id, const char *text) {
+	ui->focus = id;
+	snprintf(ui->focus_before, sizeof(ui->focus_before), "%s", text ? text : "");
+	fui_redraw(ui);
 }
 
 double fui_scrolled(struct fui *ui) {
@@ -206,6 +273,24 @@ double fui_text(struct fui *ui, double x, double y, const char *text, const char
 	pango_cairo_show_layout(ui->cr, l);
 	g_object_unref(l);
 	return w;
+}
+
+double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
+		const char *text, const char *font_name, uint32_t rgba, enum fui_align align) {
+	PangoLayout *l = layout(ui, text, font_name);
+	pango_layout_set_width(l, (int)(width * PANGO_SCALE));
+	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
+	pango_layout_set_height(l, -lines);
+	pango_layout_set_alignment(l, align == FUI_CENTER ? PANGO_ALIGN_CENTER
+		: align == FUI_RIGHT ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
+	int w, h;
+	pango_layout_get_pixel_size(l, &w, &h);
+	fui_color(ui, rgba);
+	cairo_move_to(ui->cr, x, y);
+	pango_cairo_show_layout(ui->cr, l);
+	g_object_unref(l);
+	return h;
 }
 
 double fui_paragraph(struct fui *ui, double x, double y, double width, const char *text,
@@ -392,7 +477,7 @@ static void backspace(char *text) {
 // a key that types something: not a control character (tab, ctrl+f...)
 static bool typable(const struct fui_key *k) {
 	unsigned char c = (unsigned char)k->text[0];
-	return c >= 0x20 && c != 0x7f;
+	return c >= 0x20 && c != 0x7f && !(k->mods & (FUI_CTRL | FUI_ALT | FUI_SUPER));
 }
 
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
@@ -555,4 +640,99 @@ bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *lab
 	fui_fill_rounded(ui, x, y, w, h, 8, with_alpha(0xffffffff, 0.10 + 0.08 * lit));
 	fui_text(ui, x + w / 2, y + 6, label, FONT_MEDIUM, TEXT, FUI_CENTER, 0);
 	return clicked;
+}
+
+// ---- menus ----
+
+#define MENU_ITEM_H 26
+#define MENU_LINE_H 9
+#define MENU_PAD 5
+
+void fui_menu_open(struct fui *ui, uint64_t id, double x, double y) {
+	ui->menu = id;
+	ui->menu_x = x;
+	ui->menu_y = y;
+	ui->menu_box[2] = ui->menu_box[3] = 0;
+	fui_redraw(ui);
+}
+
+bool fui_menu_is_open(const struct fui *ui, uint64_t id) {
+	return ui->menu == id;
+}
+
+void fui_menu_close(struct fui *ui) {
+	ui->menu = 0;
+	fui_redraw(ui);
+}
+
+int fui_menu(struct fui *ui, uint64_t id, const struct fui_menu_item *items, int count) {
+	if (ui->menu != id) {
+		return -1;
+	}
+	double w = 160, h = 2 * MENU_PAD;
+	for (int i = 0; i < count; i++) {
+		if (!items[i].label) {
+			h += MENU_LINE_H;
+			continue;
+		}
+		h += MENU_ITEM_H;
+		double tw = fui_text_width(ui, items[i].label, FONT) + 40;
+		if (items[i].shortcut) {
+			tw += fui_text_width(ui, items[i].shortcut, FONT) + 24;
+		}
+		w = tw > w ? tw : w;
+	}
+	// in the window, the way the pointer was going if it fits
+	double x = ui->menu_x, y = ui->menu_y;
+	x = x + w > ui->width - 4 ? x - w : x;
+	y = y + h > ui->height - 4 ? y - h : y;
+	x = x < 4 ? 4 : x;
+	y = y < 4 ? 4 : y;
+	ui->menu_box[0] = x;
+	ui->menu_box[1] = y;
+	ui->menu_box[2] = w;
+	ui->menu_box[3] = h;
+
+	double shown = fui_ease(ui, id ^ 0x6d656e75, 1, 30);
+	cairo_push_group(ui->cr);
+	// a shadow, then the menu
+	for (int i = 3; i > 0; i--) {
+		fui_fill_rounded(ui, x - i, y - i + 3, w + 2 * i, h + 2 * i, 10 + i, 0x00000014);
+	}
+	fui_fill_rounded(ui, x, y, w, h, 10, 0x2b2b31f7);
+	fui_rounded(ui, x + 0.5, y + 0.5, w - 1, h - 1, 10);
+	fui_color(ui, 0xffffff24);
+	cairo_set_line_width(ui->cr, 1);
+	cairo_stroke(ui->cr);
+	int picked = -1;
+	double iy = y + MENU_PAD;
+	for (int i = 0; i < count; i++) {
+		if (!items[i].label) {
+			fui_fill_rounded(ui, x + 10, iy + MENU_LINE_H / 2.0, w - 20, 1, 0, 0xffffff1a);
+			iy += MENU_LINE_H;
+			continue;
+		}
+		bool over = !items[i].disabled && fui_hover(ui, x + MENU_PAD, iy, w - 2 * MENU_PAD,
+			MENU_ITEM_H);
+		if (over) {
+			fui_fill_rounded(ui, x + MENU_PAD, iy, w - 2 * MENU_PAD, MENU_ITEM_H, 6, ACCENT);
+			if (ui->menu_press) {
+				picked = i;
+			}
+		}
+		uint32_t color = items[i].disabled ? with_alpha(TEXT, 0.35) : TEXT;
+		fui_text(ui, x + 14, iy + 4, items[i].label, FONT, color, FUI_LEFT, 0);
+		if (items[i].shortcut) {
+			fui_text(ui, x + w - 14, iy + 4, items[i].shortcut, FONT,
+				over ? TEXT : with_alpha(TEXT, 0.45), FUI_RIGHT, 0);
+		}
+		iy += MENU_ITEM_H;
+	}
+	cairo_pop_group_to_source(ui->cr);
+	cairo_paint_with_alpha(ui->cr, shown);
+	if (picked >= 0) {
+		ui->menu = 0;
+		fui_redraw(ui);
+	}
+	return picked;
 }

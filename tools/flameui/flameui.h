@@ -74,6 +74,37 @@ bool fui_clicked(struct fui *ui, double x, double y, double w, double h);
 double fui_scrolled(struct fui *ui); // this frame's wheel, layout units down
 void fui_cursor_pointer(struct fui *ui); // a hand over what's clickable
 
+// a press's place in a run of them, quick and on the same spot: 1 a single
+// click, 2 a double click. good in the frame fui_clicked says it's there
+int fui_click_count(const struct fui *ui);
+// the right button went down over a box this frame
+bool fui_right_clicked(struct fui *ui, double x, double y, double w, double h);
+// where the pointer is (window coords), and whether the left button's held
+void fui_pointer(const struct fui *ui, double *x, double *y);
+bool fui_button_held(const struct fui *ui);
+
+// the keyboard, for an app's own keys (shortcuts, arrows). nothing while a
+// field's being typed into
+enum fui_mod {
+	FUI_SHIFT = 1 << 0,
+	FUI_CTRL = 1 << 1,
+	FUI_ALT = 1 << 2,
+	FUI_SUPER = 1 << 3,
+};
+unsigned fui_mods(const struct fui *ui); // held now
+// sym went down this frame (or repeated) with exactly mods held. letters
+// any case: ctrl+shift+n is 'n' with FUI_CTRL | FUI_SHIFT
+bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods);
+bool fui_typing(const struct fui *ui); // a field has the keys
+// field id has the keys from now on, as if clicked (text: what it says now,
+// escape goes back to it)
+void fui_focus(struct fui *ui, uint64_t id, const char *text);
+
+// fd has something to read: f's called from the window's loop, till
+// fui_unwatch. a few at most
+bool fui_watch(struct fui *ui, int fd, void (*f)(struct fui *ui, int fd, void *data), void *data);
+void fui_unwatch(struct fui *ui, int fd);
+
 // ids for the things below: any unique number, fui_id hashes a string
 uint64_t fui_id(const char *s, uint64_t salt);
 
@@ -91,6 +122,10 @@ void fui_fill_rounded(struct fui *ui, double x, double y, double w, double h, do
 double fui_text(struct fui *ui, double x, double y, const char *text, const char *font,
 	uint32_t rgba, enum fui_align align, double max_width);
 double fui_text_width(struct fui *ui, const char *text, const char *font);
+// text wrapped to width, no more than lines of it (the last cut short with
+// an ellipsis), aligned in it. returns its height
+double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
+	const char *text, const char *font, uint32_t rgba, enum fui_align align);
 // text wrapped to width, returns its height
 double fui_paragraph(struct fui *ui, double x, double y, double width, const char *text,
 	const char *font, uint32_t rgba);
@@ -120,6 +155,27 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 // the keys types into it, escape clears it
 bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 	int size);
+// a picture file's thumbnail (jpeg, png, webp), width x height pixels cut to
+// cover that. worker threads make it, the window redraws when it's there:
+// NULL till then, or when it can't be read (failed). kept a while
+cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int height,
+	bool *failed);
+// the ones asked for so far and not started aren't wanted (another folder)
+void fui_thumbs_forget(struct fui *ui);
+
+// a menu over everything at a point, like a right click opens: open it, then
+// every frame draw it last with fui_menu. a click outside closes it
+struct fui_menu_item {
+	const char *label; // NULL: a line between groups
+	const char *shortcut; // shown at the right, NULL for none
+	bool disabled;
+};
+void fui_menu_open(struct fui *ui, uint64_t id, double x, double y);
+bool fui_menu_is_open(const struct fui *ui, uint64_t id);
+void fui_menu_close(struct fui *ui);
+// draws menu id if it's open: the item picked this frame, -1 for none
+int fui_menu(struct fui *ui, uint64_t id, const struct fui_menu_item *items, int count);
+
 // a plain button, true when clicked
 bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *label);
 

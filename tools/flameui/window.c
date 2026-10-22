@@ -279,12 +279,25 @@ static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time
 static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
 		uint32_t time, uint32_t button, uint32_t state) {
 	struct fui *ui = data;
+	bool down = state == WL_POINTER_BUTTON_STATE_PRESSED;
+	if (button == BTN_RIGHT && down) {
+		ui->right_pressed = true;
+		fui_redraw(ui);
+		return;
+	}
 	if (button != BTN_LEFT) {
 		return;
 	}
-	bool down = state == WL_POINTER_BUTTON_STATE_PRESSED;
 	ui->button_down = down;
 	if (down) {
+		// quick, and where the last one was: the next click of a double click
+		double now = fui_now();
+		bool again = now - ui->last_press < 0.4 && fabs(ui->mx - ui->last_press_x) < 5
+			&& fabs(ui->my - ui->last_press_y) < 5;
+		ui->click_count = again ? ui->click_count + 1 : 1;
+		ui->last_press = now;
+		ui->last_press_x = ui->mx;
+		ui->last_press_y = ui->my;
 		ui->pressed = true;
 	} else {
 		ui->released = true;
@@ -386,7 +399,8 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
 		}
 		return;
 	}
-	struct fui_key k = {.sym = xkb_state_key_get_one_sym(ui->xkb_state, key + 8)};
+	struct fui_key k = {.sym = xkb_state_key_get_one_sym(ui->xkb_state, key + 8),
+		.mods = fui_mods(ui)};
 	xkb_state_key_get_utf8(ui->xkb_state, key + 8, k.text, sizeof(k.text));
 	if ((unsigned char)k.text[0] < 0x20 || k.text[0] == 0x7f) {
 		k.text[0] = '\0'; // control characters aren't text
@@ -491,6 +505,9 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->repeat_delay = 600;
 	// other threads wake it down this
 	ui->wake[0] = ui->wake[1] = -1;
+	for (int i = 0; i < FUI_WATCHES; i++) {
+		ui->watches[i].fd = -1;
+	}
 	if (pipe(ui->wake) == 0) {
 		for (int i = 0; i < 2; i++) {
 			fcntl(ui->wake[i], F_SETFD, FD_CLOEXEC);
@@ -580,12 +597,15 @@ static int run_due(struct fui *ui) {
 }
 
 int fui_run(struct fui *ui) {
-	struct pollfd fds[2] = {
+	struct pollfd fds[2 + FUI_WATCHES] = {
 		{.fd = wl_display_get_fd(ui->display), .events = POLLIN},
 		{.fd = ui->wake[0], .events = POLLIN},
 	};
 	struct pollfd *fd = &fds[0];
 	while (ui->running) {
+		for (int i = 0; i < FUI_WATCHES; i++) {
+			fds[2 + i] = (struct pollfd){.fd = ui->watches[i].fd, .events = POLLIN};
+		}
 		while (wl_display_prepare_read(ui->display) != 0) {
 			wl_display_dispatch_pending(ui->display);
 		}
@@ -598,9 +618,16 @@ int fui_run(struct fui *ui) {
 			wl_display_cancel_read(ui->display);
 			break;
 		}
-		if (poll(fds, ui->wake[0] >= 0 ? 2 : 1, timeout) < 0 && errno != EINTR) {
+		// a negative fd (no wake pipe, an unused watch) is skipped
+		if (poll(fds, 2 + FUI_WATCHES, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(ui->display);
 			return 1;
+		}
+		for (int i = 0; i < FUI_WATCHES; i++) {
+			struct fui_watch *w = &ui->watches[i];
+			if (w->fd >= 0 && w->fd == fds[2 + i].fd && fds[2 + i].revents) {
+				w->f(ui, w->fd, w->data);
+			}
 		}
 		if (fds[1].revents & POLLIN) {
 			char drain[64];
@@ -626,6 +653,7 @@ int fui_run(struct fui *ui) {
 }
 
 void fui_destroy(struct fui *ui) {
+	fui_thumbs_free(ui); // its threads wake the window: gone before it is
 	for (int i = 0; i < 2; i++) {
 		buffer_free(&ui->buffers[i]);
 	}
@@ -648,6 +676,48 @@ void fui_destroy(struct fui *ui) {
 		}
 	}
 	free(ui);
+}
+
+bool fui_watch(struct fui *ui, int fd, void (*f)(struct fui *ui, int fd, void *data),
+		void *data) {
+	for (int i = 0; i < FUI_WATCHES; i++) {
+		if (ui->watches[i].fd < 0) {
+			ui->watches[i] = (struct fui_watch){fd, f, data};
+			return true;
+		}
+	}
+	return false;
+}
+
+void fui_unwatch(struct fui *ui, int fd) {
+	for (int i = 0; i < FUI_WATCHES; i++) {
+		if (ui->watches[i].fd == fd) {
+			ui->watches[i].fd = -1;
+		}
+	}
+}
+
+unsigned fui_mods(const struct fui *ui) {
+	if (!ui->xkb_state) {
+		return 0;
+	}
+	static const struct {
+		const char *name;
+		unsigned mod;
+	} names[] = {
+		{XKB_MOD_NAME_SHIFT, FUI_SHIFT},
+		{XKB_MOD_NAME_CTRL, FUI_CTRL},
+		{XKB_MOD_NAME_ALT, FUI_ALT},
+		{XKB_MOD_NAME_LOGO, FUI_SUPER},
+	};
+	unsigned mods = 0;
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		if (xkb_state_mod_name_is_active(ui->xkb_state, names[i].name,
+				XKB_STATE_MODS_EFFECTIVE) > 0) {
+			mods |= names[i].mod;
+		}
+	}
+	return mods;
 }
 
 void fui_wake(struct fui *ui) {
