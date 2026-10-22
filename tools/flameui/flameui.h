@@ -197,6 +197,25 @@ bool fui_drag_files(struct fui *ui, char *const *paths, size_t len, int icon_wid
 // a drag of ours is on
 bool fui_dragging(const struct fui *ui);
 
+// ---- the clipboard ----
+
+// paths on the clipboard, copied or cut, the way file managers put them
+// there (and as text for everything else)
+void fui_copy_files(struct fui *ui, char *const *paths, size_t len, bool cut);
+void fui_copy_text(struct fui *ui, const char *text);
+void fui_clipboard_clear(struct fui *ui);
+// files are on it (anyone's)
+bool fui_clipboard_has_files(const struct fui *ui);
+// path is cut on it, by this app
+bool fui_clipboard_cut(const struct fui *ui, const char *path);
+// the clipboard's files asked for: fui_pasted_files has them on a later
+// frame (copied, or cut: to be moved). false for none on it
+bool fui_paste_files(struct fui *ui);
+char **fui_pasted_files(struct fui *ui, size_t *len, bool *cut);
+// fields paste text themselves (ctrl+v), these are theirs
+void fui_paste_text(struct fui *ui, uint64_t field);
+char *fui_pasted_text(struct fui *ui, uint64_t field);
+
 // a menu over everything at a point, like a right click opens: open it, then
 // every frame draw it last with fui_menu. a click outside closes it
 struct fui_menu_item {

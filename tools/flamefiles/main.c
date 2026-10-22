@@ -87,10 +87,8 @@ struct app {
 	// a name being typed over
 	bool renaming;
 	char rename_from[NAME_MAX + 1], rename_text[NAME_MAX + 1];
-	// copied or cut
-	char **clip;
-	size_t clip_len;
-	bool clip_cut;
+	// a paste asked for (the clipboard's read on a later frame): where to
+	char paste_into[PATH_MAX];
 	struct ops_job *job;
 	char toast[220];
 	double toast_at;
@@ -524,31 +522,39 @@ static void free_paths(char **paths, size_t len) {
 	free(paths);
 }
 
+// the selection on the clipboard, everyone's: other file managers paste it,
+// terminals and editors get the paths
 static void clip_set(struct app *app, bool cut) {
 	size_t len;
 	char **paths = selected_paths(app, &len);
-	if (!len) {
-		free_paths(paths, len);
-		return;
-	}
-	free_paths(app->clip, app->clip_len);
-	app->clip = paths;
-	app->clip_len = len;
-	app->clip_cut = cut;
+	fui_copy_files(app->ui, paths, len, cut);
+	free_paths(paths, len);
 }
 
-static bool clipped(struct app *app, const char *name) {
-	if (!app->clip_cut) {
-		return false;
+// the selection's paths as text, a line each
+static void copy_paths(struct app *app) {
+	size_t len, total = 1;
+	char **paths = selected_paths(app, &len);
+	for (size_t i = 0; i < len; i++) {
+		total += strlen(paths[i]) + 1;
 	}
+	char *text = calloc(total, 1);
+	for (size_t i = 0; text && i < len; i++) {
+		strcat(text, paths[i]);
+		strcat(text, i + 1 < len ? "\n" : "");
+	}
+	if (text && len) {
+		fui_copy_text(app->ui, text);
+	}
+	free(text);
+	free_paths(paths, len);
+}
+
+// cut and still on the clipboard: shown faded
+static bool clipped(struct app *app, const char *name) {
 	char path[PATH_MAX];
 	path_of(app, name, path, sizeof(path));
-	for (size_t i = 0; i < app->clip_len; i++) {
-		if (!strcmp(app->clip[i], path)) {
-			return true;
-		}
-	}
-	return false;
+	return fui_clipboard_cut(app->ui, path);
 }
 
 static void start_job_into(struct app *app, char *const *paths, size_t len, const char *dest,
@@ -567,18 +573,30 @@ static void start_job(struct app *app, char *const *paths, size_t len, bool move
 	start_job_into(app, paths, len, app->folder.path, move);
 }
 
+// the clipboard's files asked for, into the folder open now
 static void paste(struct app *app) {
-	if (!app->clip_len || in_trash(app)) {
+	if (in_trash(app) || app->pick) {
 		return;
 	}
-	start_job(app, app->clip, app->clip_len, app->clip_cut);
-	if (app->clip_cut) {
-		// moved: the clipboard's spent
-		free_paths(app->clip, app->clip_len);
-		app->clip = NULL;
-		app->clip_len = 0;
-		app->clip_cut = false;
+	if (fui_paste_files(app->ui)) {
+		snprintf(app->paste_into, sizeof(app->paste_into), "%s", app->folder.path);
 	}
+}
+
+// the files a paste asked for came: copied there, cut ones moved (and the
+// clipboard's spent then, like other file managers leave it)
+static void pasted(struct app *app) {
+	size_t len;
+	bool cut;
+	char **paths = fui_pasted_files(app->ui, &len, &cut);
+	if (!paths || !app->paste_into[0]) {
+		return;
+	}
+	start_job_into(app, paths, len, app->paste_into, cut);
+	if (cut) {
+		fui_clipboard_clear(app->ui);
+	}
+	app->paste_into[0] = '\0';
 }
 
 static void duplicate(struct app *app) {
@@ -1150,6 +1168,9 @@ static void keys(struct app *app) {
 	}
 	if (fui_key_pressed(ui, XKB_KEY_c, FUI_CTRL)) {
 		clip_set(app, false);
+	}
+	if (fui_key_pressed(ui, XKB_KEY_c, FUI_CTRL | FUI_SHIFT)) {
+		copy_paths(app);
 	}
 	if (fui_key_pressed(ui, XKB_KEY_x, FUI_CTRL)) {
 		clip_set(app, true);
@@ -1745,7 +1766,7 @@ static void menus(struct app *app) {
 	size_t sel = selected_count(app);
 	bool trash = in_trash(app);
 	if (fui_menu_is_open(ui, fui_id("items", 0))) {
-		enum { OPEN, RENAME, TRASH, COPY, CUT, DUPLICATE, PUT_BACK, DELETE, PICK, COUNT };
+		enum { OPEN, RENAME, TRASH, COPY, CUT, COPY_PATH, DUPLICATE, PUT_BACK, DELETE, PICK, COUNT };
 		struct fui_menu_item items[12];
 		int what[12], n = 0;
 #define ITEM(id, label, key, off) \
@@ -1765,6 +1786,7 @@ static void menus(struct app *app) {
 			LINE();
 			ITEM(COPY, "Copy", "Ctrl+C", false);
 			ITEM(CUT, "Cut", "Ctrl+X", false);
+			ITEM(COPY_PATH, "Copy Path", "Ctrl+Shift+C", false);
 		}
 		int picked_item = fui_menu(ui, fui_id("items", 0), items, n);
 		switch (picked_item >= 0 ? what[picked_item] : -1) {
@@ -1792,6 +1814,9 @@ static void menus(struct app *app) {
 		case CUT:
 			clip_set(app, true);
 			break;
+		case COPY_PATH:
+			copy_paths(app);
+			break;
 		case PUT_BACK:
 			put_back(app);
 			break;
@@ -1806,7 +1831,7 @@ static void menus(struct app *app) {
 		int what[10], n = 0;
 		if (!app->pick && !trash) {
 			ITEM(NEW_FOLDER, "New Folder", "Ctrl+Shift+N", false);
-			ITEM(PASTE, app->clip_cut ? "Move Here" : "Paste", "Ctrl+V", !app->clip_len);
+			ITEM(PASTE, "Paste", "Ctrl+V", !fui_clipboard_has_files(ui));
 			LINE();
 		}
 		if (trash && !app->pick) {
@@ -1923,6 +1948,7 @@ static void frame(struct fui *ui, void *data) {
 		typeahead(app);
 	}
 	dnd(app);
+	pasted(app);
 	sidebar(app);
 	toolbar(app);
 	view(app);
@@ -2049,7 +2075,6 @@ int main(int argc, char **argv) {
 	folder_finish(&app.folder);
 	free(app.shown);
 	free(app.selected);
-	free_paths(app.clip, app.clip_len);
 	free_paths(app.back, app.back_len);
 	free_paths(app.forward, app.forward_len);
 	return status ? status : app.status;

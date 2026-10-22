@@ -9,18 +9,22 @@
 
 #include "internal.h"
 
-// drag and drop, wayland's (wl_data_device): files dragged out of the app
-// as a uri list, and files dropped onto it, from anywhere, the app itself
-// too (it goes through flame like any other). what's dropped is read down
-// a pipe the window's loop watches, never waited on: the app may be the one
-// writing it
+// wayland's data device: drag and drop, and the clipboard. files dragged
+// out of the app as a uri list, files dropped onto it from anywhere, the
+// app itself too (it goes through flame like any other). files and text
+// copied and pasted the way file managers and apps do (gnome's copied
+// files say copy or cut). whatever comes in is read down a pipe the
+// window's loop watches, never waited on: the app may be the one writing it
 
 #define URI_LIST "text/uri-list"
 #define PLAIN "text/plain;charset=utf-8"
+#define GNOME_COPIED "x-special/gnome-copied-files"
+#define KDE_CUT "application/x-kde-cutselection"
 
 // what an offer has, kept on it
 struct offer {
-	bool uri_list;
+	bool uri_list, gnome;
+	const char *text; // the best text type it has, NULL for none
 	uint32_t source_actions, action;
 };
 
@@ -38,6 +42,18 @@ static void offer_drop(struct wl_data_offer *offer) {
 static void offer_offer(void *data, struct wl_data_offer *offer, const char *mime) {
 	struct offer *o = data;
 	o->uri_list |= !strcmp(mime, URI_LIST);
+	o->gnome |= !strcmp(mime, GNOME_COPIED);
+	// text, the best way it comes: earlier in texts is better
+	static const char *const texts[] = {PLAIN, "text/plain", "UTF8_STRING", "STRING", "TEXT"};
+	size_t count = sizeof(texts) / sizeof(texts[0]), have = count;
+	for (size_t i = 0; o->text && i < count; i++) {
+		have = o->text == texts[i] ? i : have;
+	}
+	for (size_t i = 0; i < have; i++) {
+		if (!strcmp(mime, texts[i])) {
+			o->text = texts[i];
+		}
+	}
 }
 
 static void offer_source_actions(void *data, struct wl_data_offer *offer, uint32_t actions) {
@@ -294,12 +310,15 @@ static void peek_start(struct fui *ui) {
 	}
 }
 
+// the clipboard changed hands: what's on it now (NULL: nothing)
 static void device_selection(void *data, struct wl_data_device *device,
 		struct wl_data_offer *offer) {
 	struct fui *ui = data;
-	if (offer && offer != ui->dnd_offer) {
-		offer_drop(offer); // the clipboard: not ours to read (yet)
+	if (ui->clip_offer && ui->clip_offer != offer) {
+		offer_drop(ui->clip_offer);
 	}
+	ui->clip_offer = offer;
+	fui_redraw(ui);
 }
 
 static const struct wl_data_device_listener device_listener = {
@@ -393,9 +412,8 @@ static void drag_end(struct fui *ui) {
 static void source_target(void *data, struct wl_data_source *source, const char *mime) {
 }
 
-static void source_send(void *data, struct wl_data_source *source, const char *mime, int fd) {
-	struct fui *ui = data;
-	const char *what = !strcmp(mime, URI_LIST) ? ui->drag_uris : ui->drag_paths;
+// what to write down fd, written on a thread of its own and fd closed
+static void write_async(int fd, const char *what) {
 	struct writing *w = malloc(sizeof(*w));
 	pthread_t thread;
 	pthread_attr_t attr;
@@ -414,6 +432,11 @@ static void source_send(void *data, struct wl_data_source *source, const char *m
 		free(w);
 	}
 	pthread_attr_destroy(&attr);
+}
+
+static void source_send(void *data, struct wl_data_source *source, const char *mime, int fd) {
+	struct fui *ui = data;
+	write_async(fd, !strcmp(mime, URI_LIST) ? ui->drag_uris : ui->drag_paths);
 }
 
 static void source_cancelled(void *data, struct wl_data_source *source) {
@@ -522,8 +545,243 @@ bool fui_dragging(const struct fui *ui) {
 	return ui->drag_source != NULL;
 }
 
+// ---- the clipboard ----
+
+static void free_paths_list(char **paths, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		free(paths[i]);
+	}
+	free(paths);
+}
+
+static void clip_gone(struct fui *ui) {
+	if (ui->clip_source) {
+		wl_data_source_destroy(ui->clip_source);
+		ui->clip_source = NULL;
+	}
+	free(ui->clip_uris);
+	free(ui->clip_gnome);
+	free(ui->clip_plain);
+	ui->clip_uris = ui->clip_gnome = ui->clip_plain = NULL;
+	free_paths_list(ui->clip_paths, ui->clip_paths_len);
+	ui->clip_paths = NULL;
+	ui->clip_paths_len = 0;
+	ui->clip_cut = false;
+}
+
+static void clip_send(void *data, struct wl_data_source *source, const char *mime, int fd) {
+	struct fui *ui = data;
+	const char *what = !strcmp(mime, URI_LIST) ? ui->clip_uris
+		: !strcmp(mime, GNOME_COPIED) ? ui->clip_gnome
+		: !strcmp(mime, KDE_CUT) ? (ui->clip_cut ? "1" : "0") : ui->clip_plain;
+	write_async(fd, what);
+}
+
+// another app's on the clipboard now
+static void clip_cancelled(void *data, struct wl_data_source *source) {
+	struct fui *ui = data;
+	if (source == ui->clip_source) {
+		clip_gone(ui);
+	} else {
+		wl_data_source_destroy(source);
+	}
+	fui_redraw(ui);
+}
+
+// a clipboard source never gets drag events
+static void clip_none(void *data, struct wl_data_source *source) {
+}
+
+static const struct wl_data_source_listener clip_listener = {
+	.target = source_target,
+	.send = clip_send,
+	.cancelled = clip_cancelled,
+	.dnd_drop_performed = clip_none,
+	.dnd_finished = clip_none,
+	.action = source_action,
+};
+
+// a source of ours on the clipboard, offering what's set in ui->clip_*
+static void clip_offer_ours(struct fui *ui, bool files) {
+	struct wl_data_source *source = wl_data_device_manager_create_data_source(ui->data_manager);
+	wl_data_source_add_listener(source, &clip_listener, ui);
+	if (files) {
+		wl_data_source_offer(source, GNOME_COPIED);
+		wl_data_source_offer(source, URI_LIST);
+		wl_data_source_offer(source, KDE_CUT);
+	}
+	wl_data_source_offer(source, PLAIN);
+	wl_data_source_offer(source, "text/plain");
+	wl_data_source_offer(source, "UTF8_STRING");
+	wl_data_device_set_selection(ui->data_device, source, ui->input_serial);
+	ui->clip_source = source;
+}
+
+void fui_copy_files(struct fui *ui, char *const *paths, size_t len, bool cut) {
+	if (!ui->data_device || !len) {
+		return;
+	}
+	clip_gone(ui);
+	size_t ul = 0, pl = 0;
+	ui->clip_paths = calloc(len, sizeof(char *));
+	for (size_t i = 0; i < len; i++) {
+		append_uri(&ui->clip_uris, &ul, paths[i]);
+		char *grown = realloc(ui->clip_plain, pl + strlen(paths[i]) + 2);
+		if (grown) {
+			ui->clip_plain = grown;
+			pl += (size_t)sprintf(ui->clip_plain + pl, "%s%s", pl ? "\n" : "", paths[i]);
+		}
+		if (ui->clip_paths && (ui->clip_paths[ui->clip_paths_len] = strdup(paths[i]))) {
+			ui->clip_paths_len++;
+		}
+	}
+	// gnome's: copy or cut, then the uris a line each, no line end after
+	if (ui->clip_uris) {
+		size_t gl = strlen(ui->clip_uris) + 8;
+		ui->clip_gnome = malloc(gl);
+		if (ui->clip_gnome) {
+			snprintf(ui->clip_gnome, gl, "%s\n%s", cut ? "cut" : "copy", ui->clip_uris);
+			for (char *c = ui->clip_gnome; *c; c++) {
+				if (*c == '\r') {
+					memmove(c, c + 1, strlen(c));
+				}
+			}
+			size_t end = strlen(ui->clip_gnome);
+			while (end && ui->clip_gnome[end - 1] == '\n') {
+				ui->clip_gnome[--end] = '\0';
+			}
+		}
+	}
+	ui->clip_cut = cut;
+	clip_offer_ours(ui, true);
+}
+
+void fui_copy_text(struct fui *ui, const char *text) {
+	if (!ui->data_device) {
+		return;
+	}
+	clip_gone(ui);
+	ui->clip_plain = strdup(text);
+	clip_offer_ours(ui, false);
+}
+
+void fui_clipboard_clear(struct fui *ui) {
+	if (ui->data_device) {
+		wl_data_device_set_selection(ui->data_device, NULL, ui->input_serial);
+	}
+	clip_gone(ui);
+}
+
+bool fui_clipboard_has_files(const struct fui *ui) {
+	struct offer *o = offer_of(ui->clip_offer);
+	return o && (o->uri_list || o->gnome);
+}
+
+bool fui_clipboard_cut(const struct fui *ui, const char *path) {
+	for (size_t i = 0; ui->clip_source && ui->clip_cut && i < ui->clip_paths_len; i++) {
+		if (!strcmp(ui->clip_paths[i], path)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void paste_read(struct fui *ui, int fd, void *data) {
+	if (!read_all(fd, &ui->paste_buf, &ui->paste_len)) {
+		return;
+	}
+	fui_unwatch(ui, fd);
+	close(fd);
+	ui->paste_fd = -1;
+	char *text = ui->paste_buf ? ui->paste_buf : "";
+	if (ui->paste_field) {
+		// text for a field: what it says on one line
+		for (char *c = text; *c; c++) {
+			if (*c == '\n' || *c == '\r' || *c == '\t') {
+				*c = ' ';
+			}
+		}
+		size_t end = strlen(text);
+		while (end && text[end - 1] == ' ') {
+			text[--end] = '\0';
+		}
+		free(ui->pasted_text);
+		ui->pasted_text = strdup(text);
+	} else {
+		bool cut = false;
+		if (ui->paste_gnome) {
+			// copy or cut on the first line
+			cut = !strncmp(text, "cut", 3) && (text[3] == '\n' || !text[3]);
+			text += strcspn(text, "\n");
+		}
+		free_paths_list(ui->pasted, ui->pasted_len);
+		ui->pasted = NULL;
+		ui->pasted_len = 0;
+		parse_uris(text, &ui->pasted, &ui->pasted_len);
+		ui->pasted_cut = cut;
+		ui->pasted_ready = ui->pasted_len > 0;
+	}
+	free(ui->paste_buf);
+	ui->paste_buf = NULL;
+	ui->paste_len = 0;
+	fui_redraw(ui);
+}
+
+// what's on the clipboard read as mime, for a field (field) or as files
+static bool paste_start(struct fui *ui, const char *mime, uint64_t field) {
+	int pipes[2];
+	if (!ui->clip_offer || ui->paste_fd >= 0 || pipe(pipes) < 0) {
+		return false;
+	}
+	wl_data_offer_receive(ui->clip_offer, mime, pipes[1]);
+	close(pipes[1]);
+	wl_display_flush(ui->display);
+	fcntl(pipes[0], F_SETFL, O_NONBLOCK);
+	fcntl(pipes[0], F_SETFD, FD_CLOEXEC);
+	if (!fui_watch(ui, pipes[0], paste_read, NULL)) {
+		close(pipes[0]);
+		return false;
+	}
+	ui->paste_fd = pipes[0];
+	ui->paste_field = field;
+	ui->paste_gnome = !strcmp(mime, GNOME_COPIED);
+	return true;
+}
+
+bool fui_paste_files(struct fui *ui) {
+	struct offer *o = offer_of(ui->clip_offer);
+	if (!o || !(o->gnome || o->uri_list)) {
+		return false;
+	}
+	return paste_start(ui, o->gnome ? GNOME_COPIED : URI_LIST, 0);
+}
+
+char **fui_pasted_files(struct fui *ui, size_t *len, bool *cut) {
+	if (!ui->pasted_ready) {
+		return NULL;
+	}
+	*len = ui->pasted_len;
+	*cut = ui->pasted_cut;
+	return ui->pasted;
+}
+
+void fui_paste_text(struct fui *ui, uint64_t field) {
+	struct offer *o = offer_of(ui->clip_offer);
+	if (o && o->text) {
+		paste_start(ui, o->text, field);
+	}
+}
+
+char *fui_pasted_text(struct fui *ui, uint64_t field) {
+	if (!ui->pasted_text || ui->paste_field != field) {
+		return NULL;
+	}
+	return ui->pasted_text;
+}
+
 void fui_dnd_init(struct fui *ui) {
 	ui->peek_fd = -1;
+	ui->paste_fd = -1;
 	if (ui->data_manager && ui->seat) {
 		ui->data_device = wl_data_device_manager_get_data_device(ui->data_manager, ui->seat);
 		wl_data_device_add_listener(ui->data_device, &device_listener, ui);
@@ -531,6 +789,18 @@ void fui_dnd_init(struct fui *ui) {
 }
 
 void fui_dnd_frame_end(struct fui *ui) {
+	// a paste's files and text were the app's this frame
+	if (ui->pasted_ready) {
+		free_paths_list(ui->pasted, ui->pasted_len);
+		ui->pasted = NULL;
+		ui->pasted_len = 0;
+		ui->pasted_ready = false;
+	}
+	if (ui->pasted_text && ui->pasted_text_seen) {
+		free(ui->pasted_text);
+		ui->pasted_text = NULL;
+	}
+	ui->pasted_text_seen = ui->pasted_text != NULL;
 	if (!ui->dropped_ready) {
 		return;
 	}
@@ -554,6 +824,17 @@ void fui_dnd_finish(struct fui *ui) {
 	ui->drop_buf = NULL;
 	peek_stop(ui);
 	drag_end(ui);
+	clip_gone(ui);
+	offer_drop(ui->clip_offer);
+	ui->clip_offer = NULL;
+	if (ui->paste_fd >= 0) {
+		fui_unwatch(ui, ui->paste_fd);
+		close(ui->paste_fd);
+	}
+	free(ui->paste_buf);
+	free(ui->pasted_text);
+	ui->pasted_ready = true;
+	fui_dnd_frame_end(ui);
 	if (ui->data_device) {
 		wl_data_device_release(ui->data_device);
 		ui->data_device = NULL;
