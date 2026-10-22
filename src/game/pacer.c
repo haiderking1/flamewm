@@ -6,19 +6,32 @@
 
 // slower than 20 fps there's nothing left to smooth
 #define SLOWEST (50 * MS)
-// room on top of what the game takes, so a frame a bit slower than most
-// still makes its slot
-#define HEADROOM_PERCENT 8
-// a frame taking this many paces is a hitch (a shader compiling), not how
-// heavy the scene is: it doesn't slow the pace
+// a frame this far past its slot is late: the pace backs off
+#define LATE_NS (MS / 2)
+// a frame this many paces late is a hitch (a shader compiling), not how
+// heavy the scene is: the pace stays
 #define HITCH_PACES 3
-// the share of frames the pace has to fit, and the lead the release counts on
-#define PERCENTILE 90
+// on time, the pace speeds up by this fraction of itself a frame: a tenth
+// in about 100 frames, invisible with the display following the frames.
+// faster and it settles where a share of frames are late
+#define SPEED_UP_DIV 1000
+// a frame quicker than the lead the release counts on brings it down by
+// this fraction of the difference. a slower one raises it right away: a
+// release too late makes the frame late, and that's flame's doing, not the
+// scene's
+#define LEAD_DOWN_DIV 32
+// late, the pace backs off at most this fraction of itself in one frame
+#define BACK_OFF_MAX_DIV 10
+
+// the fastest the pace may be: the display's, or the cap
+static int64_t fastest_pace(const struct pacer *pacer) {
+	return pacer->fixed > pacer->fastest ? pacer->fixed : pacer->fastest;
+}
 
 void pacer_init(struct pacer *pacer, int64_t fastest, int64_t fixed) {
 	memset(pacer, 0, sizeof(*pacer));
 	pacer_set_limits(pacer, fastest, fixed);
-	pacer->interval = pacer->fixed > pacer->fastest ? pacer->fixed : pacer->fastest;
+	pacer->interval = fastest_pace(pacer);
 }
 
 void pacer_set_limits(struct pacer *pacer, int64_t fastest, int64_t fixed) {
@@ -27,71 +40,58 @@ void pacer_set_limits(struct pacer *pacer, int64_t fastest, int64_t fixed) {
 	pacer->fixed = fixed > 0 ? fixed : 0;
 }
 
-void pacer_released(struct pacer *pacer, int64_t t) {
+void pacer_released(struct pacer *pacer, int64_t t, bool held) {
 	pacer->released = t;
-}
-
-// the value PERCENTILE percent of the samples are at or under
-static int64_t percentile(const int64_t *samples, int len) {
-	int64_t sorted[PACER_SAMPLES];
-	memcpy(sorted, samples, (size_t)len * sizeof(*sorted));
-	for (int i = 1; i < len; i++) {
-		int64_t v = sorted[i];
-		int j = i;
-		for (; j > 0 && sorted[j - 1] > v; j--) {
-			sorted[j] = sorted[j - 1];
-		}
-		sorted[j] = v;
-	}
-	int index = (len * PERCENTILE + 99) / 100 - 1;
-	return sorted[index < 0 ? 0 : index];
+	pacer->held = held;
 }
 
 static int64_t clamp(int64_t v, int64_t lo, int64_t hi) {
 	return v < lo ? lo : v > hi ? hi : v;
 }
 
-// the pace the game can hold right now, a cap from the config on top
-static int64_t wanted(const struct pacer *pacer) {
-	int64_t want = pacer->len ? percentile(pacer->cost, pacer->len) : pacer->fastest;
-	want += want * HEADROOM_PERCENT / 100;
-	if (want < pacer->fixed) {
-		want = pacer->fixed;
-	}
-	return clamp(want, pacer->fastest, pacer->slowest);
-}
-
+// the pace comes from how frames turn out, not from what the game does
+// inside: its present can come from a thread of its own (dxgi on vulkan)
+// that says nothing about the game. busy: what the frame took once it
+// could start (let go, and the frame before it done): longer than the pace,
+// the game can't hold it and the pace backs off toward it. late with time
+// to spare, flame let it go too late: the lead grows, the pace stays. on
+// time, the pace speeds up a hair. it settles where nearly every frame
+// makes its slot
 void pacer_frame(struct pacer *pacer, int64_t presented, int64_t ready) {
 	if (ready < presented) {
 		ready = presented;
 	}
-	int64_t since = pacer->last_ready > presented ? pacer->last_ready : presented;
-	int64_t gpu = ready - since;
-	int64_t cpu = pacer->released && presented > pacer->released
-		? presented - pacer->released : 0;
-	int64_t cost = cpu > gpu ? cpu : gpu;
+	int64_t start = pacer->released > pacer->last_ready ? pacer->released : pacer->last_ready;
+	int64_t busy = start ? ready - start : 0;
 	int64_t lead = pacer->released && ready > pacer->released ? ready - pacer->released : 0;
-	pacer->last_ready = ready;
+	bool held = pacer->held;
 	pacer->released = 0;
-
-	if (cost < HITCH_PACES * pacer->interval) {
-		pacer->cost[pacer->at] = cost;
-		pacer->lead[pacer->at] = lead;
-		pacer->at = (pacer->at + 1) % PACER_SAMPLES;
-		if (pacer->len < PACER_SAMPLES) {
-			pacer->len++;
+	pacer->held = false;
+	pacer->last_ready = ready;
+	if (lead > 0 && lead < HITCH_PACES * pacer->interval) {
+		if (lead > pacer->lead) {
+			pacer->lead = lead;
+		} else {
+			pacer->lead -= (pacer->lead - lead) / LEAD_DOWN_DIV;
 		}
 	}
-
-	// glide: back off quick (a slot missed shows), speed up slowly (a
-	// steady rise is invisible with the display following the frames)
-	int64_t want = wanted(pacer);
-	if (want > pacer->interval) {
-		pacer->interval += (want - pacer->interval + 3) / 4;
-	} else {
-		pacer->interval -= (pacer->interval - want) / 48;
+	if (!pacer->last_shown) {
+		return;
 	}
-	pacer->interval = clamp(pacer->interval, pacer->fastest, pacer->slowest);
+	int64_t late = ready - (pacer->last_shown + pacer->interval);
+	if (late > HITCH_PACES * pacer->interval || busy > HITCH_PACES * pacer->interval) {
+		return; // a hitch: nothing to learn about the scene
+	}
+	if (busy > pacer->interval + LATE_NS) {
+		int64_t back = (busy - pacer->interval) / 2 + pacer->interval / 50;
+		int64_t most = pacer->interval / BACK_OFF_MAX_DIV;
+		pacer->interval += back < most ? back : most;
+	} else if (late > LATE_NS && held) {
+		// let go too late: the lead took it, the pace stays
+	} else if (late <= LATE_NS) {
+		pacer->interval -= pacer->interval / SPEED_UP_DIV;
+	}
+	pacer->interval = clamp(pacer->interval, fastest_pace(pacer), pacer->slowest);
 }
 
 int64_t pacer_slot(const struct pacer *pacer, int64_t ready) {
@@ -113,17 +113,7 @@ int64_t pacer_release_at(const struct pacer *pacer) {
 	if (!pacer->last_shown) {
 		return 0;
 	}
-	int64_t lead = 0;
-	if (pacer->len) {
-		int64_t leads[PACER_SAMPLES];
-		int n = 0;
-		for (int i = 0; i < pacer->len; i++) {
-			if (pacer->lead[i] > 0) {
-				leads[n++] = pacer->lead[i];
-			}
-		}
-		lead = n ? percentile(leads, n) : 0;
-	}
+	int64_t lead = pacer->lead;
 	int64_t margin = pacer->interval / 10 > MS ? pacer->interval / 10 : MS;
 	return pacer->last_shown + pacer->interval - lead - margin;
 }

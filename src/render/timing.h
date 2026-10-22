@@ -30,6 +30,7 @@ struct flame_frame_timing {
 	// this report
 	uint32_t flips, composited, scanout, cursor, failed, tearing;
 	double pace_fps; // the game paced on this output, 0 for none (frame.pace_fps)
+	uint32_t pace_stuck; // times it waited on buffers the pacer held, all given back
 	// successors: rendered behind a pending flip, sent when it landed, or
 	// refused by KMS right then
 	uint32_t prepared, promoted, discarded;

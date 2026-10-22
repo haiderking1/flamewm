@@ -247,11 +247,13 @@ struct xlayer {
 	struct pacer *pacer;
 	int64_t release_at; // INT64_MAX: it got its one for this frame
 	struct wl_list held_back; // xpresent.held_link, oldest first
-	// frames in a row that came well before their slot: the game has a
-	// spare buffer, and given one a frame it stays a frame ahead for good
-	// (lag). the next release is skipped once that's clear, the spare's used
-	int early_frames;
+	// presents in a row with nothing let go since the one before: the game
+	// draws into a spare buffer of its own, and given one a frame it stays a
+	// frame ahead for good (lag). once that's clear the next release is
+	// skipped, the spare gets used up
+	int spare_frames;
 	bool skip_release;
+	bool released; // a buffer went back since its last present
 	int64_t last_present; // when it last presented, a game stuck on us hasn't
 };
 
@@ -538,8 +540,8 @@ static void arm_msc_timer(struct flame_xshell *xshell);
 #define PACE_STUCK_NS 100000000LL
 // a slot this close is due, the timer isn't finer
 #define PACE_EARLY_NS 200000LL
-// frames well early in a row before the game counts as a buffer ahead
-#define PACE_EARLY_FRAMES 8
+// presents in a row on a spare before the game counts as a frame ahead
+#define PACE_SPARE_FRAMES 4
 
 // paced: the game has its one buffer for this frame, the rest wait for the
 // release. true: xp waits
@@ -549,6 +551,11 @@ static bool pace_holds(struct xpresent *xp) {
 		return false;
 	}
 	int64_t now = now_ns();
+	if (layer->skip_release && now >= layer->release_at) {
+		// due now, but it has a spare: this frame it goes without
+		layer->skip_release = false;
+		layer->release_at = INT64_MAX;
+	}
 	if (now < layer->release_at) {
 		if (!xp->back_held) {
 			xp->back_held = true;
@@ -560,8 +567,9 @@ static bool pace_holds(struct xpresent *xp) {
 	}
 	// the release was due before this one was free: it's the one
 	layer->release_at = INT64_MAX;
+	layer->released = true;
 	if (!layer->pacer->released) {
-		pacer_released(layer->pacer, now);
+		pacer_released(layer->pacer, now, false);
 	}
 	return false;
 }
@@ -573,10 +581,11 @@ static void pace_release(struct xlayer *layer, int64_t now) {
 	wl_list_init(&xp->held_link);
 	xp->back_held = false;
 	xp->back_paced = true;
+	layer->released = true;
 	if (layer->pacer) {
 		layer->release_at = INT64_MAX;
 		if (!layer->pacer->released) {
-			pacer_released(layer->pacer, now);
+			pacer_released(layer->pacer, now, true);
 		}
 	}
 	give_back(xp);
@@ -588,12 +597,19 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 		return;
 	}
 	if (now - layer->last_present >= PACE_STUCK_NS) {
-		pace_release(layer, now); // it waits on it, whatever we think
+		// it waits on us, whatever we think: everything goes back
+		struct flame_frame *frame = layer->window->xshell->clock.frame;
+		if (frame) {
+			frame->timing.pace_stuck++;
+		}
+		wlr_log(WLR_DEBUG, "xshell: 0x%x waited on its buffers, all of them go back", layer->id);
+		while (!wl_list_empty(&layer->held_back)) {
+			pace_release(layer, now);
+		}
 	} else if (now >= layer->release_at) {
 		if (layer->skip_release) {
 			// it's drawing into its spare: this frame it goes without
 			layer->skip_release = false;
-			layer->early_frames = 0;
 			layer->release_at = INT64_MAX;
 		} else {
 			pace_release(layer, now);
@@ -616,17 +632,38 @@ static bool pace_slot_due(struct xlayer *layer, struct xpresent *xp, int64_t now
 		int64_t ready = xp->ready_at ? xp->ready_at : now;
 		pacer_frame(layer->pacer, xp->requested, ready);
 		xp->show_at = pacer_slot(layer->pacer, ready);
-		// let go just in time it's ready a margin before its slot. half a
-		// pace or more, frame after frame: it had a buffer of its own
-		if (xp->show_at - ready > layer->pacer->interval / 2) {
-			if (++layer->early_frames >= PACE_EARLY_FRAMES) {
-				layer->skip_release = true;
-			}
-		} else {
-			layer->early_frames = 0;
-		}
 	}
 	return now >= xp->show_at - PACE_EARLY_NS;
+}
+
+static void retire(struct xlayer *layer, struct xpresent *xp);
+static void show(struct xlayer *layer, struct xpresent *xp);
+
+// paced, the slots say when, not the msc: the newest frame that's ready
+// goes on its slot, older ready ones behind it are skipped. a game that got
+// ahead (frames lining up for their slots, lag) drops back to one
+static void pace_queue(struct xlayer *layer, int64_t now) {
+	struct xpresent *newest = NULL, *xp, *tmp;
+	wl_list_for_each(xp, &layer->queue, link) {
+		if (xp->acquiring) {
+			break; // the ones behind it wait too, order stays
+		}
+		newest = xp;
+	}
+	if (!newest) {
+		return;
+	}
+	wl_list_for_each_safe(xp, tmp, &layer->queue, link) {
+		if (xp == newest) {
+			break;
+		}
+		wl_list_remove(&xp->link);
+		retire(layer, xp);
+	}
+	if (pace_slot_due(layer, newest, now)) {
+		wl_list_remove(&newest->link);
+		show(layer, newest);
+	}
 }
 
 // the game's frame went on screen: when it's let go for the next one
@@ -1231,13 +1268,13 @@ static void process_msc(struct flame_xshell *xshell, int64_t now) {
 		if (layer->pacer) {
 			pace_tick(layer, now);
 		}
-		while (!wl_list_empty(&layer->queue)) {
+		if (layer->pacer) {
+			pace_queue(layer, now);
+		}
+		while (!layer->pacer && !wl_list_empty(&layer->queue)) {
 			struct xpresent *first = wl_container_of(layer->queue.next, first, link);
 			if (first->acquiring || first->target > now_msc + 1) {
 				break; // the ones behind it wait too, order stays
-			}
-			if (layer->pacer && !pace_slot_due(layer, first, now)) {
-				break; // on its slot
 			}
 			wl_list_remove(&first->link);
 			show(layer, first);
@@ -1499,6 +1536,26 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		deliver_held(layer);
 		layer->last_present = now_ns();
 		pace_update(layer);
+		struct xs_pixmap *pixmap = present->pixmap;
+		if (layer->pacer && !wl_list_empty(&layer->held_back)) {
+			struct xpresent *held = wl_container_of(layer->held_back.next, held, held_link);
+			if (held->pixmap->width != pixmap->width || held->pixmap->height != pixmap->height) {
+				// a new swapchain (fullscreen, a resize): the old one's buffers
+				// go back now, the game waits on them before it's done with it
+				while (!wl_list_empty(&layer->held_back)) {
+					pace_release(layer, now_ns());
+				}
+			}
+		}
+		if (layer->pacer && layer->pacer->last_shown) {
+			if (layer->released) {
+				layer->spare_frames = 0;
+			} else if (++layer->spare_frames >= PACE_SPARE_FRAMES) {
+				layer->spare_frames = 0;
+				layer->skip_release = true;
+			}
+		}
+		layer->released = false;
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);

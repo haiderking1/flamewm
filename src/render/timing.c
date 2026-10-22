@@ -99,6 +99,7 @@ static void handle_present(struct wl_listener *listener, void *data) {
 static void reset_span(struct flame_frame_timing *timing) {
 	timing->flips = timing->composited = timing->scanout = timing->cursor = timing->failed = 0;
 	timing->tearing = 0;
+	timing->pace_stuck = 0;
 	timing->prepared = timing->promoted = timing->discarded = 0;
 	memset(&timing->timer_late, 0, sizeof(timing->timer_late));
 	timing->timer_early = 0;
@@ -129,7 +130,7 @@ static int handle_report(void *data) {
 	char wayland[64], x11[64], slack[64], gpu_done[64];
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
-		"pipeline=%s overlap=%s asap=%s vrr=%s pace_fps=%.1f lead_ms=%.3f "
+		"pipeline=%s overlap=%s asap=%s vrr=%s pace_fps=%.1f pace_stuck=%u lead_ms=%.3f "
 		"flips=%u flip_hz=%.1f composited=%u scanout=%u cursor=%u failed=%u tearing=%u "
 		"successors=%u promoted=%u discarded=%u timer_late_ms=%s timer_early=%u "
 		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s gpu_done_ms=%s flip_ms=%s "
@@ -142,7 +143,7 @@ static int handle_report(void *data) {
 		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
 		schedule->asap ? "on" : "off",
 		timing->output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED ? "on" : "off",
-		timing->pace_fps, schedule_lead(schedule) / 1e6,
+		timing->pace_fps, timing->pace_stuck, schedule_lead(schedule) / 1e6,
 		timing->flips, span > 0 ? timing->flips / span : 0.0,
 		timing->composited, timing->scanout, timing->cursor, timing->failed, timing->tearing,
 		timing->prepared, timing->promoted, timing->discarded,
