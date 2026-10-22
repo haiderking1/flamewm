@@ -256,6 +256,62 @@ cat full.out" "paced: yes" "even: yes" "kept going: yes"
 CASE_ARGS=
 case_run "an app busy for a while while flame has lots to tell it: still connected after" "
 $BIN/wlstall 20000" "mapped" "after the stall: still connected"
+case_run "share picker: picked on the windows themselves, the bar switches to the screen or cancels" "
+foot -T left > /dev/null 2>&1 &
+sleep 1
+foot -T right > /dev/null 2>&1 &
+sleep 1.2
+$CTL pointer move 960 400 > /dev/null
+grim -t ppm before.ppm
+$CTL share-pick > pick.out 2> pick.err &
+sleep 0.6
+grim -t ppm open.ppm
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+echo \"enter [\$(cat pick.out)]\"
+$CTL share-pick > pick.out 2> pick.err &
+sleep 0.5
+$CTL key Right press > /dev/null; $CTL key Right release > /dev/null
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+echo \"screen [\$(cat pick.out)]\"
+$CTL share-pick > pick.out 2> pick.err &
+sleep 0.5
+$CTL key Escape press > /dev/null; $CTL key Escape release > /dev/null
+sleep 0.3
+echo \"escape [\$(cat pick.out)] \$(cat pick.err)\"
+$CTL share-pick > pick.out 2> pick.err &
+sleep 0.5
+$CTL pointer move 300 400 > /dev/null
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.3
+echo \"click [\$(cat pick.out)]\"
+$CTL share-pick > pick.out 2> pick.err &
+sleep 0.5
+$CTL key Super_L press > /dev/null; $CTL key 2 press > /dev/null
+$CTL key 2 release > /dev/null; $CTL key Super_L release > /dev/null
+sleep 0.4
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+echo \"empty workspace, enter: [\$(cat pick.out)]\"
+$CTL pointer move 740 36 > /dev/null
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.3
+echo \"cancel [\$(cat pick.out)] \$(cat pick.err)\"
+python3 -I -c \"
+def px(p):
+	d = open(p, 'rb').read()
+	return d[-(1280 * 720 * 3):]
+def avg(px, x0, x1):
+	s = [px[(y * 1280 + x) * 3] for y in range(100, 700, 7) for x in range(x0, x1, 7)]
+	return sum(s) / len(s)
+b, o = px('before.ppm'), px('open.ppm')
+print('left dimmed' if avg(o, 20, 600) < avg(b, 20, 600) * 0.75 else 'left not dimmed')
+print('right lit' if avg(o, 680, 1260) > avg(b, 680, 1260) * 0.85 else 'right dimmed')
+\"" "enter [Window: " "screen [Monitor: HEADLESS-1]" \
+	"escape [] {\"ok\":false,\"error\":\"cancelled\"}" "click [Window: " \
+	"empty workspace, enter: []" "cancel [] {\"ok\":false,\"error\":\"cancelled\"}" \
+	"left dimmed" "right lit"
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

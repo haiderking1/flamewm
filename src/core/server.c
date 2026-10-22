@@ -38,7 +38,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& xshell_init(&server->xshell, server, &server->xbridge.xserver)
 		&& xselection_init(&server->xselection, server, &server->xbridge.xserver)
 		&& ext_workspaces_init(&server->ext_workspaces, server)
-		&& capture_init(&server->capture, server);
+		&& capture_init(&server->capture, server)
+		&& picker_init(&server->picker, server);
 }
 
 static void server_keymap_names(struct flame_server *server);
@@ -69,7 +70,8 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	// real seat: a nested or headless flame mustn't take over the session's
 	if (server->backend.session) {
 		const char *const argv[] = {"dbus-update-activation-environment", "--systemd",
-			"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", NULL};
+			"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE",
+			"FLAMEWM_SOCKET", NULL};
 		spawn(argv);
 	}
 
@@ -168,6 +170,7 @@ void server_finish(struct flame_server *server) {
 	xselection_finish(&server->xselection);
 	xbridge_finish(&server->xbridge);
 	xshell_finish(&server->xshell);
+	picker_finish(&server->picker);
 	capture_finish(&server->capture);
 	ext_workspaces_finish(&server->ext_workspaces);
 	desktop_finish(&server->desktop);

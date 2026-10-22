@@ -124,6 +124,10 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 		dnd_pointer(cursor, time_msec);
 		return;
 	}
+	if (picker_active(&server->picker)) {
+		picker_pointer_motion(&server->picker, cursor->wlr->x, cursor->wlr->y);
+		return;
+	}
 	if (held_motion(cursor, time_msec)) {
 		return;
 	}
@@ -192,6 +196,10 @@ static void button_event(struct flame_cursor *cursor,
 	struct flame_server *server = cursor->server;
 
 	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
+	if (picker_active(&server->picker)) {
+		picker_pointer_button(&server->picker, cursor->wlr->x, cursor->wlr->y, pressed);
+		return;
+	}
 	xbridge_pointer_input(&server->xbridge, true);
 	if (drag_button(&server->input.drag, event->button, pressed)) {
 		return;
@@ -263,7 +271,7 @@ static void handle_button(struct wl_listener *listener, void *data) {
 }
 
 static void axis_event(struct flame_cursor *cursor, struct wlr_pointer_axis_event *event) {
-	if (drag_active(&cursor->server->input.drag)) {
+	if (drag_active(&cursor->server->input.drag) || picker_active(&cursor->server->picker)) {
 		return;
 	}
 	if (xshell_pointer_axis(&cursor->server->xshell,

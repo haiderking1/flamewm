@@ -32,6 +32,7 @@ void view_init(struct flame_view *view, const struct flame_view_impl *impl,
 
 void view_finish(struct flame_view *view) {
 	capture_view_gone(&view->desktop->server->capture, view);
+	picker_view_gone(&view->desktop->server->picker, view);
 	window_anim_free(view);
 	scene_node_destroy(&view->tree->node);
 }

@@ -52,7 +52,15 @@ static void handle_key(struct wl_listener *listener, void *data) {
 	struct wlr_keyboard_key_event *event = data;
 
 	bool handled = false;
-	xserver_activity(&keyboard->input->server->xbridge.xserver);
+	struct flame_server *server = keyboard->input->server;
+	xserver_activity(&server->xbridge.xserver);
+	// the share picker has the keyboard: tab, arrows, enter, escape. binds go on
+	if (picker_key(&server->picker, event->keycode + 8,
+			xkb_state_key_get_one_sym(keyboard->wlr->xkb_state, event->keycode + 8),
+			event->state == WL_KEYBOARD_KEY_STATE_PRESSED,
+			wlr_keyboard_get_modifiers(keyboard->wlr))) {
+		return;
+	}
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		// libinput keycodes are evdev, xkb is offset by 8
 		handled = handle_press(keyboard, event->keycode + 8);
