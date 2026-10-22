@@ -321,10 +321,22 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 		ewmh_update(xshell);
 	} else if (type == atom(xshell, NET_ACTIVE_WINDOW)) {
 		// apps asking for focus get it on the workspace that shows, they
-		// don't pull the user to another one
-		if (view->workspace == desktop->active) {
-			focus_view(desktop, view);
+		// don't pull the user to another one. and only from their own
+		// windows, like windows' foreground lock: another app the user is
+		// in keeps it. wine asks as a pager with no timestamp, so neither
+		// says anything (a game took focus back from a tool next to it
+		// every few seconds, every key went to the game)
+		struct flame_view *focused = desktop->focused;
+		pid_t pid = xshell_view_pid(xshell, view);
+		if (view->workspace != desktop->active) {
+			return;
 		}
+		if (focused && focused != view && (!pid || pid != xshell_view_pid(xshell, focused))) {
+			wlr_log(WLR_DEBUG, "xshell: 0x%x asks for the focus, another app has it: refused",
+				id);
+			return;
+		}
+		focus_view(desktop, view);
 	} else if (type == atom(xshell, NET_CLOSE_WINDOW)) {
 		view_close(view);
 	} else if (type == atom(xshell, NET_WM_MOVERESIZE)) {

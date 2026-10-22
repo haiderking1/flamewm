@@ -1,5 +1,5 @@
 // flame as X's window manager, the EWMH way an app sees it
-// usage: xewmh check | fullscreen | startfull | activate | close | dpi | configure |
+// usage: xewmh check | fullscreen | startfull | activate | steal | close | dpi | configure |
 //   subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL | grabaway FLAMECTL
 #include <stdbool.h>
 #include <stdio.h>
@@ -182,6 +182,64 @@ int main(int argc, char **argv) {
 		xcb_get_property_reply_t *list = prop(s->root, "_NET_CLIENT_LIST");
 		printf("clients: %d\n", list ? xcb_get_property_value_length(list) / 4 : -1);
 		free(list);
+	} else if (!strcmp(mode, "steal")) {
+		// another app asking for the focus wine's way (as a pager, no
+		// timestamp) while the user is in this one: refused. between its
+		// own windows an app moves focus as it likes
+		int ready[2], go[2], done[2];
+		if (pipe(ready) < 0 || pipe(go) < 0 || pipe(done) < 0) {
+			return 1;
+		}
+		xcb_disconnect(c);
+		pid_t child = fork();
+		if (child == 0) {
+			c = xcb_connect(NULL, NULL);
+			s = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+			xcb_window_t b = window(false);
+			settle();
+			char byte;
+			if (write(ready[1], &b, sizeof(b)) != sizeof(b) || read(go[0], &byte, 1) != 1) {
+				_exit(1);
+			}
+			wm_message(b, "_NET_ACTIVE_WINDOW", 2, 0, 0);
+			settle();
+			// its window stays till the other side looked: gone, the focus
+			// would come back anyway
+			if (write(ready[1], &b, sizeof(b)) != sizeof(b) || read(done[0], &byte, 1) != 1) {
+				_exit(1);
+			}
+			_exit(0);
+		}
+		c = xcb_connect(NULL, NULL);
+		s = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+		xcb_window_t b;
+		if (read(ready[0], &b, sizeof(b)) != sizeof(b)) {
+			return 1;
+		}
+		xcb_window_t a = window(false);
+		settle();
+		printf("the user is in this app: %s\n",
+			first32(s->root, "_NET_ACTIVE_WINDOW") == a ? "yes" : "no");
+		if (write(go[1], "x", 1) != 1) {
+			return 1;
+		}
+		if (read(ready[0], &b, sizeof(b)) != sizeof(b)) {
+			return 1;
+		}
+		settle();
+		printf("the other app asked, still this one: %s\n",
+			first32(s->root, "_NET_ACTIVE_WINDOW") == a ? "yes" : "no");
+		if (write(done[1], "x", 1) != 1) {
+			return 1;
+		}
+		waitpid(child, NULL, 0);
+		xcb_window_t a2 = window(false);
+		settle();
+		wm_message(a, "_NET_ACTIVE_WINDOW", 2, 0, 0);
+		settle();
+		printf("its own window back: %s\n",
+			first32(s->root, "_NET_ACTIVE_WINDOW") == a ? "yes" : "no");
+		(void)a2;
 	} else if (!strcmp(mode, "wmstate")) {
 		// ICCCM: Normal once managed, Withdrawn once the app unmaps it
 		xcb_window_t w = window(false);

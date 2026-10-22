@@ -4,6 +4,7 @@
 #include <pixman.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <wayland-server-core.h>
 
 #include "desktop/view.h"
@@ -184,6 +185,9 @@ bool xshell_pointer_grabbed(const struct flame_xshell *xshell);
 // pointer passing over other windows moves no focus until it closes, like
 // a wayland popup's grab. clicks still do
 bool xshell_menu_open(struct flame_xshell *xshell);
+// the process behind any window, X or wayland (steam's bridged ones), 0
+// for unknown
+pid_t xshell_view_pid(struct flame_xshell *xshell, struct flame_view *view);
 // a key typed in a wayland window: X apps see it the way the config's
 // x_global_keys says (push to talk, obs hotkeys, global hotkeys). true: an
 // X app's global hotkey took it, the window doesn't get it
