@@ -211,6 +211,17 @@ void ewmh_update(struct flame_xshell *xshell) {
 			write_state(xshell, x, bits);
 		}
 	}
+	// a wayland window in front, X has no word for: flame's own window is
+	// active then, another app's as far as X apps can tell. None says
+	// nothing, and wine keeps its game in front on it (and lets it take
+	// the raw clicks meant for the browser)
+	bool x_focused = false;
+	wl_list_for_each(window, &xshell->windows, link) {
+		x_focused |= desktop->focused == &window->view;
+	}
+	if (desktop->focused && !x_focused) {
+		active = xshell->ewmh.check;
+	}
 	struct xs_window *root = root_of(xshell);
 	if (!xshell->ewmh.active_set || active != xshell->ewmh.active) {
 		xshell->ewmh.active = active;
@@ -343,6 +354,15 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 			return;
 		}
 		focus_view(desktop, view);
+	} else if (type == xserver_atom(xshell->xserver, "WM_CHANGE_STATE") && data[0] == 3) {
+		// ICCCM's minimize (IconicState). flame has none, the window stays
+		// where it is, and the app hears it's still Normal: wine waits for
+		// WM_STATE to move, and meanwhile ignores focus coming back (a game
+		// that lost focus came back half minimized, fullscreen at random)
+		struct xs_window *x = xserver_window(xshell->xserver, id);
+		if (x) {
+			set_wm_state(xshell, x, WM_STATE_NORMAL);
+		}
 	} else if (type == atom(xshell, NET_CLOSE_WINDOW)) {
 		view_close(view);
 	} else if (type == atom(xshell, NET_WM_MOVERESIZE)) {
