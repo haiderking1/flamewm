@@ -68,6 +68,14 @@ cairo_t *fui_cairo(struct fui *ui) {
 	return ui->cr;
 }
 
+int fui_width(const struct fui *ui) {
+	return ui->width;
+}
+
+int fui_height(const struct fui *ui) {
+	return ui->height;
+}
+
 double fui_time(const struct fui *ui) {
 	return ui->now;
 }
@@ -381,6 +389,12 @@ static void backspace(char *text) {
 	text[len] = '\0';
 }
 
+// a key that types something: not a control character (tab, ctrl+f...)
+static bool typable(const struct fui_key *k) {
+	unsigned char c = (unsigned char)k->text[0];
+	return c >= 0x20 && c != 0x7f;
+}
+
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 		int size, const char *placeholder, bool enabled) {
 	const double h = 28;
@@ -408,7 +422,7 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 				focused = false;
 			} else if (k->sym == XKB_KEY_BackSpace) {
 				backspace(text);
-			} else if (k->text[0] && strlen(text) + strlen(k->text) < (size_t)size) {
+			} else if (typable(k) && strlen(text) + strlen(k->text) < (size_t)size) {
 				strcat(text, k->text);
 			}
 		}
@@ -438,6 +452,96 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 	}
 	cairo_restore(ui->cr);
 	return changed;
+}
+
+bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
+		int size) {
+	const double h = 28;
+	char before[256];
+	snprintf(before, sizeof(before), "%s", text);
+	bool hover = fui_hover(ui, x, y, w, h);
+	bool over_clear = *text && fui_hover(ui, x + w - 26, y, 26, h);
+	bool focused = ui->focus == id;
+	if (over_clear) {
+		fui_cursor_pointer(ui);
+	} else if (hover) {
+		ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
+	}
+	if (*text && fui_clicked(ui, x + w - 26, y, 26, h)) {
+		text[0] = '\0';
+	} else if (!focused && fui_clicked(ui, x, y, w, h)) {
+		ui->focus = id;
+		focused = true;
+	} else if (focused && ui->pressed && !hover) {
+		ui->focus = 0;
+		focused = false;
+	}
+	// typing with nothing else taking the keys: that's a search
+	for (int i = 0; i < ui->keys_len && !focused && !ui->focus; i++) {
+		if (typable(&ui->keys[i])) {
+			ui->focus = id;
+			focused = true;
+		}
+	}
+	for (int i = 0; focused && i < ui->keys_len; i++) {
+		const struct fui_key *k = &ui->keys[i];
+		if (k->sym == XKB_KEY_Escape) {
+			// the search first, then the field
+			if (*text) {
+				text[0] = '\0';
+			} else {
+				ui->focus = 0;
+				focused = false;
+			}
+		} else if (k->sym == XKB_KEY_BackSpace) {
+			backspace(text);
+		} else if (typable(k) && strlen(text) + strlen(k->text) < (size_t)size) {
+			strcat(text, k->text);
+		}
+	}
+
+	double lit = fui_ease(ui, id, focused ? 1 : 0, 18);
+	fui_fill_rounded(ui, x, y, w, h, 8, 0xffffff14);
+	fui_rounded(ui, x + 0.5, y + 0.5, w - 1, h - 1, 8);
+	fui_color(ui, mix(0xffffff1a, ACCENT, lit));
+	cairo_set_line_width(ui->cr, 1 + lit);
+	cairo_stroke(ui->cr);
+	// the magnifier
+	fui_color(ui, TEXT_DIM);
+	cairo_set_line_width(ui->cr, 1.5);
+	cairo_set_line_cap(ui->cr, CAIRO_LINE_CAP_ROUND);
+	cairo_arc(ui->cr, x + 14, y + 13, 4.5, 0, 2 * M_PI);
+	cairo_stroke(ui->cr);
+	cairo_move_to(ui->cr, x + 17.3, y + 16.3);
+	cairo_line_to(ui->cr, x + 20.5, y + 19.5);
+	cairo_stroke(ui->cr);
+	cairo_save(ui->cr);
+	cairo_rectangle(ui->cr, x + 26, y, w - 26 - (*text ? 26 : 8), h);
+	cairo_clip(ui->cr);
+	bool empty = !*text;
+	// focused and empty: the caret first, the placeholder after it
+	double tx = x + 27 + (focused && empty ? 4 : 0);
+	double tw = fui_text(ui, tx, y + 6, empty ? "Search" : text, FONT,
+		empty ? with_alpha(TEXT_DIM, 0.8) : TEXT, FUI_LEFT, 0);
+	if (focused) {
+		fui_fill_rounded(ui, x + 27 + (empty ? 0 : tw + 1), y + 6, 1.6, h - 12, 0.8, ACCENT);
+	}
+	cairo_restore(ui->cr);
+	// clearing it
+	if (*text) {
+		double cx = x + w - 14, cy = y + h / 2;
+		cairo_arc(ui->cr, cx, cy, 7, 0, 2 * M_PI);
+		fui_color(ui, over_clear ? 0xffffff66 : 0xffffff3d);
+		cairo_fill(ui->cr);
+		fui_color(ui, 0x1c1c20ff);
+		cairo_set_line_width(ui->cr, 1.4);
+		cairo_move_to(ui->cr, cx - 2.6, cy - 2.6);
+		cairo_line_to(ui->cr, cx + 2.6, cy + 2.6);
+		cairo_move_to(ui->cr, cx + 2.6, cy - 2.6);
+		cairo_line_to(ui->cr, cx - 2.6, cy + 2.6);
+		cairo_stroke(ui->cr);
+	}
+	return strcmp(before, text) != 0;
 }
 
 bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *label) {

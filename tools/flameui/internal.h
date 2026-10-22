@@ -68,6 +68,7 @@ struct fui {
 	struct wp_viewport *viewport;
 	struct flame_glass_v1 *glass;
 	bool configured;
+	int width, height; // layout units, as flame last configured it
 	uint32_t scale120; // the screen's scale, 120ths
 	struct fui_buffer buffers[2];
 	struct wl_callback *frame_callback;
