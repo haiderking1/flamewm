@@ -141,8 +141,15 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 	}
 	if (!strcmp(name, "share-pick")) {
 		// the answer comes when the user picks, raw for the portal's chooser:
-		// "Monitor: NAME" or "Window: ID", an error when cancelled
-		picker_open(&client->ipc->server->picker, client);
+		// "Monitor: NAME" or "Window: ID", an error when cancelled. "screen"
+		// and "window" after it: what the app asked for, both when neither
+		unsigned kinds = 0;
+		const char *kind;
+		while ((kind = strtok_r(NULL, " \t\r", &save))) {
+			kinds |= !strcmp(kind, "screen") ? PICKER_SCREENS
+				: !strcmp(kind, "window") ? PICKER_WINDOWS : 0;
+		}
+		picker_open(&client->ipc->server->picker, client, kinds);
 		return;
 	}
 	if (!strcmp(name, "test")) {

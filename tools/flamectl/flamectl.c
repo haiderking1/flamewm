@@ -17,7 +17,72 @@ static void usage(void) {
 	fprintf(stderr,
 		"usage: flamectl <command> [arg]\n"
 		"  subscribe | state | workspace <1-10> | movetoworkspace <1-10>\n"
-		"  focus next|prev | fullscreen | close | quit\n");
+		"  focus next|prev | fullscreen | close | quit\n"
+		"  share-pick [--dmenu]  (what to share, for xdg-desktop-portal-wlr)\n");
+}
+
+// xdg-desktop-portal-wlr's dmenu chooser: what the app asked for comes in on
+// stdin, a line a source ("Monitor: NAME DESCRIPTION", "Window: TITLE (ID)"),
+// the pick goes back as one of those lines exactly. the picker's told which
+// kinds there are, so a screen asked for opens on the screen
+struct portal_list {
+	char **lines;
+	size_t len;
+	bool screens, windows;
+};
+
+static bool read_portal_list(struct portal_list *list) {
+	*list = (struct portal_list){0};
+	size_t cap = 0;
+	char *line = NULL;
+	size_t size = 0;
+	ssize_t got;
+	while ((got = getline(&line, &size, stdin)) >= 0) {
+		if (got > 0 && line[got - 1] == '\n') {
+			line[got - 1] = '\0';
+		}
+		if (!strncmp(line, "Monitor: ", 9)) {
+			list->screens = true;
+		} else if (!strncmp(line, "Window: ", 8)) {
+			list->windows = true;
+		} else {
+			continue;
+		}
+		if (list->len == cap) {
+			cap = cap ? cap * 2 : 16;
+			char **grown = realloc(list->lines, cap * sizeof(*grown));
+			if (!grown) {
+				return false;
+			}
+			list->lines = grown;
+		}
+		list->lines[list->len++] = strdup(line);
+	}
+	free(line);
+	return true;
+}
+
+// the portal's line for flame's answer: "Monitor: NAME" is the line for
+// that output, "Window: ID" the one ending in (ID). NULL: none
+static const char *portal_line(const struct portal_list *list, const char *answer) {
+	size_t len = strlen(answer);
+	for (size_t i = 0; i < list->len; i++) {
+		const char *line = list->lines[i];
+		if (!strncmp(answer, "Monitor: ", 9)) {
+			if (!strncmp(line, answer, len) && (line[len] == ' ' || line[len] == '\0')) {
+				return line;
+			}
+		} else if (!strncmp(answer, "Window: ", 8)) {
+			const char *id = answer + 8;
+			size_t id_len = strlen(id), line_len = strlen(line);
+			if (line_len >= id_len + 2 && line[line_len - 1] == ')'
+					&& line[line_len - id_len - 2] == '('
+					&& !strncmp(line + line_len - id_len - 1, id, id_len)) {
+				return line;
+			}
+		}
+	}
+	return NULL;
 }
 
 // $FLAMEWM_SOCKET from anything flame started, else worked out the same way
@@ -79,6 +144,28 @@ int main(int argc, char **argv) {
 		return argc < 2 ? 1 : 0;
 	}
 
+	struct portal_list portal = {0};
+	bool dmenu = !strcmp(argv[1], "share-pick") && argc == 3 && !strcmp(argv[2], "--dmenu");
+	if (dmenu) {
+		if (!read_portal_list(&portal)) {
+			return 1;
+		}
+		// asked for: share-pick screen window, or one of them
+		static char screen[] = "screen", window[] = "window";
+		static char *kinds[4];
+		int n = 0;
+		kinds[n++] = argv[0];
+		kinds[n++] = argv[1];
+		if (portal.screens) {
+			kinds[n++] = screen;
+		}
+		if (portal.windows) {
+			kinds[n++] = window;
+		}
+		argc = n;
+		argv = kinds;
+	}
+
 	// the arguments, space separated, as one line
 	size_t len = 1;
 	for (int i = 1; i < argc; i++) {
@@ -132,7 +219,8 @@ int main(int argc, char **argv) {
 		while ((newline = strchr(start, '\n'))) {
 			*newline = '\0';
 			bool failed = strstr(start, "\"ok\":false") != NULL;
-			fprintf(failed ? stderr : stdout, "%s\n", start);
+			const char *pick = dmenu && !failed ? portal_line(&portal, start) : NULL;
+			fprintf(failed ? stderr : stdout, "%s\n", pick ? pick : start);
 			fflush(failed ? stderr : stdout);
 			if (!stream) {
 				close(fd);

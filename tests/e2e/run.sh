@@ -312,6 +312,30 @@ print('right lit' if avg(o, 680, 1260) > avg(b, 680, 1260) * 0.85 else 'right di
 	"escape [] {\"ok\":false,\"error\":\"cancelled\"}" "click [Window: " \
 	"empty workspace, enter: []" "cancel [] {\"ok\":false,\"error\":\"cancelled\"}" \
 	"left dimmed" "right lit"
+case_run "share picker as the portal's dmenu chooser: only what the app asked for, answered in its lines" "
+foot -T one > /dev/null 2>&1 &
+sleep 1.2
+$CTL pointer move 640 360 > /dev/null
+printf 'Monitor: HEADLESS-1 a screen\\n' | $CTL share-pick --dmenu > a.out 2>&1
+echo \"screen asked [\$(cat a.out)]\"
+$CTL share-pick > raw.out 2>&1 &
+sleep 0.5
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+ID=\$(sed 's/^Window: //' raw.out)
+printf 'Window: one (%s)\\nWindow: other (nope)\\n' \"\$ID\" | $CTL share-pick --dmenu > w.out 2>&1 &
+sleep 0.5
+$CTL key Right press > /dev/null; $CTL key Right release > /dev/null
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+[ \"\$(cat w.out)\" = \"Window: one (\$ID)\" ] && echo 'window asked: its line back' || echo \"window asked: [\$(cat w.out)]\"
+printf 'Monitor: HEADLESS-1 a screen\\nWindow: one (%s)\\n' \"\$ID\" | $CTL share-pick --dmenu > b.out 2>&1 &
+sleep 0.5
+$CTL key Right press > /dev/null; $CTL key Right release > /dev/null
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.3
+echo \"both asked, screen picked [\$(cat b.out)]\"" "screen asked [Monitor: HEADLESS-1 a screen]" \
+	"window asked: its line back" "both asked, screen picked [Monitor: HEADLESS-1 a screen]"
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

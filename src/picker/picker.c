@@ -284,8 +284,8 @@ static void light(struct flame_picker *picker, struct flame_view *view) {
 }
 
 static void set_mode(struct flame_picker *picker, enum picker_mode mode) {
-	if (mode == picker->mode) {
-		return;
+	if (mode == picker->mode || !(picker->kinds & (1u << mode))) {
+		return; // there already, or the app didn't ask for it
 	}
 	picker->mode = mode;
 	relabel(picker);
@@ -312,8 +312,11 @@ static void build_bar(struct flame_picker *picker) {
 	int x = 0;
 	for (int i = 0; i < PICKER_CHOICES; i++) {
 		struct picker_label *label = &picker->choices[i];
+		// cancel quieter, what the app didn't ask for faded out
+		bool offered = i == PICKER_CHOICES - 1 || picker->kinds & (1u << i);
 		label_set(picker, label, picker->bar, choice_text[i], CHOICE_FONT,
-			(const float[4]){1, 1, 1, i == PICKER_CHOICES - 1 ? 0.7f : 1}, 400);
+			(const float[4]){1, 1, 1, !offered ? 0.3f : i == PICKER_CHOICES - 1 ? 0.7f : 1},
+			400);
 		picker->choice_boxes[i] = (struct wlr_box){x, 0, label->width + 2 * CHOICE_PAD,
 			CHOICE_H};
 		x += picker->choice_boxes[i].width;
@@ -460,8 +463,35 @@ static int handle_refresh(void *data) {
 	return 0;
 }
 
-void picker_open(struct flame_picker *picker, struct flame_ipc_client *client) {
+// the one screen there is, when the app only wants a screen: nothing to
+// pick. NULL with more than one
+static struct flame_output *only_output(struct flame_server *server) {
+	struct flame_output *output, *only = NULL;
+	wl_list_for_each(output, &server->outputs.list, link) {
+		if (output->wlr->enabled) {
+			if (only) {
+				return NULL;
+			}
+			only = output;
+		}
+	}
+	return only;
+}
+
+void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
+		unsigned kinds) {
 	struct flame_server *server = picker->server;
+	kinds &= PICKER_WINDOWS | PICKER_SCREENS;
+	kinds = kinds ? kinds : PICKER_WINDOWS | PICKER_SCREENS;
+	struct flame_output *only = kinds == PICKER_SCREENS ? only_output(server) : NULL;
+	if (only) {
+		// the app's own "share your screen" already said which
+		char answer[128];
+		snprintf(answer, sizeof(answer), "Monitor: %s", only->wlr->name);
+		wlr_log(WLR_DEBUG, "picker: asked for a screen, there's one: %s", answer);
+		ipc_client_send(client, answer, strlen(answer));
+		return;
+	}
 	if (picker->open) {
 		finish(picker, NULL);
 	}
@@ -480,7 +510,8 @@ void picker_open(struct flame_picker *picker, struct flame_ipc_client *client) {
 	listener_connect(&picker->client_destroy, &client->events.destroy, handle_client_destroy);
 	picker->open = true;
 	picker->shown = 0;
-	picker->mode = PICKER_WINDOW;
+	picker->kinds = kinds;
+	picker->mode = kinds & PICKER_WINDOWS ? PICKER_WINDOW : PICKER_SCREEN;
 	picker->lit = picker->lit_from = picker->lit_to = (struct wlr_box){0};
 	picker->knob_box = picker->knob_from = picker->knob_to = (struct wlr_box){0};
 
@@ -494,8 +525,9 @@ void picker_open(struct flame_picker *picker, struct flame_ipc_client *client) {
 	retarget(picker, false);
 	anim_finish(&picker->glide);
 	apply(picker);
-	wlr_log(WLR_DEBUG, "picker: open on %s, %s lit", output->wlr->name,
-		picker->view ? "a window" : "nothing");
+	wlr_log(WLR_DEBUG, "picker: open on %s for %s, %s lit", output->wlr->name,
+		kinds == PICKER_WINDOWS ? "a window" : kinds == PICKER_SCREENS ? "a screen"
+		: "a window or a screen", picker->view ? "a window" : "nothing");
 
 	// the pointer is the picker's: nothing under it hears it go by
 	wlr_seat_pointer_clear_focus(server->input.seat);
@@ -512,7 +544,8 @@ bool picker_active(const struct flame_picker *picker) {
 
 static int choice_at(struct flame_picker *picker, double lx, double ly) {
 	for (int i = 0; i < PICKER_CHOICES; i++) {
-		if (wlr_box_contains_point(&picker->choice_boxes[i], lx, ly)) {
+		bool offered = i == PICKER_CHOICES - 1 || picker->kinds & (1u << i);
+		if (offered && wlr_box_contains_point(&picker->choice_boxes[i], lx, ly)) {
 			return i;
 		}
 	}
@@ -590,12 +623,16 @@ static void key_press(struct flame_picker *picker, xkb_keysym_t sym) {
 	case XKB_KEY_Tab:
 	case XKB_KEY_Down:
 		set_mode(picker, PICKER_WINDOW);
-		step(picker, false);
+		if (picker->mode == PICKER_WINDOW) {
+			step(picker, false);
+		}
 		return;
 	case XKB_KEY_ISO_Left_Tab:
 	case XKB_KEY_Up:
 		set_mode(picker, PICKER_WINDOW);
-		step(picker, true);
+		if (picker->mode == PICKER_WINDOW) {
+			step(picker, true);
+		}
 		return;
 	case XKB_KEY_Left:
 		set_mode(picker, PICKER_WINDOW);
