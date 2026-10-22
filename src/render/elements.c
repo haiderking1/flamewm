@@ -8,6 +8,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/util/log.h>
 
+#include "eyecandy/eyecandy.h"
 #include "scene/scene.h"
 
 void elements_init(struct flame_element_list *list) {
@@ -124,6 +125,40 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	if (wlr_box_empty(&box) || !clip_box(collect, box, collect->clip ? &node_clip : NULL,
 			&clip)) {
 		return;
+	}
+
+	// its glass first, right under it: what's behind it, frosted
+	size_t panes_len;
+	const struct eyecandy_pane *panes = eyecandy_panes(surface, &panes_len);
+	for (size_t i = 0; i < panes_len; i++) {
+		struct wlr_box pane_box = {collect->x + sx + panes[i].box.x,
+			collect->y + sy + panes[i].box.y, panes[i].box.width, panes[i].box.height};
+		struct wlr_box surface_box = {collect->x + sx, collect->y + sy, surface->current.width,
+			surface->current.height};
+		// clipped to the surface, then the way the surface is
+		if (!wlr_box_intersection(&pane_box, &pane_box, &surface_box)) {
+			continue;
+		}
+		pane_box = apply(&collect->t, pane_box);
+		struct wlr_box pane_clip;
+		if (wlr_box_empty(&pane_box) || !clip_box(collect, pane_box,
+				collect->clip ? &node_clip : NULL, &pane_clip)) {
+			continue;
+		}
+		struct flame_element *pane = push(collect->list);
+		if (!pane) {
+			collect->failed = true;
+			return;
+		}
+		pane->type = FLAME_ELEMENT_GLASS;
+		pane->id = &panes[i];
+		pane->box = pane_box;
+		pane->clip = pane_clip;
+		pane->glass = panes[i].style;
+		pane->glass.radius *= collect->t.ax;
+		pane->glass.blur *= collect->t.ax;
+		pane->glass.refraction *= collect->t.ax;
+		mark(pane, collect);
 	}
 
 	struct flame_element *element = push(collect->list);

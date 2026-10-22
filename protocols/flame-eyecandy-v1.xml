@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="flame_eyecandy_v1">
+  <copyright>
+    Copyright (C) 2026 the flamewm authors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="flame's effects for surfaces">
+    Effects flame draws for a surface, the way it draws its own: glass
+    behind a surface's translucent content. An app only describes them,
+    flame draws them, with whatever is behind the surface right then.
+  </description>
+
+  <interface name="flame_eyecandy_manager_v1" version="1">
+    <description summary="effects for surfaces">
+      Gets effect objects for surfaces.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="the manager goes">
+        Objects made from it stay as they are.
+      </description>
+    </request>
+
+    <enum name="error">
+      <entry name="glass_exists" value="0"
+             summary="the surface already has a glass object"/>
+    </enum>
+
+    <request name="get_glass">
+      <description summary="glass behind a surface">
+        A glass object for the surface, one per surface. A second one is the
+        glass_exists error.
+      </description>
+      <arg name="id" type="new_id" interface="flame_glass_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="flame_glass_v1" version="1">
+    <description summary="panes of glass behind a surface">
+      Rounded panes of glass behind the surface's content: what's behind the
+      surface is blurred, its colors pushed, tinted, bent at the pane's edge
+      and lit along its rim, then the surface's own pixels go over it. A
+      pane shows through wherever the surface's content is translucent.
+
+      The panes are double buffered state: clear and add_pane change the
+      pending set, wl_surface.commit makes it current. Coordinates are
+      surface local, lengths in surface local units. Panes are clipped to
+      the surface.
+
+      If the surface is destroyed the object goes inert.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="the glass goes">
+        Its panes go with the surface's next commit.
+      </description>
+    </request>
+
+    <request name="clear">
+      <description summary="no panes">
+        The pending set is emptied.
+      </description>
+    </request>
+
+    <request name="add_pane">
+      <description summary="one more pane">
+        A pane added to the pending set, drawn after the ones before it.
+
+        tint is straight (not premultiplied) 0xRRGGBBAA, laid over the blur.
+        saturation 1 keeps the colors behind it, more makes them vivid. edge
+        is how much light its rim catches, 0 for none. refraction is how far
+        its rim bends what's behind it, 0 for none.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="radius" type="fixed" summary="its corners"/>
+      <arg name="blur" type="fixed" summary="how far what's behind smears"/>
+      <arg name="tint" type="uint" summary="0xRRGGBBAA, straight alpha"/>
+      <arg name="saturation" type="fixed"/>
+      <arg name="edge" type="fixed"/>
+      <arg name="refraction" type="fixed"/>
+    </request>
+  </interface>
+</protocol>

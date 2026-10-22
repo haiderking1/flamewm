@@ -27,6 +27,13 @@ endif
 PROTOCOLS     := $(wildcard protocols/*.xml)
 PROTO_HEADERS := $(PROTOCOLS:protocols/%.xml=$(BUILD)/gen/%-protocol.h)
 
+# protocols flame implements itself: wlroots has no code for them, their
+# interfaces get generated and linked in too
+BG_EFFECT_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/staging/ext-background-effect/ext-background-effect-v1.xml
+OWN_PROTOCOLS := flame-eyecandy-v1 ext-background-effect-v1
+PROTO_HEADERS += $(BUILD)/gen/ext-background-effect-v1-protocol.h
+OWN_PROTO_OBJS := $(OWN_PROTOCOLS:%=$(BUILD)/obj/gen/%-protocol.o)
+
 OPT  ?= -O2 -g
 WARN := -Wall -Wextra -Wno-unused-parameter -Wshadow -Wmissing-prototypes \
 	-Werror=implicit-function-declaration -Werror=return-type
@@ -41,7 +48,7 @@ OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
 all: $(TARGET) $(CTL)
 
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
 
 $(BUILD)/obj/%.o: src/%.c | $(PROTO_HEADERS)
@@ -56,6 +63,22 @@ $(CTL): tools/flamectl/flamectl.c
 $(BUILD)/gen/%-protocol.h: protocols/%.xml
 	@mkdir -p $(dir $@)
 	$(WAYLAND_SCANNER) server-header $< $@
+
+$(BUILD)/gen/ext-background-effect-v1-protocol.h: $(BG_EFFECT_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) server-header $< $@
+
+$(BUILD)/gen/flame-eyecandy-v1-protocol.c: protocols/flame-eyecandy-v1.xml
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(BUILD)/gen/ext-background-effect-v1-protocol.c: $(BG_EFFECT_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(BUILD)/obj/gen/%-protocol.o: $(BUILD)/gen/%-protocol.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 $(OPT) $(PKG_CFLAGS) -c -o $@ $<
 
 # pure logic modules get unit tests, sanitizers on
 TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test $(BUILD)/tests/sync_test \
@@ -212,6 +235,32 @@ $(E2E)/xkeys: tests/e2e/xkeys.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xinput)
 
+# glass for apps: our protocol and the standard one, client side
+$(E2E)/flame-eyecandy-v1-client-protocol.h: protocols/flame-eyecandy-v1.xml
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/flame-eyecandy-v1-protocol.c: protocols/flame-eyecandy-v1.xml
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/ext-background-effect-v1-client-protocol.h: $(BG_EFFECT_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/ext-background-effect-v1-protocol.c: $(BG_EFFECT_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+GLASS_CLIENT := $(E2E)/flame-eyecandy-v1-client-protocol.h $(E2E)/flame-eyecandy-v1-protocol.c \
+	$(E2E)/ext-background-effect-v1-client-protocol.h $(E2E)/ext-background-effect-v1-protocol.c
+
+$(E2E)/wlglass: tests/e2e/wlglass.c $(GLASS_CLIENT) $(E2E)/xdg-shell-protocol.c \
+		$(E2E)/xdg-shell-client-protocol.h
+	$(CC) -std=c17 -O1 -g -D_GNU_SOURCE -I$(E2E) -o $@ tests/e2e/wlglass.c \
+		$(E2E)/flame-eyecandy-v1-protocol.c $(E2E)/ext-background-effect-v1-protocol.c \
+		$(E2E)/xdg-shell-protocol.c $(shell pkg-config --cflags --libs wayland-client)
+
 $(E2E)/portalcast: tests/e2e/portalcast.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_GNU_SOURCE -o $@ $< \
@@ -223,7 +272,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast
+		$(E2E)/portalcast $(E2E)/wlglass
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
