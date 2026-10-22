@@ -416,8 +416,9 @@ grim -t ppm shot.ppm
 cat cast.out
 [ \"\$(sed -n 's/^first: middle pixel //p' cast.out)\" = \"\$($MIDDLE shot.ppm)\" ] && echo 'stream matches the screen'" \
 	"first: start 0, right away" "first: source screen, 1280x720 at 0,0, kept yes" \
-	"first: frames came, 1280x720 in gpu buffers" "again: start 0, right away" \
-	"again: frames came, 1280x720 in gpu buffers" "stream matches the screen"
+	"first: frames came, 1280x720 in gpu buffers" "first: first frame right away" \
+	"again: start 0, right away" "again: frames came, 1280x720 in gpu buffers" \
+	"stream matches the screen"
 case_run "portal: a window picked in flame's picker, shared at its size, in shared memory too, a cancel says so" "
 foot -T left > /dev/null 2>&1 &
 sleep 1
