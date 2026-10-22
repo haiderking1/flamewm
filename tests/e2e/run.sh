@@ -728,6 +728,18 @@ $CTL settings | python3 -I -c \"import json, sys; print('still', json.load(sys.s
 $CTL unset wallpaper > /dev/null; sleep 1.2
 grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
 	"not a jpeg, png or webp it can read" "still True" "none blue"
+case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
+mkdir walls
+$CTL set background '#ff0000' > /dev/null; sleep 0.5; grim walls/red.png
+$CTL set background '#0000ff' > /dev/null; sleep 0.5; grim walls/blue.png
+$CTL set wallpaper \$PWD/walls/red.png > /dev/null; sleep 0.5
+$(dirname $CTL)/flamesettings wallpaper > /dev/null 2>&1 &
+sleep 2
+$CTL pointer move 538 390 > /dev/null; sleep 0.3
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.6
+$CTL settings | python3 -I -c \"import json, sys; print('picked', json.load(sys.stdin)['values']['wallpaper'].split('/')[-1])\"" \
+	"picked blue.png"
 case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
 $CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
 $CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
