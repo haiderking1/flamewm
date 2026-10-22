@@ -262,7 +262,7 @@ case_run "an X window on another workspace isn't minimized (steam came back whit
 $BIN/xewmh away $CTL" "away, state: MAXIMIZED_VERT MAXIMIZED_HORZ"
 case_run "an X app can't take the focus from another app the user is in (a game from a tool)" "
 $BIN/xewmh steal" "the user is in this app: yes" "the other app asked, still this one: yes" \
-	"its own window back: yes"
+	"the other app was told who's active: yes" "its own window back: yes"
 case_run "WM_TAKE_FOCUS windows (wine's): WM_STATE first, a click offers focus again" "
 $BIN/xewmh takefocus $CTL" "WM_STATE before the offer: yes" \
 	"offers on a click, not taken: 1" "offers on a click, taken: 0"

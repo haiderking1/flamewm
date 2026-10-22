@@ -201,8 +201,25 @@ int main(int argc, char **argv) {
 			if (write(ready[1], &b, sizeof(b)) != sizeof(b) || read(go[0], &byte, 1) != 1) {
 				_exit(1);
 			}
+			// the root's PropertyNotify for _NET_ACTIVE_WINDOW, refused or not:
+			// wine waits for it to know where it stands
+			uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+			xcb_change_window_attributes(c, s->root, XCB_CW_EVENT_MASK, &mask);
+			xcb_flush(c);
 			wm_message(b, "_NET_ACTIVE_WINDOW", 2, 0, 0);
 			settle();
+			bool told = false;
+			xcb_generic_event_t *ev;
+			while ((ev = xcb_poll_for_event(c))) {
+				if ((ev->response_type & 0x7f) == XCB_PROPERTY_NOTIFY
+						&& ((xcb_property_notify_event_t *)ev)->atom
+							== atom("_NET_ACTIVE_WINDOW")) {
+					told = true;
+				}
+				free(ev);
+			}
+			printf("the other app was told who's active: %s\n", told ? "yes" : "no");
+			fflush(stdout);
 			// its window stays till the other side looked: gone, the focus
 			// would come back anyway
 			if (write(ready[1], &b, sizeof(b)) != sizeof(b) || read(done[0], &byte, 1) != 1) {

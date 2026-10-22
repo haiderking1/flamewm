@@ -1,7 +1,9 @@
 #include "desktop/focus.h"
 
+#include <stdio.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/util/log.h>
 
 #include "config/config.h"
 #include "core/server.h"
@@ -24,6 +26,16 @@ void focus_view(struct flame_desktop *desktop, struct flame_view *view) {
 		focus_restore_keyboard(desktop);
 		return;
 	}
+	// who took it from whom: a game losing it for a moment drops out of
+	// fullscreen, that's a hitch worth finding the cause of
+	// (copied: X windows hand their name out of one static buffer)
+	char from[128] = "none";
+	if (desktop->focused) {
+		const char *app = view_app_id(desktop->focused);
+		snprintf(from, sizeof(from), "%s", app ? app : "?");
+	}
+	const char *to = view ? view_app_id(view) : NULL;
+	wlr_log(WLR_DEBUG, "desktop: focus %s -> %s", from, view ? (to ? to : "?") : "none");
 	if (desktop->focused) {
 		view_set_focused(desktop->focused, false);
 	}
