@@ -5,6 +5,7 @@ PREFIX  ?= /usr/local
 BUILD   ?= build
 TARGET  := $(BUILD)/flamewm
 CTL     := $(BUILD)/flamectl
+SETTINGS := $(BUILD)/flamesettings
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -46,7 +47,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL)
+all: $(TARGET) $(CTL) $(SETTINGS)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -54,6 +55,40 @@ $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 $(BUILD)/obj/%.o: src/%.c | $(PROTO_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(FLAME_CFLAGS) -c -o $@ $<
+
+# flame's own apps: flameui (tools/flameui) and what's built on it
+CLIENT_GEN := $(BUILD)/gen-client
+WL_PROTOCOLS := $(shell pkg-config --variable=pkgdatadir wayland-protocols)
+UI_PROTOCOLS := $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
+	$(WL_PROTOCOLS)/staging/fractional-scale/fractional-scale-v1.xml \
+	$(WL_PROTOCOLS)/stable/viewporter/viewporter.xml \
+	$(WL_PROTOCOLS)/staging/cursor-shape/cursor-shape-v1.xml \
+	$(WL_PROTOCOLS)/stable/tablet/tablet-v2.xml \
+	protocols/flame-eyecandy-v1.xml
+UI_PROTO_NAMES := $(basename $(notdir $(UI_PROTOCOLS)))
+UI_PROTO_HEADERS := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-client-protocol.h)
+UI_PROTO_CODE := $(UI_PROTO_NAMES:%=$(CLIENT_GEN)/%-protocol.c)
+UI_PKGS := wayland-client pangocairo xkbcommon
+
+define ui_protocol
+$(CLIENT_GEN)/$(basename $(notdir $(1)))-client-protocol.h: $(1)
+	@mkdir -p $$(dir $$@)
+	$$(WAYLAND_SCANNER) client-header $$< $$@
+
+$(CLIENT_GEN)/$(basename $(notdir $(1)))-protocol.c: $(1)
+	@mkdir -p $$(dir $$@)
+	$$(WAYLAND_SCANNER) private-code $$< $$@
+endef
+$(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
+
+$(SETTINGS): tools/flamesettings/main.c tools/flamesettings/json.c tools/flamesettings/json.h \
+		tools/flameui/window.c tools/flameui/ui.c tools/flameui/flameui.h \
+		tools/flameui/internal.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) $(SAN) $(CFLAGS) \
+		$(LDFLAGS) -o $@ tools/flamesettings/main.c tools/flamesettings/json.c \
+		tools/flameui/window.c tools/flameui/ui.c $(UI_PROTO_CODE) \
+		$(shell pkg-config --cflags --libs $(UI_PKGS)) -lm
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c
@@ -272,7 +307,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass
+		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -300,6 +335,9 @@ PORTALDIR ?= /usr/share/xdg-desktop-portal
 install: release
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
+	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
+	install -Dm644 data/flamesettings.desktop \
+		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
 	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
 

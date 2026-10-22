@@ -33,11 +33,14 @@ struct pane_set {
 
 struct surface_glass {
 	struct wlr_addon addon;
+	struct flame_server *server;
 	struct wlr_surface *surface;
 	struct wl_resource *glass, *background; // the objects, NULL for none
 	// flame-eyecandy's and ext-background-effect's, each pending and current
 	struct pane_set candy_pending, candy, blur_pending, blur;
 	bool candy_dirty, blur_dirty;
+	double shape_pending, shape; // set_shape's radius, 0 for none
+	bool shape_dirty;
 	// what the frame reads: both, candy's over blur's
 	struct pane_set all;
 	struct wl_listener commit;
@@ -66,8 +69,22 @@ static void rebuild(struct surface_glass *glass) {
 	}
 }
 
+static void handle_arrange(void *data) {
+	struct flame_server *server = data;
+	desktop_arrange(&server->desktop);
+}
+
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct surface_glass *glass = wl_container_of(listener, glass, commit);
+	if (glass->shape_dirty) {
+		glass->shape_dirty = false;
+		if (glass->shape != glass->shape_pending) {
+			glass->shape = glass->shape_pending;
+			// its border comes or goes: the layout's done again, after this
+			// commit's through
+			wl_event_loop_add_idle(glass->server->loop, handle_arrange, glass->server);
+		}
+	}
 	if (!glass->candy_dirty && !glass->blur_dirty) {
 		return;
 	}
@@ -90,7 +107,7 @@ static void glass_free(struct surface_glass *glass) {
 // both objects gone: nothing to keep around
 static void maybe_free(struct surface_glass *glass) {
 	if (!glass->glass && !glass->background && !glass->all.len && !glass->candy_dirty
-			&& !glass->blur_dirty) {
+			&& !glass->blur_dirty && !glass->shape && !glass->shape_dirty) {
 		glass_free(glass);
 	}
 }
@@ -107,7 +124,8 @@ static void addon_destroy(struct wlr_addon *addon) {
 	glass_free(glass);
 }
 
-static struct surface_glass *glass_get(struct wlr_surface *surface) {
+static struct surface_glass *glass_get(struct flame_server *server,
+		struct wlr_surface *surface) {
 	struct surface_glass *glass = glass_of(surface);
 	if (glass) {
 		return glass;
@@ -116,10 +134,16 @@ static struct surface_glass *glass_get(struct wlr_surface *surface) {
 	if (!glass) {
 		return NULL;
 	}
+	glass->server = server;
 	glass->surface = surface;
 	wlr_addon_init(&glass->addon, &surface->addons, NULL, &addon_impl);
 	listener_connect(&glass->commit, &surface->events.commit, handle_commit);
 	return glass;
+}
+
+bool eyecandy_shaped(struct wlr_surface *surface) {
+	struct surface_glass *glass = glass_of(surface);
+	return glass && glass->shape > 0;
 }
 
 const struct eyecandy_pane *eyecandy_panes(struct wlr_surface *surface, size_t *len) {
@@ -177,9 +201,20 @@ static void glass_handle_add_pane(struct wl_client *client, struct wl_resource *
 	glass->candy_dirty = true;
 }
 
+static void glass_handle_set_shape(struct wl_client *client, struct wl_resource *resource,
+		wl_fixed_t radius) {
+	struct surface_glass *glass = wl_resource_get_user_data(resource);
+	if (glass) {
+		double r = wl_fixed_to_double(radius);
+		glass->shape_pending = r > 0 ? (r < 4096 ? r : 4096) : 0;
+		glass->shape_dirty = true;
+	}
+}
+
 static const struct flame_glass_v1_interface glass_impl = {
 	.destroy = glass_handle_destroy,
 	.clear = glass_handle_clear,
+	.set_shape = glass_handle_set_shape,
 	.add_pane = glass_handle_add_pane,
 };
 
@@ -188,10 +223,12 @@ static void glass_resource_destroy(struct wl_resource *resource) {
 	if (!glass) {
 		return;
 	}
-	// its panes go with the next commit
+	// its panes go with the next commit, its shape too
 	glass->glass = NULL;
 	glass->candy_pending.len = 0;
 	glass->candy_dirty = true;
+	glass->shape_pending = 0;
+	glass->shape_dirty = true;
 	maybe_free(glass);
 }
 
@@ -201,8 +238,9 @@ static void manager_handle_destroy(struct wl_client *client, struct wl_resource 
 
 static void manager_handle_get_glass(struct wl_client *client, struct wl_resource *resource,
 		uint32_t id, struct wl_resource *surface_resource) {
+	struct flame_eyecandy *eyecandy = wl_resource_get_user_data(resource);
 	struct wlr_surface *surface = wlr_surface_from_resource(surface_resource);
-	struct surface_glass *glass = glass_get(surface);
+	struct surface_glass *glass = glass_get(eyecandy->server, surface);
 	if (glass && glass->glass) {
 		wl_resource_post_error(resource, FLAME_EYECANDY_MANAGER_V1_ERROR_GLASS_EXISTS,
 			"the surface has glass already");
@@ -290,8 +328,9 @@ static void background_manager_handle_destroy(struct wl_client *client,
 
 static void background_manager_handle_get(struct wl_client *client,
 		struct wl_resource *resource, uint32_t id, struct wl_resource *surface_resource) {
+	struct flame_eyecandy *eyecandy = wl_resource_get_user_data(resource);
 	struct wlr_surface *surface = wlr_surface_from_resource(surface_resource);
-	struct surface_glass *glass = glass_get(surface);
+	struct surface_glass *glass = glass_get(eyecandy->server, surface);
 	if (glass && glass->background) {
 		wl_resource_post_error(resource,
 			EXT_BACKGROUND_EFFECT_MANAGER_V1_ERROR_BACKGROUND_EFFECT_EXISTS,

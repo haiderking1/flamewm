@@ -40,8 +40,9 @@ it's up, debug logs.
 
 ## config
 
-none needed. change things live with `flamectl set gap 8` (`flamectl
-settings` lists them all), flame keeps them in `~/.config/flame/settings.lua`.
+none needed. **flamesettings** (`super+,`) changes things live, on flame's
+glass, so does `flamectl set gap 8` (`flamectl settings` lists them all).
+flame keeps them in `~/.config/flame/settings.lua`.
 
 for more, lua at `~/.config/flame/init.lua`, see
 [examples/init.lua](examples/init.lua). what it sets wins over settings.lua.
@@ -63,6 +64,7 @@ mod is super.
 | --- | --- |
 | `super+q` / `super+enter` | foot |
 | `super+c` | close window |
+| `super+,` | settings |
 | `super+j` / `super+k` | focus next / prev |
 | `super+f` | fullscreen |
 | `super+1..0` | go to workspace |

@@ -20,11 +20,13 @@
 	{ MOD | SHIFT, sym, action_move_to_workspace, { .i = index } }
 
 static const char *const terminal[] = { "foot", NULL };
+static const char *const settings[] = { "flamesettings", NULL };
 
 static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_Return, action_spawn, { .argv = terminal } },
 	{ MOD, XKB_KEY_q, action_spawn, { .argv = terminal } },
 	{ MOD, XKB_KEY_c, action_close, { 0 } },
+	{ MOD, XKB_KEY_comma, action_spawn, { .argv = settings } },
 	{ MOD, XKB_KEY_j, action_focus, { .i = +1 } },
 	{ MOD, XKB_KEY_k, action_focus, { .i = -1 } },
 	{ MOD, XKB_KEY_f, action_fullscreen, { 0 } },

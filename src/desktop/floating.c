@@ -6,10 +6,6 @@
 
 #define MIN_FLOAT_SIZE 40
 
-static int border(struct flame_desktop *desktop) {
-	return desktop->server->config->border_width;
-}
-
 static struct wlr_box usable_area(struct flame_desktop *desktop) {
 	struct flame_output *output = outputs_primary(&desktop->server->outputs);
 	return output ? output->usable : (struct wlr_box){0, 0, 1280, 720};
@@ -57,7 +53,7 @@ struct wlr_box floating_initial_box(struct flame_desktop *desktop, struct flame_
 		width = area.width / 2;
 		height = area.height / 2;
 	}
-	int bw = border(desktop);
+	int bw = view_border_width(view, false);
 	return centered(desktop, width + 2 * bw, height + 2 * bw);
 }
 
@@ -115,7 +111,7 @@ void floating_content_resized(struct flame_desktop *desktop, struct flame_view *
 	if (!view->floating || view->fullscreen_shown || view->resizing || view->grabbed) {
 		return;
 	}
-	int bw = border(desktop);
+	int bw = view_border_width(view, false);
 	struct wlr_box box = view->float_box;
 	if (box.width == width + 2 * bw && box.height == height + 2 * bw) {
 		return;
