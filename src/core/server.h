@@ -7,6 +7,7 @@
 #include "anim/anim.h"
 #include "backend/backend.h"
 #include "capture/capture.h"
+#include "eyecandy/eyecandy.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
 #include "input/input.h"
@@ -51,6 +52,7 @@ struct flame_server {
 	struct flame_capture capture;
 	struct flame_picker picker;
 	struct flame_screencast screencast;
+	struct flame_eyecandy eyecandy;
 	struct flame_portal portal;
 	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;

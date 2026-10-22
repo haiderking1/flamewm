@@ -673,6 +673,38 @@ sleep 0.8
 $CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" '"floating":false,"x":6'
 CASE_ARGS=
 
+# sharp stripes behind, a see-through window with glass floating over them:
+# inside it they're smoothed, around it they stay sharp
+ROUGH="python3 -I -c \"
+import sys
+d = open(sys.argv[1], 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+def rough(x0, x1, y):
+	return sum(abs(px[(y * w + x) * 3 + c] - px[(y * w + x + 1) * 3 + c])
+		for x in range(x0, x1) for c in range(3)) / (x1 - x0)
+inside, outside = rough(480, 800, 330), rough(40, 400, 330)
+print(sys.argv[2], 'smooth' if inside < outside / 3 else 'sharp', 'over sharp' if outside > 3 else 'over nothing')
+\""
+cat > "$WORK/stripes.sh" <<'EOF'
+for i in $(seq 1 40); do
+	for j in $(seq 1 20); do printf '\033[41m  \033[42m  \033[44m  \033[0m  '; done
+	echo
+done
+sleep 30
+EOF
+case_run "glass for apps: flame-eyecandy and ext-background-effect blur what's behind a see-through window" "
+foot sh stripes.sh > /dev/null 2>&1 &
+sleep 1.2
+$BIN/wlglass candy 3 &
+sleep 1.2
+grim -t ppm candy.ppm
+sleep 2.2
+$BIN/wlglass blur 3 &
+sleep 1.2
+grim -t ppm blur.ppm
+$ROUGH candy.ppm candy
+$ROUGH blur.ppm blur" "glass up" "candy smooth over sharp" "blur smooth over sharp"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
