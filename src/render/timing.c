@@ -114,6 +114,7 @@ static void reset_span(struct flame_frame_timing *timing) {
 	timing->missed = timing->late_app_frames = 0;
 	timing->hiccups = timing->hiccups_planned = 0;
 	memset(&timing->x11_latency, 0, sizeof(timing->x11_latency));
+	memset(&timing->game_gap, 0, sizeof(timing->game_gap));
 	memset(timing->seq_steps, 0, sizeof(timing->seq_steps));
 	timing->seq_repeat = timing->seq_reset = 0;
 	timing->metadata_missing = timing->clock_discontinuities = 0;
@@ -127,7 +128,7 @@ static int handle_report(void *data) {
 	double span = ms_between(&timing->span_start, &now) / 1e3;
 
 	char draw[64], empty[64], gpu[64], flip[64], dispatch[64], late[64];
-	char wayland[64], x11[64], slack[64], gpu_done[64];
+	char wayland[64], x11[64], slack[64], gpu_done[64], game[64];
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
 		"pipeline=%s overlap=%s asap=%s vrr=%s pace_fps=%.1f pace_stuck=%u lead_ms=%.3f "
@@ -136,7 +137,7 @@ static int handle_report(void *data) {
 		"draws=%u draw_ms=%s empty=%u empty_ms=%s gpu_batch_max_ms=%s gpu_done_ms=%s flip_ms=%s "
 		"seq_steps=1:%u,2:%u,3+:%u dispatch_ms=%s clock=%s "
 		"metadata_missing=%u clock_discontinuities=%u seq_repeat=%u seq_reset=%u seq_last=%u "
-		"wayland_commit_to_flip_ms=%s x11_present_to_flip_ms=%s "
+		"wayland_commit_to_flip_ms=%s x11_present_to_flip_ms=%s game_gap_ms=%s "
 		"missed_vblanks=%u margin_ms=%.3f slack_ms=%s late_app_frames=%u "
 		"hiccups=%u planned=%u",
 		timing->output->name, timing->output->refresh / 1000.0, span,
@@ -160,6 +161,7 @@ static int handle_report(void *data) {
 		timing->seq_repeat, timing->seq_reset, timing->last_seq,
 		stat_str(&timing->wayland_latency, wayland, sizeof(wayland)),
 		stat_str(&timing->x11_latency, x11, sizeof(x11)),
+		stat_str(&timing->game_gap, game, sizeof(game)),
 		timing->missed, schedule->margin / 1e6, stat_str(&timing->slack, slack, sizeof(slack)),
 		timing->late_app_frames, timing->hiccups, timing->hiccups_planned);
 
@@ -254,6 +256,12 @@ void timing_late_app_frames(struct flame_frame_timing *timing, uint32_t count) {
 void timing_latency(struct flame_frame_timing *timing, bool x11, int64_t ns) {
 	if (timing->enabled && ns >= 0) {
 		stat_add(x11 ? &timing->x11_latency : &timing->wayland_latency, ns / 1e6);
+	}
+}
+
+void timing_game_gap(struct flame_frame_timing *timing, int64_t ns) {
+	if (timing->enabled && ns >= 0) {
+		stat_add(&timing->game_gap, ns / 1e6);
 	}
 }
 
