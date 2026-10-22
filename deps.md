@@ -44,7 +44,7 @@ not linked, flame works without them, these features don't.
 | dep | why |
 | --- | --- |
 | xdg-desktop-portal, xdg-desktop-portal-wlr, pipewire | screen sharing (obs, discord, browsers): the portal asks wlr's backend, it captures a screen or one window through flame's ext-image-copy-capture into pipewire. `data/flamewm-portals.conf` (installed by `make install`) points the portal at it |
-| (picking what to share) | flame's own picker, no extra deps: the portal runs `flamectl share-pick` (`data/xdg-desktop-portal-wlr-flamewm`, installed to `/etc/xdg/xdg-desktop-portal-wlr/flamewm`) |
+| (picking what to share) | flame's own picker, no extra deps: the portal runs `flamectl share-pick --dmenu` (`data/xdg-desktop-portal-wlr-flamewm`, installed to `/etc/xdg/xdg-desktop-portal-wlr/flamewm`) |
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
 
 ## tests

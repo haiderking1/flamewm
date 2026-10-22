@@ -31,6 +31,10 @@ enum picker_mode {
 	PICKER_SCREEN,
 };
 
+// what the app asked for, picker_open's kinds
+#define PICKER_WINDOWS (1u << PICKER_WINDOW)
+#define PICKER_SCREENS (1u << PICKER_SCREEN)
+
 // a line of text in the scene
 struct picker_label {
 	struct flame_buffer_node *node;
@@ -58,6 +62,7 @@ struct flame_picker {
 	struct picker_label title, action;
 
 	enum picker_mode mode;
+	unsigned kinds; // the modes it offers, PICKER_WINDOWS | PICKER_SCREENS
 	struct flame_view *view; // the window lit, NULL for none
 	bool open; // taking input, waiting for a pick
 	struct wlr_box area; // the output it's on, layout coords
@@ -82,8 +87,10 @@ bool picker_init(struct flame_picker *picker, struct flame_server *server);
 void picker_finish(struct flame_picker *picker);
 
 // shows it for client, whose answer comes when the user picks or cancels.
-// one open already: that one's cancelled
-void picker_open(struct flame_picker *picker, struct flame_ipc_client *client);
+// kinds: what it asked for, 0 for anything. only screens on one screen:
+// that one, no picker. one open already: that one's cancelled
+void picker_open(struct flame_picker *picker, struct flame_ipc_client *client,
+	unsigned kinds);
 // open and taking the pointer and the keyboard
 bool picker_active(const struct flame_picker *picker);
 
