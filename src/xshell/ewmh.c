@@ -322,6 +322,13 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 			}
 			bool on = action == STATE_ADD
 				|| (action == STATE_TOGGLE && !view->fullscreen_wanted);
+			if (!on && desktop->focused != view) {
+				// out of fullscreen while the user's elsewhere isn't the user's
+				// doing: a game dropping it as it loses focus (wine's dxgi
+				// does). it stays, and it hears so: back on its workspace it
+				// showed tiled till it asked for fullscreen again
+				continue;
+			}
 			if (action <= STATE_TOGGLE) {
 				fullscreen_request(desktop, view, on);
 			}

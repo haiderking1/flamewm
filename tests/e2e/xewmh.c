@@ -1,7 +1,7 @@
 // flame as X's window manager, the EWMH way an app sees it
 // usage: xewmh check | fullscreen | startfull | activate | steal | wayland CMD | close | dpi |
 //   configure | subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL |
-//   grabaway FLAMECTL | away FLAMECTL | iconify
+//   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -274,6 +274,34 @@ int main(int argc, char **argv) {
 		uint32_t check = first32(s->root, "_NET_SUPPORTING_WM_CHECK");
 		printf("a wayland window in front, active is: %s\n",
 			active && active == check ? "flame's window" : active == w ? "still this one" : "none");
+	} else if (!strcmp(mode, "keepfull") && argc > 2) {
+		// a fullscreen game drops fullscreen as it loses focus (wine): the
+		// user went to another workspace, it isn't theirs to ask. it stays
+		// fullscreen, and back there it's fullscreen right away
+		xcb_window_t w = window(true);
+		settle();
+		char cmd[300];
+		snprintf(cmd, sizeof(cmd), "%s workspace 2 > /dev/null", argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		wm_message(w, "_NET_WM_STATE", 0, atom("_NET_WM_STATE_FULLSCREEN"), 0);
+		settle();
+		printf("away, asked out of it: ");
+		print_state(w);
+		snprintf(cmd, sizeof(cmd), "%s workspace 1 > /dev/null", argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		printf("back: ");
+		print_geometry(w);
+		// the user's own: in it, out of fullscreen works
+		wm_message(w, "_NET_WM_STATE", 0, atom("_NET_WM_STATE_FULLSCREEN"), 0);
+		settle();
+		printf("in it, asked out: ");
+		print_state(w);
 	} else if (!strcmp(mode, "iconify")) {
 		// ICCCM's minimize, wine's way (XIconifyWindow): flame has none, the
 		// app hears WM_STATE is still Normal, it's never left waiting
