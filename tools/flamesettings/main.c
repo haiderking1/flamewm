@@ -1090,7 +1090,7 @@ static void icon(struct fui *ui, enum icon kind, double x, double y, uint32_t co
 static void sidebar(struct app *app) {
 	struct fui *ui = app->ui;
 	const double x = 10, w = SIDEBAR_W - 20, item_h = 30, top = 54;
-	fui_search(ui, fui_id("search", 0), x, 14, w, app->query, sizeof(app->query));
+	fui_search(ui, fui_id("search", 0), x, 14, w, app->query, sizeof(app->query), true);
 	bool searching = app->query[0] != '\0';
 	// the highlight glides to the page that's open, gone while searching
 	double sel_y = fui_ease(ui, fui_id("selection", 0), top + app->page * (item_h + 2), 22);

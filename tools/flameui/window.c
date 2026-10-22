@@ -172,7 +172,10 @@ static void frame_done(void *data, struct wl_callback *callback, uint32_t time) 
 
 void fui_redraw(struct fui *ui) {
 	ui->dirty = true;
-	draw(ui);
+	// asked mid-frame (a menu opening): the next frame's, not one inside this
+	if (!ui->cr) {
+		draw(ui);
+	}
 }
 
 void fui_set_glass(struct fui *ui, const struct fui_pane *panes, int len) {

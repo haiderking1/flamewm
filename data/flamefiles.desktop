@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+Comment=flame's file manager
+Exec=flamefiles %F
+Icon=system-file-manager
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;

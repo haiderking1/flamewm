@@ -6,6 +6,7 @@ BUILD   ?= build
 TARGET  := $(BUILD)/flamewm
 CTL     := $(BUILD)/flamectl
 SETTINGS := $(BUILD)/flamesettings
+FILES    := $(BUILD)/flamefiles
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -47,7 +48,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL) $(SETTINGS)
+all: $(TARGET) $(CTL) $(SETTINGS) $(FILES)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -81,18 +82,28 @@ $(CLIENT_GEN)/$(basename $(notdir $(1)))-protocol.c: $(1)
 endef
 $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 
-$(SETTINGS): tools/flamesettings/main.c tools/flamesettings/json.c tools/flamesettings/json.h \
-		tools/flamesettings/browser.c tools/flamesettings/browser.h \
-		tools/flameui/window.c tools/flameui/ui.c tools/flameui/flameui.h \
-		tools/flameui/internal.h tools/flameui/thumbs.c src/image/image.c src/image/image.h \
-		$(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
+# flame's own apps: flameui, the pictures it reads, its protocols
+FLAMEUI_SRCS := tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c \
+	src/image/image.c
+FLAMEUI_DEPS := $(FLAMEUI_SRCS) tools/flameui/flameui.h tools/flameui/internal.h \
+	src/image/image.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
+UI_CC = $(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
+	$(LDFLAGS)
+UI_LIBS = $(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
+
+SETTINGS_SRCS := tools/flamesettings/main.c tools/flamesettings/json.c \
+	tools/flamesettings/browser.c
+$(SETTINGS): $(SETTINGS_SRCS) tools/flamesettings/json.h tools/flamesettings/browser.h \
+		$(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
-		$(LDFLAGS) -o $@ tools/flamesettings/main.c tools/flamesettings/json.c \
-		tools/flamesettings/browser.c \
-		tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c src/image/image.c \
-		$(UI_PROTO_CODE) \
-		$(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
+	$(UI_CC) -o $@ $(SETTINGS_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
+
+FILES_SRCS := tools/flamefiles/main.c tools/flamefiles/folder.c tools/flamefiles/ops.c \
+	tools/flamefiles/icons.c
+$(FILES): $(FILES_SRCS) tools/flamefiles/folder.h tools/flamefiles/ops.h \
+		tools/flamefiles/icons.h $(FLAMEUI_DEPS)
+	@mkdir -p $(dir $@)
+	$(UI_CC) -o $@ $(FILES_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c
@@ -311,7 +322,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS)
+		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -340,8 +351,10 @@ install: release
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
 	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
+	install -Dm755 build-release/flamefiles $(DESTDIR)$(PREFIX)/bin/flamefiles
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
+	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop
 	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
 	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
 

@@ -113,6 +113,7 @@ struct fui {
 	uint64_t active; // the control the button went down on, 0 for none
 	uint64_t focus; // the field being typed into, 0 for none
 	char focus_before[256]; // what it said when it got focus
+	char typed[64]; // fui_typed's
 	bool click_used; // a control took this frame's press
 
 	struct fui_pane panes[16];
