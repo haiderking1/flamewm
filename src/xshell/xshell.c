@@ -262,6 +262,15 @@ struct xlayer {
 	// till then (some keep their buffers across a resize). paced or not yet:
 	// pacing starts with the first frame after going fullscreen
 	int64_t swapping_until;
+	// frames in a row ready well before their slot: lag, the game has a
+	// buffer of its own (vsync on, a frame ahead). once that's clear one
+	// release is held back as a probe: it presents in time anyway, the
+	// spare's gone. it doesn't by its slot, it had none, the buffer goes
+	// right back and no probe for a while
+	int early_frames;
+	bool skip_release;
+	int64_t probe_until; // probing: the slot it has to make, 0 none
+	int64_t probe_again; // no probe before then
 };
 
 struct xpresent {
@@ -551,11 +560,25 @@ static void arm_msc_timer(struct flame_xshell *xshell);
 #define PACE_EARLY_NS 200000LL
 // after a resize nothing's held till the new swapchain shows, this long at most
 #define PACE_SWAP_NS 500000000LL
+// frames ready over half a pace early, in a row, before a spare is probed
+#define PACE_EARLY_FRAMES 8
+// a probe that showed no spare: none again for this long
+#define PACE_PROBE_COOLDOWN_NS 5000000000LL
 
 // when a game waiting on held buffers counts as stuck on us
 static int64_t pace_stuck_after(const struct xlayer *layer) {
 	int64_t after = layer->pacer->interval * PACE_STUCK_PACES;
 	return after > PACE_STUCK_MIN_NS ? after : PACE_STUCK_MIN_NS;
+}
+
+// the release due now is held back: the game has to make its next slot on
+// a buffer of its own
+static void pace_probe(struct xlayer *layer) {
+	wlr_log(WLR_DEBUG, "xshell: 0x%x runs a frame ahead, a buffer's held back to use its spare up",
+		layer->id);
+	layer->skip_release = false;
+	layer->release_at = INT64_MAX;
+	layer->probe_until = layer->pacer->last_shown + layer->pacer->interval;
 }
 
 // paced: the game has its one buffer for this frame, the rest wait for the
@@ -565,6 +588,9 @@ static bool pace_holds(struct xpresent *xp) {
 	int64_t now = now_ns();
 	if (!layer->pacer || xp->back_paced || now < layer->swapping_until) {
 		return false;
+	}
+	if (layer->skip_release && now >= layer->release_at) {
+		pace_probe(layer); // this one's the probe
 	}
 	bool current = false;
 	for (int i = 0; i < layer->images_len; i++) {
@@ -626,8 +652,18 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 		while (!wl_list_empty(&layer->held_back)) {
 			pace_release(layer, now);
 		}
-	} else if (now >= layer->release_at) {
+	} else if (layer->probe_until && now >= layer->probe_until) {
+		// no frame by its slot: it had no spare. it gets one right away
+		wlr_log(WLR_DEBUG, "xshell: 0x%x had no spare, its buffer goes back", layer->id);
+		layer->probe_until = 0;
+		layer->probe_again = now + PACE_PROBE_COOLDOWN_NS;
 		pace_release(layer, now);
+	} else if (now >= layer->release_at) {
+		if (layer->skip_release) {
+			pace_probe(layer);
+		} else {
+			pace_release(layer, now);
+		}
 	}
 }
 
@@ -637,7 +673,8 @@ static int64_t pace_next_release(const struct xlayer *layer) {
 		return 0;
 	}
 	int64_t stuck = layer->last_present + pace_stuck_after(layer);
-	return layer->release_at < stuck ? layer->release_at : stuck;
+	int64_t next = layer->release_at < stuck ? layer->release_at : stuck;
+	return layer->probe_until && layer->probe_until < next ? layer->probe_until : next;
 }
 
 // a frame ready for the screen waits for its slot. true: due now
@@ -646,6 +683,15 @@ static bool pace_slot_due(struct xlayer *layer, struct xpresent *xp, int64_t now
 		int64_t ready = xp->ready_at ? xp->ready_at : now;
 		pacer_frame(layer->pacer, xp->requested, ready);
 		xp->show_at = pacer_slot(layer->pacer, ready);
+		if (xp->show_at - ready > layer->pacer->interval / 2) {
+			if (++layer->early_frames >= PACE_EARLY_FRAMES && !layer->probe_until
+					&& now >= layer->probe_again && now >= layer->swapping_until) {
+				layer->early_frames = 0;
+				layer->skip_release = true;
+			}
+		} else {
+			layer->early_frames = 0;
+		}
 	}
 	return now >= xp->show_at - PACE_EARLY_NS;
 }
@@ -742,6 +788,9 @@ static void pace_update(struct xlayer *layer) {
 	}
 	pacer_init(layer->pacer, fastest, fixed);
 	layer->release_at = 0;
+	layer->early_frames = 0;
+	layer->skip_release = false;
+	layer->probe_until = 0;
 	const char *app = layer->window->view.impl->app_id
 		? layer->window->view.impl->app_id(&layer->window->view) : NULL;
 	wlr_log(WLR_INFO, "xshell: 0x%x of %s is paced: its frames at the fastest even pace it holds",
@@ -1557,6 +1606,7 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		}
 		layer->last_present = now;
 		pace_update(layer);
+		layer->probe_until = 0; // it made it without: the spare's used up
 		bool known = false;
 		for (int i = 0; i < layer->images_len; i++) {
 			known |= layer->images[i] == present->pixmap->id;
@@ -1908,6 +1958,9 @@ static void pace_resized(struct flame_xwindow *window) {
 	int64_t now = now_ns();
 	wl_list_for_each(layer, &window->layers, link) {
 		layer->swapping_until = now + PACE_SWAP_NS;
+		layer->skip_release = false;
+		layer->probe_until = 0;
+		layer->early_frames = 0;
 		while (layer->pacer && !wl_list_empty(&layer->held_back)) {
 			pace_release(layer, now);
 		}
