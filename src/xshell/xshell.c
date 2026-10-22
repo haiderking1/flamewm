@@ -262,15 +262,24 @@ struct xlayer {
 	// till then (some keep their buffers across a resize). paced or not yet:
 	// pacing starts with the first frame after going fullscreen
 	int64_t swapping_until;
-	// frames in a row ready well before their slot: lag, the game has a
-	// buffer of its own (vsync on, a frame ahead). once that's clear one
-	// release is held back as a probe: it presents in time anyway, the
-	// spare's gone. it doesn't by its slot, it had none, the buffer goes
-	// right back and no probe for a while
-	int early_frames;
+	// frames in a row drawn ahead of their release (game/pacer.h): lag,
+	// the game has a buffer of its own (vsync on, a frame ahead). once
+	// that's clear one release is held back as a probe: it presents in time
+	// anyway, the spare's gone. it doesn't by its slot, it had none, the
+	// buffer goes right back and no probe for a while, longer every time
+	int ahead_frames;
 	bool skip_release;
 	int64_t probe_until; // probing: the slot it has to make, 0 none
 	int64_t probe_again; // no probe before then
+	int64_t probe_wait; // how long after one that found no spare
+	// what the pacer learned of it, kept while it isn't paced (another
+	// workspace): back, it goes on from there
+	struct pacer learned;
+	bool has_learned;
+	// its last present came while it was the fullscreen game the user is
+	// in: a gap from there to the next is the game's, not time spent away
+	bool presented_in_game;
+	int64_t valve_at; // when its buffers all went back stuck, 0 none
 };
 
 struct xpresent {
@@ -560,10 +569,15 @@ static void arm_msc_timer(struct flame_xshell *xshell);
 #define PACE_EARLY_NS 200000LL
 // after a resize nothing's held till the new swapchain shows, this long at most
 #define PACE_SWAP_NS 500000000LL
-// frames ready over half a pace early, in a row, before a spare is probed
-#define PACE_EARLY_FRAMES 8
-// a probe that showed no spare: none again for this long
+// frames drawn ahead of their release, in a row, before a spare is probed
+#define PACE_AHEAD_FRAMES 8
+// a probe that showed no spare: none again for this long, doubling every
+// time, up to the most
 #define PACE_PROBE_COOLDOWN_NS 5000000000LL
+#define PACE_PROBE_COOLDOWN_MAX_NS 300000000000LL
+// a game going this long without a frame (and over 3 paces) is a hitch,
+// in the log with what flame did around it
+#define PACE_HITCH_NS 50000000LL
 
 // when a game waiting on held buffers counts as stuck on us
 static int64_t pace_stuck_after(const struct xlayer *layer) {
@@ -649,14 +663,20 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 			layer->release_at == INT64_MAX ? "given, next frame" : "due in",
 			layer->release_at == INT64_MAX ? 0.0 : (layer->release_at - now) / 1e6,
 			wl_list_length(&layer->queue), now < layer->swapping_until ? "swapping" : "steady");
+		layer->valve_at = now;
 		while (!wl_list_empty(&layer->held_back)) {
 			pace_release(layer, now);
 		}
 	} else if (layer->probe_until && now >= layer->probe_until) {
 		// no frame by its slot: it had no spare. it gets one right away
-		wlr_log(WLR_DEBUG, "xshell: 0x%x had no spare, its buffer goes back", layer->id);
+		layer->probe_wait = layer->probe_wait ? layer->probe_wait * 2 : PACE_PROBE_COOLDOWN_NS;
+		if (layer->probe_wait > PACE_PROBE_COOLDOWN_MAX_NS) {
+			layer->probe_wait = PACE_PROBE_COOLDOWN_MAX_NS;
+		}
+		wlr_log(WLR_DEBUG, "xshell: 0x%x had no spare, its buffer goes back, no probe for %.0f s",
+			layer->id, layer->probe_wait / 1e9);
 		layer->probe_until = 0;
-		layer->probe_again = now + PACE_PROBE_COOLDOWN_NS;
+		layer->probe_again = now + layer->probe_wait;
 		pace_release(layer, now);
 	} else if (now >= layer->release_at) {
 		if (layer->skip_release) {
@@ -664,6 +684,24 @@ static void pace_tick(struct xlayer *layer, int64_t now) {
 		} else {
 			pace_release(layer, now);
 		}
+	}
+}
+
+// a long gap in a game's frames, in the log with what flame did: whether
+// it held its buffers then, so a hitch is either the game's or ours
+static void pace_hitch(struct xlayer *layer, int64_t gap, int64_t now) {
+	int64_t pace = layer->pacer ? layer->pacer->interval : 0;
+	if (gap < PACE_HITCH_NS || gap < 3 * pace) {
+		return;
+	}
+	if (layer->valve_at) {
+		wlr_log(WLR_DEBUG, "xshell: 0x%x hitch: no frame for %.1f ms, it presented %.1f ms "
+			"after its buffers all went back: %s", layer->id, gap / 1e6,
+			(now - layer->valve_at) / 1e6, now - layer->valve_at < 5000000LL
+			? "it waited on flame" : "it was busy itself");
+	} else {
+		wlr_log(WLR_DEBUG, "xshell: 0x%x hitch: no frame for %.1f ms, %s, flame never held "
+			"it up: the game's own", layer->id, gap / 1e6, layer->pacer ? "paced" : "not paced");
 	}
 }
 
@@ -681,16 +719,14 @@ static int64_t pace_next_release(const struct xlayer *layer) {
 static bool pace_slot_due(struct xlayer *layer, struct xpresent *xp, int64_t now) {
 	if (!xp->show_at) {
 		int64_t ready = xp->ready_at ? xp->ready_at : now;
-		pacer_frame(layer->pacer, xp->requested, ready);
+		bool ahead = pacer_frame(layer->pacer, xp->requested, ready);
 		xp->show_at = pacer_slot(layer->pacer, ready);
-		if (xp->show_at - ready > layer->pacer->interval / 2) {
-			if (++layer->early_frames >= PACE_EARLY_FRAMES && !layer->probe_until
-					&& now >= layer->probe_again && now >= layer->swapping_until) {
-				layer->early_frames = 0;
-				layer->skip_release = true;
-			}
-		} else {
-			layer->early_frames = 0;
+		if (!ahead) {
+			layer->ahead_frames = 0;
+		} else if (++layer->ahead_frames >= PACE_AHEAD_FRAMES && !layer->probe_until
+				&& now >= layer->probe_again && now >= layer->swapping_until) {
+			layer->ahead_frames = 0;
+			layer->skip_release = true;
 		}
 	}
 	return now >= xp->show_at - PACE_EARLY_NS;
@@ -741,6 +777,8 @@ static void pace_shown(struct xlayer *layer) {
 static void pace_stop(struct xlayer *layer) {
 	struct flame_xshell *xshell = layer->window->xshell;
 	wlr_log(WLR_INFO, "xshell: 0x%x isn't paced anymore", layer->id);
+	layer->learned = *layer->pacer;
+	layer->has_learned = true;
 	free(layer->pacer);
 	layer->pacer = NULL;
 	if (xshell->clock.frame) {
@@ -787,14 +825,18 @@ static void pace_update(struct xlayer *layer) {
 		return;
 	}
 	pacer_init(layer->pacer, fastest, fixed);
+	if (layer->has_learned) {
+		pacer_resume(layer->pacer, &layer->learned);
+	}
 	layer->release_at = 0;
-	layer->early_frames = 0;
+	layer->ahead_frames = 0;
 	layer->skip_release = false;
 	layer->probe_until = 0;
 	const char *app = layer->window->view.impl->app_id
 		? layer->window->view.impl->app_id(&layer->window->view) : NULL;
-	wlr_log(WLR_INFO, "xshell: 0x%x of %s is paced: its frames at the fastest even pace it holds",
-		layer->id, app ? app : "an app with no name");
+	wlr_log(WLR_INFO, "xshell: 0x%x of %s is paced: its frames at the fastest even pace it holds"
+		"%s", layer->id, app ? app : "an app with no name",
+		layer->has_learned ? ", from where it was" : "");
 }
 
 static void handle_back_ready(struct wlr_drm_syncobj_timeline_waiter *waiter) {
@@ -1598,15 +1640,26 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		}
 		deliver_held(layer);
 		int64_t now = now_ns();
-		// the game's own frames, not the screen's: what a hitch in it is
+		// the game's own frames, not the screen's: what a hitch in it is.
+		// from a present made while the user was elsewhere it's not
 		struct flame_frame *clock = xshell->clock.frame;
-		if (clock && layer->last_present && layer->window->view.fullscreen_shown
-				&& xshell->server->desktop.focused == &layer->window->view) {
-			timing_game_gap(&clock->timing, now - layer->last_present);
+		bool in_game = clock && layer->window->view.fullscreen_shown
+			&& xshell->server->desktop.focused == &layer->window->view;
+		if (in_game && layer->presented_in_game && layer->last_present) {
+			int64_t gap = now - layer->last_present;
+			timing_game_gap(&clock->timing, gap);
+			pace_hitch(layer, gap, now);
 		}
+		layer->presented_in_game = in_game;
+		layer->valve_at = 0;
 		layer->last_present = now;
 		pace_update(layer);
-		layer->probe_until = 0; // it made it without: the spare's used up
+		if (layer->probe_until) {
+			layer->probe_until = 0; // it made it without: the spare's used up
+			layer->probe_wait = 0;
+			wlr_log(WLR_DEBUG, "xshell: 0x%x made its slot without it: a frame less lag",
+				layer->id);
+		}
 		bool known = false;
 		for (int i = 0; i < layer->images_len; i++) {
 			known |= layer->images[i] == present->pixmap->id;
@@ -1960,7 +2013,7 @@ static void pace_resized(struct flame_xwindow *window) {
 		layer->swapping_until = now + PACE_SWAP_NS;
 		layer->skip_release = false;
 		layer->probe_until = 0;
-		layer->early_frames = 0;
+		layer->ahead_frames = 0;
 		while (layer->pacer && !wl_list_empty(&layer->held_back)) {
 			pace_release(layer, now);
 		}

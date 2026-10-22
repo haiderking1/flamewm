@@ -21,6 +21,8 @@ static int failures;
 struct game {
 	int64_t now;
 	int64_t gpu_free; // its gpu is busy till then
+	int ahead; // frames the pacer took for drawn ahead of their release
+	int early; // frames ready over half a pace before their slot
 };
 
 static int64_t frame(struct pacer *p, struct game *g, int64_t cpu, int64_t gpu) {
@@ -34,8 +36,9 @@ static int64_t frame(struct pacer *p, struct game *g, int64_t cpu, int64_t gpu) 
 	int64_t start = presented > g->gpu_free ? presented : g->gpu_free;
 	int64_t ready = start + gpu;
 	g->gpu_free = ready;
-	pacer_frame(p, presented, ready);
+	g->ahead += pacer_frame(p, presented, ready);
 	int64_t slot = pacer_slot(p, ready);
+	g->early += slot - ready > p->interval / 2;
 	pacer_shown(p, slot);
 	// the game is let go again once it can be, never before its last frame showed
 	g->now = presented;
@@ -165,6 +168,140 @@ static void test_release_just_in_time(void) {
 	CHECK(slot - ready < 3 * MS);
 }
 
+// a vsync game: its present goes out only once the frame before it showed
+// (its complete). that floor isn't its work: the release still comes just
+// in time, the frame's ready a little before its slot, not a frame early.
+// spare: it has a buffer of its own besides, a frame ahead of its release
+struct vsync_game {
+	int64_t now, last_slot, last_release;
+	bool spare;
+	int ahead;
+};
+
+static int64_t vsync_frame(struct pacer *p, struct vsync_game *g, int64_t work) {
+	int64_t release = pacer_release_at(p);
+	bool held = release > g->now;
+	int64_t start = held ? release : g->now;
+	pacer_released(p, start, held);
+	if (g->spare) {
+		// drawn on the one it had, the release refills it for the next
+		int64_t on = g->last_release > g->now - work ? g->last_release : g->now - work;
+		g->last_release = start;
+		start = on;
+	}
+	int64_t presented = start + work > g->last_slot ? start + work : g->last_slot;
+	g->ahead += pacer_frame(p, presented, presented);
+	int64_t slot = pacer_slot(p, presented);
+	pacer_shown(p, slot);
+	g->last_slot = slot;
+	g->now = presented;
+	return slot - presented;
+}
+
+static void test_vsync_game_just_in_time(void) {
+	struct pacer p;
+	pacer_init(&p, 16 * MS, 33 * MS);
+	struct vsync_game g = {0};
+	int64_t early = 0;
+	for (int i = 0; i < 300; i++) {
+		early = vsync_frame(&p, &g, 3 * MS);
+	}
+	CHECK(early >= 0 && early < 5 * MS); // not a frame of lag
+	CHECK(p.lead < 6 * MS);
+	CHECK(g.ahead == 0); // it waits on its release: nothing to probe
+}
+
+// a frame ahead on a buffer of its own: told, every frame
+static void test_vsync_game_ahead(void) {
+	struct pacer p;
+	pacer_init(&p, 16 * MS, 33 * MS);
+	struct vsync_game g = {.spare = true};
+	for (int i = 0; i < 100; i++) {
+		vsync_frame(&p, &g, 3 * MS);
+	}
+	g.ahead = 0;
+	for (int i = 0; i < 20; i++) {
+		vsync_frame(&p, &g, 3 * MS);
+	}
+	CHECK(g.ahead >= 18);
+}
+
+// one frame that needed longer from its release than the lead gave it
+// (still within the pace): late, the lead takes it at once. it doesn't
+// stay up: a while later the frames are just in time again, not early
+// (lag) for good
+static void test_lead_recovers(void) {
+	struct pacer p;
+	pacer_init(&p, 6 * MS, 20 * MS);
+	struct game g = {0};
+	for (int i = 0; i < 300; i++) {
+		frame(&p, &g, 1 * MS, 2 * MS);
+	}
+	int64_t steady = p.lead;
+	frame(&p, &g, 1 * MS, 12 * MS);
+	CHECK(p.lead > steady + 8 * MS);
+	for (int i = 0; i < 150; i++) {
+		frame(&p, &g, 1 * MS, 2 * MS);
+	}
+	CHECK(p.lead < steady + 2 * MS);
+}
+
+// a game its gpu holds back: once let go a frame takes its cpu part and
+// its gpu part, 11 ms. the lead is that, it doesn't run up to let the game
+// go as early as it can (that's lag): later on the release isn't what it
+// waits on, its frame before is
+static void test_gpu_bound_lead(void) {
+	struct pacer p;
+	pacer_init(&p, 6 * MS, 0);
+	struct game g = {0};
+	for (int i = 0; i < 1000; i++) {
+		frame(&p, &g, 2 * MS, 9 * MS);
+	}
+	CHECK(p.lead >= 10 * MS && p.lead < 13 * MS);
+}
+
+// after a frame that needed long from its release the lead's up, the next
+// ones are early for a while: that's not a game drawing ahead on a buffer
+// of its own, nothing to probe for (it has none, it'd miss its slot)
+static void test_early_isnt_ahead(void) {
+	struct pacer p;
+	pacer_init(&p, 6 * MS, 12 * MS);
+	struct game g = {0};
+	for (int i = 0; i < 300; i++) {
+		frame(&p, &g, 1 * MS, 2 * MS);
+	}
+	frame(&p, &g, 1 * MS, 10 * MS);
+	g.ahead = g.early = 0;
+	for (int i = 0; i < 20; i++) {
+		frame(&p, &g, 1 * MS, 2 * MS);
+	}
+	CHECK(g.early >= 8); // the old way to tell
+	CHECK(g.ahead == 0);
+}
+
+// back from another workspace: the pace and lead it had, not the display's
+// top refresh relearned frame by frame
+static void test_resume(void) {
+	struct pacer p;
+	pacer_init(&p, 6 * MS, 0);
+	struct game g = {0};
+	for (int i = 0; i < 1000; i++) {
+		frame(&p, &g, 2 * MS, 9 * MS);
+	}
+	struct pacer before = p;
+	pacer_init(&p, 6 * MS, 0);
+	pacer_resume(&p, &before);
+	g.now += 500 * MS;
+	g.gpu_free = g.now;
+	int64_t last = frame(&p, &g, 2 * MS, 9 * MS);
+	for (int i = 0; i < 10; i++) {
+		int64_t slot = frame(&p, &g, 2 * MS, 9 * MS);
+		int64_t off = slot - last - before.interval;
+		CHECK(off > -MS && off < MS); // on the pace from the first frame
+		last = slot;
+	}
+}
+
 static void test_fps(void) {
 	struct pacer p;
 	pacer_init(&p, 10 * MS, 0);
@@ -189,6 +326,12 @@ int main(void) {
 	test_hitch();
 	test_glide();
 	test_release_just_in_time();
+	test_vsync_game_just_in_time();
+	test_vsync_game_ahead();
+	test_lead_recovers();
+	test_gpu_bound_lead();
+	test_early_isnt_ahead();
+	test_resume();
 	test_fps();
 	test_mode_parse();
 	if (failures) {
