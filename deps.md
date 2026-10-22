@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs make pkgconf foot
 ```
 
 ## build
@@ -30,6 +30,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | libxshmfence | `xshmfence` | flame's X server: the fences X11 apps share with it for their gpu buffers (DRI3), triggered when flame is done with a buffer |
 | lua 5.4 | `lua5.4` | the config: `~/.config/flame/init.lua`, see `src/config/lua.c` for what it can say |
 | pango, cairo | `pangocairo` | the share picker: its labels drawn as text |
+| pipewire | `libpipewire-0.3` | screen sharing: flame's portal streams what's shared into pipewire itself, drawn straight into the stream's gpu buffers (or shared memory for apps that can't take those) |
+| sd-bus (systemd) | `libsystemd` | flame's portal on the session bus, what xdg-desktop-portal calls for screen sharing and screenshots |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
 
 `flamectl` and the ipc socket are plain libc (unix sockets), nothing extra.
@@ -43,9 +45,9 @@ not linked, flame works without them, these features don't.
 
 | dep | why |
 | --- | --- |
-| xdg-desktop-portal, xdg-desktop-portal-wlr, pipewire | screen sharing (obs, discord, browsers): the portal asks wlr's backend, it captures a screen or one window through flame's ext-image-copy-capture into pipewire. `data/flamewm-portals.conf` (installed by `make install`) points the portal at it |
-| (picking what to share) | flame's own picker, no extra deps: the portal runs `flamectl share-pick --dmenu` (`data/xdg-desktop-portal-wlr-flamewm`, installed to `/etc/xdg/xdg-desktop-portal-wlr/flamewm`) |
+| xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
+| (xdg-desktop-portal-wlr, if you'd rather) | flame's ext-image-copy-capture still serves it, `flamectl share-pick --dmenu` as its dmenu chooser gets you flame's picker |
 
 ## tests
 
@@ -61,6 +63,7 @@ not linked, flame works without them, these features don't.
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
+| dbus (`dbus-run-session`), libsystemd, libpipewire, libEGL, GLESv2 | `libsystemd` `libpipewire-0.3` `egl` `glesv2` | `make e2e`: flame's portal on a bus of its own, called like xdg-desktop-portal calls it, its streams taken from pipewire like apps take them (gpu buffers imported with EGL). uses the running pipewire |
 
 ## data
 

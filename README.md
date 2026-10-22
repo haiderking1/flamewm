@@ -16,9 +16,10 @@ Xwayland needed, Steam and Proton games included.
   at an even pace, the fastest it can hold. a flat frametime line with
   nothing to set and no injecting into the game
 - **hardware cursor** that works on nvidia
-- **screen sharing** with its own picker: the window you want lights
-  up under the mouse, a glass panel on it, click to share. flame draws
-  everything itself, blur and glass included
+- **screen sharing** through its own portal and picker: the window you
+  want lights up under the mouse, a glass panel on it, click to share.
+  an app asking twice (browsers do) doesn't make you pick twice. flame
+  draws everything itself, blur and glass included
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run
@@ -31,6 +32,7 @@ make run        # nested inside your current compositor
 make release    # build-release/flamewm
 make test       # unit tests
 make e2e        # end to end tests on headless flames
+sudo make install  # flamewm, flamectl, and the portal files screen sharing needs
 ```
 
 `flamewm -c config -s command -d`: a config file, a command to run once

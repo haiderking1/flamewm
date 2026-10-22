@@ -31,11 +31,12 @@ wait_below() {
 	done
 }
 
-# the case in dir $1, named $2, flame's args $3. its result printed in one
-# go, a block the others running don't tear up
+# the case in dir $1, named $2, flame's args $3, what flame runs inside $4
+# (CASE_WRAP: dbus-run-session for a bus of its own). its result printed in
+# one go, a block the others running don't tear up
 run_case() {
 	dir=$1
-	timeout 30 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 "$FLAME" $3 \
+	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 $CASE_ENV "$FLAME" $3 \
 		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
 	ok=1
 	while IFS= read -r want; do
@@ -96,10 +97,10 @@ EOF
 	: > "$dir/out"
 	if alone "$name"; then
 		wait
-		run_case "$dir" "$name" "$args"
+		run_case "$dir" "$name" "$args" "$CASE_WRAP"
 	else
 		wait_below "$JOBS"
-		run_case "$dir" "$name" "$args" &
+		run_case "$dir" "$name" "$args" "$CASE_WRAP" &
 	fi
 }
 
@@ -395,6 +396,66 @@ $CTL key Return press > /dev/null; $CTL key Return release > /dev/null
 sleep 0.3
 echo \"both asked, screen picked [\$(cat b.out)]\"" "screen asked [Monitor: HEADLESS-1 a screen]" \
 	"window asked: its line back" "both asked, screen picked [Monitor: HEADLESS-1 a screen]"
+# flame's own portal on a bus of its own, called the way xdg-desktop-portal
+# calls it, streams taken from the running pipewire like apps take them
+CASE_WRAP="dbus-run-session --"
+CASE_ENV="FLAME_PORTAL=1"
+MIDDLE="python3 -I -c \"
+import sys
+d = open(sys.argv[1], 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+i = ((h // 2) * w + w // 2) * 3
+print('%02x%02x%02x' % (px[i], px[i + 1], px[i + 2]))
+\""
+case_run "portal: a screen shared straight away, gpu buffers, the same picture as the screen, asked again: no pick" "
+foot -o colors-dark.background=aa2233 > /dev/null 2>&1 &
+sleep 1.2
+$BIN/portalcast screen again gpu > cast.out 2>&1
+grim -t ppm shot.ppm
+cat cast.out
+[ \"\$(sed -n 's/^first: middle pixel //p' cast.out)\" = \"\$($MIDDLE shot.ppm)\" ] && echo 'stream matches the screen'" \
+	"first: start 0, right away" "first: source screen, 1280x720 at 0,0, kept yes" \
+	"first: frames came, 1280x720 in gpu buffers" "again: start 0, right away" \
+	"again: frames came, 1280x720 in gpu buffers" "stream matches the screen"
+case_run "portal: a window picked in flame's picker, shared at its size, in shared memory too, a cancel says so" "
+foot -T left > /dev/null 2>&1 &
+sleep 1
+foot -T right > /dev/null 2>&1 &
+sleep 1.2
+$CTL pointer move 300 360 > /dev/null
+$BIN/portalcast window again > cast.out 2>&1 &
+sleep 0.8
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 5
+cat cast.out
+$BIN/portalcast window > cancel.out 2>&1 &
+sleep 0.8
+$CTL key Escape press > /dev/null; $CTL key Escape release > /dev/null
+sleep 0.5
+cat cancel.out" \
+	"first: start 0" "first: source window, 627x704 at 0,0, kept yes" \
+	"first: frames came, 627x704 in shared memory" "again: start 0, right away" \
+	"again: frames came, 627x704 in shared memory" "first: start 1"
+case_run "portal: a shared window that closes ends its share, flame says so" "
+foot -T gone > /dev/null 2>&1 &
+sleep 1.2
+$BIN/portalcast window closed > cast.out 2>&1 &
+sleep 0.8
+$CTL key Return press > /dev/null; $CTL key Return release > /dev/null
+sleep 0.8
+$CTL close > /dev/null
+sleep 1.5
+cat cast.out" "first: start 0" "first: closed by flame"
+case_run "portal: a screenshot, a png of the screen" "
+busctl --user call org.freedesktop.impl.portal.desktop.flamewm /org/freedesktop/portal/desktop \
+	org.freedesktop.impl.portal.Screenshot Screenshot ossa{sv} /r/1 test '' 0 > shot.out 2>&1
+cat shot.out
+f=\$(grep -o '/tmp/flamewm-screenshot-[A-Za-z0-9]*.png' shot.out)
+file \"\$f\"
+rm -f \"\$f\"" '"uri" s "file:///tmp/flamewm-screenshot-' "PNG image data, 1280 x 720"
+CASE_WRAP=
+CASE_ENV=
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "
 foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5

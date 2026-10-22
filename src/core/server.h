@@ -13,6 +13,8 @@
 #include "ipc/ipc.h"
 #include "layers/layers.h"
 #include "picker/picker.h"
+#include "portal/portal.h"
+#include "screencast/screencast.h"
 #include "output/output.h"
 #include "protocols/workspaces.h"
 #include "render/render.h"
@@ -48,6 +50,8 @@ struct flame_server {
 	struct flame_xshell xshell;
 	struct flame_capture capture;
 	struct flame_picker picker;
+	struct flame_screencast screencast;
+	struct flame_portal portal;
 	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;
 };
