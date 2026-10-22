@@ -9,10 +9,10 @@
 // time for the frame to be ready at its slot, and shows it on the slot: the
 // line stays flat and what's on screen is the freshest input. the pace
 // follows how the frames turn out, gliding: slowly faster while they make
-// their slots, backing off when one's late, so nothing on screen jumps. after a hitch the frames
-// that pile up keep the pace instead of rushing out. pure logic, times in
-// ns, see game/pacer.c. what lets the game go and what shows the frames is
-// the X server's business (xshell)
+// their slots, backing off when one's late, so nothing on screen jumps.
+// after a hitch the frames that pile up keep the pace instead of rushing
+// out. pure logic, times in ns, see game/pacer.c. what lets the game go
+// and what shows the frames is the X server's business (xshell)
 
 // when the fullscreen game gets paced: never, while the display runs vrr
 // (it follows the frames, any pace shows as it is), or always (a fixed
