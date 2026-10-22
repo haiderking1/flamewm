@@ -1,5 +1,6 @@
 #define _GNU_SOURCE // memfd_create
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/input-event-codes.h>
 #include <math.h>
 #include <poll.h>
@@ -488,6 +489,14 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
 	ui->repeat_rate = 25;
 	ui->repeat_delay = 600;
+	// other threads wake it down this
+	ui->wake[0] = ui->wake[1] = -1;
+	if (pipe(ui->wake) == 0) {
+		for (int i = 0; i < 2; i++) {
+			fcntl(ui->wake[i], F_SETFD, FD_CLOEXEC);
+			fcntl(ui->wake[i], F_SETFL, O_NONBLOCK);
+		}
+	}
 	ui->display = wl_display_connect(NULL);
 	ui->xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (!ui->display || !ui->xkb) {
@@ -571,7 +580,11 @@ static int run_due(struct fui *ui) {
 }
 
 int fui_run(struct fui *ui) {
-	struct pollfd fd = {.fd = wl_display_get_fd(ui->display), .events = POLLIN};
+	struct pollfd fds[2] = {
+		{.fd = wl_display_get_fd(ui->display), .events = POLLIN},
+		{.fd = ui->wake[0], .events = POLLIN},
+	};
+	struct pollfd *fd = &fds[0];
 	while (ui->running) {
 		while (wl_display_prepare_read(ui->display) != 0) {
 			wl_display_dispatch_pending(ui->display);
@@ -585,11 +598,17 @@ int fui_run(struct fui *ui) {
 			wl_display_cancel_read(ui->display);
 			break;
 		}
-		if (poll(&fd, 1, timeout) < 0 && errno != EINTR) {
+		if (poll(fds, ui->wake[0] >= 0 ? 2 : 1, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(ui->display);
 			return 1;
 		}
-		if (fd.revents & POLLIN) {
+		if (fds[1].revents & POLLIN) {
+			char drain[64];
+			while (read(ui->wake[0], drain, sizeof(drain)) > 0) {
+			}
+			fui_redraw(ui);
+		}
+		if (fd->revents & POLLIN) {
 			if (wl_display_read_events(ui->display) < 0) {
 				return 1;
 			}
@@ -623,5 +642,16 @@ void fui_destroy(struct fui *ui) {
 	if (ui->display) {
 		wl_display_disconnect(ui->display);
 	}
+	for (int i = 0; i < 2; i++) {
+		if (ui->wake[i] >= 0) {
+			close(ui->wake[i]);
+		}
+	}
 	free(ui);
+}
+
+void fui_wake(struct fui *ui) {
+	char byte = 1;
+	ssize_t n = write(ui->wake[1], &byte, 1);
+	(void)n; // full: it's woken already
 }

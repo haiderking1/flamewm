@@ -27,6 +27,8 @@
 //     pace = "vrr" ("off", "always": the fullscreen game's frames at an even
 //     pace, the fastest it holds), pace_fps = 0 (a cap, 0 for none),
 //     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
+//     wallpaper = "~/walls/sea.jpg" ("" for none: jpeg, png or webp),
+//     wallpaper_mode = "fill" ("fit", "center", "stretch"),
 //     keyboard = { layout = "us,ara", variant = "", model = "",
 //       options = "grp:alt_shift_toggle", rules = "" } }
 //   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
@@ -363,6 +365,31 @@ static int l_set(lua_State *L) {
 			ok = parse_color(lua_tostring(L, value), config->background_color);
 		} else if (!strcmp(key, "drag_modifier")) {
 			ok = parse_mods(lua_tostring(L, value), &config->drag_modifier);
+		} else if (!strcmp(key, "wallpaper")) {
+			// "" for none, ~ for home
+			const char *path = lua_isstring(L, value) ? lua_tostring(L, value) : "";
+			const char *home = getenv("HOME");
+			free(config->wallpaper);
+			config->wallpaper = NULL;
+			if (!strncmp(path, "~/", 2) && home) {
+				size_t len = strlen(home) + strlen(path);
+				config->wallpaper = malloc(len);
+				if (config->wallpaper) {
+					snprintf(config->wallpaper, len, "%s%s", home, path + 1);
+				}
+			} else if (*path) {
+				config->wallpaper = strdup(path);
+			}
+		} else if (!strcmp(key, "wallpaper_mode")) {
+			static const char *const modes[] = {"fill", "fit", "center", "stretch"};
+			const char *mode = lua_isstring(L, value) ? lua_tostring(L, value) : "";
+			ok = false;
+			for (int i = 0; i < 4; i++) {
+				if (!strcmp(mode, modes[i])) {
+					config->wallpaper_mode = (enum flame_wallpaper_mode)i;
+					ok = true;
+				}
+			}
 		} else if (!strcmp(key, "cursor_theme")) {
 			free(config->owned_cursor_theme);
 			config->owned_cursor_theme = lua_isstring(L, value) ? strdup(lua_tostring(L, value))
@@ -712,6 +739,7 @@ void config_free(struct flame_config *config) {
 	lua_free(config->lua);
 	free(config->owned_keybinds);
 	free(config->owned_cursor_theme);
+	free(config->wallpaper);
 	struct flame_keyboard_names *k = &config->keyboard;
 	free(k->rules);
 	free(k->model);

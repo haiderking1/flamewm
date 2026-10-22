@@ -73,6 +73,7 @@ struct fui {
 	struct fui_buffer buffers[2];
 	struct wl_callback *frame_callback;
 	bool dirty; // a frame's wanted
+	int wake[2]; // a pipe: fui_wake from other threads
 
 	// the pointer as of now, and what happened since the last frame
 	double mx, my;

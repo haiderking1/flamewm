@@ -62,6 +62,13 @@ enum flame_x_global_keys {
 	FLAME_X_KEYS_ALWAYS, // every key, mouse buttons too
 };
 
+enum flame_wallpaper_mode {
+	FLAME_WALLPAPER_FILL, // covers the screen, cut to it
+	FLAME_WALLPAPER_FIT, // all of it shows, the background color around it
+	FLAME_WALLPAPER_CENTER, // its own size, in the middle
+	FLAME_WALLPAPER_STRETCH, // the screen's shape, whatever its own
+};
+
 struct flame_config {
 	int border_width;
 	int gap;
@@ -99,6 +106,11 @@ struct flame_config {
 	// caps it, 0 for none
 	enum pacer_mode pace;
 	int pace_fps;
+
+	// a picture on every screen over the background color, under everything
+	// (layer-shell wallpapers too), NULL for none. how it fits a screen
+	char *wallpaper;
+	enum flame_wallpaper_mode wallpaper_mode;
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;
