@@ -3,6 +3,7 @@
 // clips, alpha, blending, textures with and without alpha. needs a gpu with
 // GLES2, skipped without one
 #include <drm_fourcc.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,8 +34,12 @@ static int failed;
 // into (nvidia can't draw to linear)
 static struct wlr_drm_format *format;
 
+static struct wlr_buffer *new_buffer_sized(int width, int height) {
+	return wlr_allocator_create_buffer(allocator, width, height, format);
+}
+
 static struct wlr_buffer *new_buffer(void) {
-	return wlr_allocator_create_buffer(allocator, W, H, format);
+	return new_buffer_sized(W, H);
 }
 
 static bool read_back(struct wlr_buffer *buffer, uint32_t *out) {
@@ -42,7 +47,7 @@ static bool read_back(struct wlr_buffer *buffer, uint32_t *out) {
 	bool ok = texture && wlr_texture_read_pixels(texture, &(struct wlr_texture_read_pixels_options){
 		.data = out,
 		.format = DRM_FORMAT_ARGB8888,
-		.stride = W * 4,
+		.stride = (uint32_t)buffer->width * 4,
 	});
 	if (texture) {
 		wlr_texture_destroy(texture);
@@ -227,6 +232,113 @@ static void test_textures(void) {
 	wlr_texture_destroy(rgbx);
 }
 
+// glass over a busy picture: blurred and lit inside its rounded box,
+// nothing outside it touched. GL_TEST_DUMP=file.ppm writes it out to look at
+#define GW 320
+#define GH 200
+
+static void busy(struct gl_pass *pass) {
+	gl_pass_rect(pass, (struct wlr_box){0, 0, GW, GH}, (const float[4]){0.1f, 0.1f, 0.12f, 1},
+		NULL, false);
+	for (int x = 0; x < GW; x += 8) {
+		const float c[4] = {(x / 8 % 3 == 0), (x / 8 % 3 == 1), (x / 8 % 3 == 2), 1};
+		gl_pass_rect(pass, (struct wlr_box){x, 0, 4, GH}, c, NULL, false);
+	}
+	for (int y = 20; y < GH; y += 40) {
+		gl_pass_rect(pass, (struct wlr_box){0, y, GW, 6}, (const float[4]){1, 1, 1, 1}, NULL,
+			false);
+	}
+}
+
+static double luma(uint32_t p) {
+	return 0.2126 * (p >> 16 & 0xff) + 0.7152 * (p >> 8 & 0xff) + 0.0722 * (p & 0xff);
+}
+
+// how much neighbours differ along a row, a sharp stripe pattern a lot
+static double roughness(const uint32_t *px, int y, int x0, int x1) {
+	double sum = 0;
+	for (int x = x0; x < x1; x++) {
+		sum += fabs(luma(px[y * GW + x + 1]) - luma(px[y * GW + x]));
+	}
+	return sum / (x1 - x0);
+}
+
+static void test_glass(void) {
+	static uint32_t plain[GW * GH], glassy[GW * GH];
+	struct wlr_box box = {60, 50, 200, 100};
+	struct gl_glass_options options = {
+		.box = box,
+		.radius = 24,
+		.blur = 16,
+		.refraction = 6,
+		.tint = {0.12f, 0.12f, 0.12f, 0.12f},
+		.saturation = 1.6f,
+		.edge = 0.7f,
+		.rim = 1.5f,
+		.alpha = 1,
+	};
+	struct wlr_buffer *a = new_buffer_sized(GW, GH), *b = new_buffer_sized(GW, GH);
+	struct gl_pass pass;
+	gl_pass_begin(&pass, &gl, a, NULL, 0);
+	busy(&pass);
+	gl_pass_submit(&pass);
+	gl_pass_begin(&pass, &gl, b, NULL, 0);
+	busy(&pass);
+	gl_pass_glass(&pass, &options);
+	gl_pass_submit(&pass);
+	if (!read_back(a, plain) || !read_back(b, glassy)) {
+		fprintf(stderr, "glass: can't read back\n");
+		failed++;
+		goto out;
+	}
+	const char *dump = getenv("GL_TEST_DUMP");
+	if (dump) {
+		FILE *f = fopen(dump, "wb");
+		fprintf(f, "P6\n%d %d\n255\n", GW, GH);
+		for (int i = 0; i < GW * GH; i++) {
+			fputc(glassy[i] >> 16 & 0xff, f);
+			fputc(glassy[i] >> 8 & 0xff, f);
+			fputc(glassy[i] & 0xff, f);
+		}
+		fclose(f);
+	}
+	// outside the box, and in its corners past the rounding: untouched
+	int touched = 0;
+	for (int y = 0; y < GH; y++) {
+		for (int x = 0; x < GW; x++) {
+			bool inside = x >= box.x && x < box.x + box.width && y >= box.y
+				&& y < box.y + box.height;
+			bool corner = (x < box.x + 4 || x >= box.x + box.width - 4)
+				&& (y < box.y + 4 || y >= box.y + box.height - 4);
+			if ((!inside || corner) && plain[y * GW + x] != glassy[y * GW + x]) {
+				touched++;
+			}
+		}
+	}
+	if (touched) {
+		fprintf(stderr, "glass: %d pixels outside it changed\n", touched);
+		failed++;
+	}
+	// inside, away from the rim: the stripes smeared out
+	int mid = box.y + box.height / 2 + 7;
+	double sharp = roughness(plain, mid, box.x + 40, box.x + box.width - 40);
+	double soft = roughness(glassy, mid, box.x + 40, box.x + box.width - 40);
+	if (soft > sharp / 4) {
+		fprintf(stderr, "glass: not blurred (%.1f against %.1f behind it)\n", soft, sharp);
+		failed++;
+	}
+	// the rim catches light at the top left, the inside right under it doesn't
+	double rim = luma(glassy[(box.y + 1) * GW + box.x + 40]);
+	double under = luma(glassy[(box.y + 12) * GW + box.x + 40]);
+	if (rim < under + 20) {
+		fprintf(stderr, "glass: no light on its rim (%.0f against %.0f)\n", rim, under);
+		failed++;
+	}
+out:
+	wlr_buffer_drop(a);
+	wlr_buffer_drop(b);
+}
+
 int main(void) {
 	wlr_log_init(WLR_ERROR, NULL);
 	struct wl_display *display = wl_display_create();
@@ -252,6 +364,7 @@ int main(void) {
 	format = &output->swapchain->format;
 	test_rects();
 	test_textures();
+	test_glass();
 	gl_finish(&gl);
 	wlr_allocator_destroy(allocator);
 	wlr_renderer_destroy(renderer);

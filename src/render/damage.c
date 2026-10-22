@@ -32,6 +32,9 @@ static bool looks_the_same(const struct flame_element *a, const struct flame_ele
 	if (a->type == FLAME_ELEMENT_TEXTURE) {
 		return a->image == b->image;
 	}
+	if (a->type == FLAME_ELEMENT_GLASS) {
+		return !memcmp(&a->glass, &b->glass, sizeof(a->glass));
+	}
 	// a new buffer comes with commit damage, that's handled by the commit
 	return a->transform == b->transform && fbox_equal(&a->src, &b->src);
 }

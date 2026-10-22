@@ -1,5 +1,6 @@
 #include "render/frame.h"
 
+#include <math.h>
 #include <wlr/backend.h>
 #include <wlr/backend/session.h>
 #include <wlr/render/drm_syncobj.h>
@@ -473,6 +474,11 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 	struct wlr_box dst = element->box;
 	target_box_to_buffer(target, &dst);
 
+	if (element->type == FLAME_ELEMENT_GLASS) {
+		pass_glass_style(pass, &element->glass, dst, &region, target->scale, element->alpha);
+		pixman_region32_fini(&region);
+		return;
+	}
 	if (element->type == FLAME_ELEMENT_RECT) {
 		// premultiplied: fading scales every channel
 		float alpha = element->alpha;
@@ -559,6 +565,48 @@ static void draw_background(struct flame_pass *pass,
 	pixman_region32_fini(&background);
 }
 
+// glass is drawn from what's in the buffer under it: wherever one gets
+// drawn, everything it reads has to be drawn fresh this frame first, or it
+// blurs its own last frame into itself. repaint grows to that (buffer
+// coords), until no glass reaches past it. it's only redrawn, not changed:
+// the damage ring doesn't hear of it
+static void glass_repaint(const struct flame_element_list *list,
+		const struct flame_render_target *target, pixman_region32_t *repaint, int width,
+		int height) {
+	for (size_t round = 0; round <= list->len; round++) {
+		bool grew = false;
+		for (size_t i = 0; i < list->len; i++) {
+			const struct flame_element *element = &list->data[i];
+			if (element->type != FLAME_ELEMENT_GLASS) {
+				continue;
+			}
+			struct wlr_box box = element->clip;
+			target_box_to_buffer(target, &box);
+			pixman_box32_t shows = {box.x, box.y, box.x + box.width, box.y + box.height};
+			if (pixman_region32_contains_rectangle(repaint, &shows) == PIXMAN_REGION_OUT) {
+				continue;
+			}
+			int grow = (int)ceilf(elements_glass_reach(element) * target->scale);
+			pixman_region32_t reach;
+			pixman_region32_init_rect(&reach, box.x - grow, box.y - grow,
+				(unsigned)(box.width + 2 * grow), (unsigned)(box.height + 2 * grow));
+			pixman_region32_intersect_rect(&reach, &reach, 0, 0, width, height);
+			pixman_region32_t missing;
+			pixman_region32_init(&missing);
+			pixman_region32_subtract(&missing, &reach, repaint);
+			if (pixman_region32_not_empty(&missing)) {
+				pixman_region32_union(repaint, repaint, &reach);
+				grew = true;
+			}
+			pixman_region32_fini(&missing);
+			pixman_region32_fini(&reach);
+		}
+		if (!grew) {
+			break;
+		}
+	}
+}
+
 // renders the frame into a buffer and fills state with it, ready to commit
 static bool draw(struct flame_frame *frame, const struct flame_render_target *target,
 		const pixman_region32_t *damage, struct wlr_output_state *state) {
@@ -577,6 +625,7 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	pixman_region32_init(&repaint);
 	wlr_damage_ring_add(&frame->ring, damage);
 	wlr_damage_ring_rotate_buffer(&frame->ring, buffer, &repaint);
+	glass_repaint(&frame->cur, target, &repaint, buffer->width, buffer->height);
 
 	frame->in_point++;
 	frame->draw_id++;
@@ -617,6 +666,25 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	return true;
 }
 
+// glass shows what's behind it blurred and bent: anything changing within
+// its reach changes all of it. bottom up, one glass changing can reach the
+// next. layout coords
+static void glass_damage(const struct flame_element_list *list, pixman_region32_t *damage) {
+	for (size_t i = 0; i < list->len; i++) {
+		const struct flame_element *element = &list->data[i];
+		if (element->type != FLAME_ELEMENT_GLASS) {
+			continue;
+		}
+		int grow = elements_glass_reach(element);
+		struct wlr_box box = element->clip;
+		pixman_box32_t reach = {box.x - grow, box.y - grow, box.x + box.width + grow,
+			box.y + box.height + grow};
+		if (pixman_region32_contains_rectangle(damage, &reach) != PIXMAN_REGION_OUT) {
+			pixman_region32_union_rect(damage, damage, box.x, box.y, box.width, box.height);
+		}
+	}
+}
+
 // what changed since the last frame, buffer coords. the element lists are
 // built here too
 static void build(struct flame_frame *frame, const struct flame_render_target *target,
@@ -636,6 +704,7 @@ static void build(struct flame_frame *frame, const struct flame_render_target *t
 	damage_diff(&frame->prev, &frame->cur, damage);
 	pixman_region32_union(damage, damage, &frame->pending);
 	pixman_region32_clear(&frame->pending);
+	glass_damage(&frame->cur, damage);
 	pixman_region32_intersect_rect(damage, damage, logical.x, logical.y,
 		logical.width, logical.height);
 

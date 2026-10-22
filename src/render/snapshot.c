@@ -95,6 +95,8 @@ static void draw(struct flame_pass *pass, const struct flame_render_target *targ
 		target_region_to_buffer(target, &clip, true);
 		if (element->type == FLAME_ELEMENT_RECT) {
 			pass_rect(pass, dst, element->color, &clip, true);
+		} else if (element->type == FLAME_ELEMENT_GLASS) {
+			pass_glass_style(pass, &element->glass, dst, &clip, target->scale, 1);
 		} else if (element->texture) {
 			struct wlr_linux_drm_syncobj_surface_v1_state *sync = element->surface
 				? wlr_linux_drm_syncobj_v1_get_surface_state(element->surface) : NULL;

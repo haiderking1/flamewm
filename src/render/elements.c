@@ -1,5 +1,6 @@
 #include "render/elements.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wlr/types/wlr_buffer.h>
@@ -196,6 +197,30 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		memcpy(element->color, rect->color, sizeof(element->color));
 		mark(element, collect);
 		break;
+	case FLAME_NODE_GLASS:;
+		struct flame_glass *glass = wl_container_of(node, glass, node);
+		struct wlr_box glass_box = apply(&collect->t, (struct wlr_box){x, y, glass->width,
+			glass->height});
+		struct wlr_box glass_clip;
+		if (wlr_box_empty(&glass_box) || !clip_box(collect, glass_box, NULL, &glass_clip)) {
+			break;
+		}
+		struct flame_element *pane = push(collect->list);
+		if (!pane) {
+			collect->failed = true;
+			break;
+		}
+		pane->type = FLAME_ELEMENT_GLASS;
+		pane->id = glass;
+		pane->box = glass_box;
+		pane->clip = glass_clip;
+		// scaled along with the box, a zoom scales its corners and blur too
+		pane->glass = glass->style;
+		pane->glass.radius *= collect->t.ax;
+		pane->glass.blur *= collect->t.ax;
+		pane->glass.refraction *= collect->t.ax;
+		mark(pane, collect);
+		break;
 	case FLAME_NODE_SURFACE:;
 		struct flame_surface_node *surface_node = wl_container_of(node, surface_node, node);
 		if (!surface_node->surface
@@ -351,6 +376,14 @@ void elements_occlude(struct flame_element_list *list) {
 	pixman_region32_fini(&above);
 }
 
+int elements_glass_reach(const struct flame_element *element) {
+	if (element->type != FLAME_ELEMENT_GLASS) {
+		return 0;
+	}
+	// a blur spreads about twice its radius before it fades out
+	return (int)ceil(2 * element->glass.blur + element->glass.refraction) + 1;
+}
+
 const struct flame_element *elements_find(const struct flame_element_list *list,
 		const void *id, size_t hint, size_t *index) {
 	if (hint < list->len && list->data[hint].id == id) {
@@ -395,7 +428,13 @@ uint64_t elements_look(const struct flame_element_list *list, struct wlr_box are
 		hash = mix(hash, float_bits(e->alpha));
 		for (int c = 0; c < 4; c++) {
 			hash = mix(hash, float_bits(e->color[c]));
+			hash = mix(hash, float_bits(e->glass.tint[c]));
 		}
+		hash = mix(hash, float_bits((float)e->glass.radius));
+		hash = mix(hash, float_bits((float)e->glass.blur));
+		hash = mix(hash, float_bits(e->glass.saturation));
+		hash = mix(hash, float_bits(e->glass.edge));
+		hash = mix(hash, float_bits((float)e->glass.refraction));
 	}
 	return hash;
 }

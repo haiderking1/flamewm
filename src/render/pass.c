@@ -4,6 +4,7 @@
 #include <wlr/render/wlr_renderer.h>
 
 #include "render/render.h"
+#include "scene/scene.h"
 
 bool pass_begin(struct flame_pass *pass, struct flame_render *render,
 		struct wlr_buffer *buffer, struct wlr_drm_syncobj_timeline *signal, uint64_t point) {
@@ -51,6 +52,36 @@ void pass_texture(struct flame_pass *pass, const struct gl_texture_options *opti
 		.filter_mode = options->nearest ? WLR_SCALE_FILTER_NEAREST : WLR_SCALE_FILTER_BILINEAR,
 		.wait_timeline = options->wait_timeline,
 		.wait_point = options->wait_point,
+	});
+}
+
+void pass_glass(struct flame_pass *pass, const struct gl_glass_options *options) {
+	if (!pass->wlr) {
+		gl_pass_glass(&pass->gl, options);
+		return;
+	}
+	const float *t = options->tint;
+	float a = options->alpha;
+	wlr_render_pass_add_rect(pass->wlr, &(struct wlr_render_rect_options){
+		.box = options->box,
+		.color = {t[0] * a, t[1] * a, t[2] * a, t[3] * a},
+		.clip = options->clip,
+	});
+}
+
+void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,
+		struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha) {
+	pass_glass(pass, &(struct gl_glass_options){
+		.box = box,
+		.clip = clip,
+		.radius = (float)style->radius * scale,
+		.blur = (float)style->blur * scale,
+		.refraction = (float)style->refraction * scale,
+		.tint = {style->tint[0], style->tint[1], style->tint[2], style->tint[3]},
+		.saturation = style->saturation,
+		.edge = style->edge,
+		.rim = 1.5f * scale,
+		.alpha = alpha,
 	});
 }
 
