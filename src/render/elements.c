@@ -107,6 +107,20 @@ static bool clip_box(const struct collect *collect, struct wlr_box box,
 	return !clip || wlr_box_intersection(out, out, clip);
 }
 
+// box, surface local and any size an app sends, cut down to a width x
+// height surface. false when none of it's on it
+static bool clip_local(struct wlr_box box, int width, int height, struct wlr_box *out) {
+	int64_t x1 = box.x > 0 ? box.x : 0, y1 = box.y > 0 ? box.y : 0;
+	int64_t x2 = (int64_t)box.x + box.width, y2 = (int64_t)box.y + box.height;
+	x2 = x2 < width ? x2 : width;
+	y2 = y2 < height ? y2 : height;
+	if (x2 <= x1 || y2 <= y1) {
+		return false;
+	}
+	*out = (struct wlr_box){(int)x1, (int)y1, (int)(x2 - x1), (int)(y2 - y1)};
+	return true;
+}
+
 static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *data) {
 	struct collect *collect = data;
 	struct wlr_texture *texture = wlr_surface_get_texture(surface);
@@ -131,14 +145,16 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	size_t panes_len;
 	const struct eyecandy_pane *panes = eyecandy_panes(surface, &panes_len);
 	for (size_t i = 0; i < panes_len; i++) {
-		struct wlr_box pane_box = {collect->x + sx + panes[i].box.x,
-			collect->y + sy + panes[i].box.y, panes[i].box.width, panes[i].box.height};
-		struct wlr_box surface_box = {collect->x + sx, collect->y + sy, surface->current.width,
-			surface->current.height};
-		// clipped to the surface, then the way the surface is
-		if (!wlr_box_intersection(&pane_box, &pane_box, &surface_box)) {
+		// clipped to the surface in its own coords first: "all of it" comes as
+		// 0, 0, INT32_MAX, INT32_MAX (foot's blur), moved before it's cut
+		// down it would overflow
+		struct wlr_box pane_box;
+		if (!clip_local(panes[i].box, surface->current.width, surface->current.height,
+				&pane_box)) {
 			continue;
 		}
+		pane_box.x += collect->x + sx;
+		pane_box.y += collect->y + sy;
 		pane_box = apply(&collect->t, pane_box);
 		struct wlr_box pane_clip;
 		if (wlr_box_empty(&pane_box) || !clip_box(collect, pane_box,

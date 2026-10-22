@@ -105,7 +105,8 @@ int main(int argc, char **argv) {
 		struct ext_background_effect_surface_v1 *effect =
 			ext_background_effect_manager_v1_get_background_effect(background, surface);
 		struct wl_region *region = wl_compositor_create_region(compositor);
-		wl_region_add(region, 0, 0, W, H);
+		// all of it, the way foot asks: bigger than any surface
+		wl_region_add(region, 0, 0, INT32_MAX, INT32_MAX);
 		ext_background_effect_surface_v1_set_blur_region(effect, region);
 		wl_region_destroy(region);
 	}

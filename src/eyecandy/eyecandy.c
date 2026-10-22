@@ -278,6 +278,11 @@ static void background_handle_destroy(struct wl_client *client, struct wl_resour
 	wl_resource_destroy(resource);
 }
 
+static int span(int32_t from, int32_t to) {
+	int64_t len = (int64_t)to - from;
+	return len < INT32_MAX ? (int)len : INT32_MAX;
+}
+
 static void background_handle_set_blur_region(struct wl_client *client,
 		struct wl_resource *resource, struct wl_resource *region_resource) {
 	struct surface_glass *glass = wl_resource_get_user_data(resource);
@@ -298,8 +303,10 @@ static void background_handle_set_blur_region(struct wl_client *client,
 		(pixman_region32_t *)region, &n);
 	for (int i = 0; i < n && glass->blur_pending.len < MAX_PANES; i++) {
 		glass->blur_pending.panes[glass->blur_pending.len++] = (struct eyecandy_pane){
-			.box = {rects[i].x1, rects[i].y1, rects[i].x2 - rects[i].x1,
-				rects[i].y2 - rects[i].y1},
+			// a region can span more than an int's worth, it's cut to the
+			// surface when drawn anyway
+			.box = {rects[i].x1, rects[i].y1, span(rects[i].x1, rects[i].x2),
+				span(rects[i].y1, rects[i].y2)},
 			.style = blur_style,
 		};
 	}
