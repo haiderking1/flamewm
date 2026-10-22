@@ -7,7 +7,6 @@
 #include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/drm_syncobj.h>
-#include <wlr/render/pass.h>
 #include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
@@ -21,6 +20,7 @@
 #include "core/server.h"
 #include "desktop/view.h"
 #include "render/elements.h"
+#include "render/pass.h"
 #include "render/snapshot.h"
 #include "scene/scene.h"
 #include "util/listener.h"
@@ -297,18 +297,16 @@ static bool copy_synced(struct window_source *source,
 	struct pending_copy *copy = calloc(1, sizeof(*copy));
 	struct wlr_texture *texture = copy ? wlr_texture_from_buffer(renderer, frame->buffer) : NULL;
 	uint64_t point = source->point + 1;
-	struct wlr_render_pass *pass = texture ? wlr_renderer_begin_buffer_pass(renderer,
-		dst->buffer, &(struct wlr_buffer_pass_options){
-			.signal_timeline = source->timeline,
-			.signal_point = point,
-		}) : NULL;
+	struct flame_pass pass;
 	bool ok = false;
-	if (pass) {
-		wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+	if (texture && pass_begin(&pass, &source->capture->server->render, dst->buffer,
+			source->timeline, point)) {
+		pass_texture(&pass, &(struct gl_texture_options){
 			.texture = texture,
-			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+			.dst = {0, 0, texture->width, texture->height},
+			.alpha = 1,
 		});
-		ok = wlr_render_pass_submit(pass);
+		ok = pass_submit(&pass);
 	}
 	if (texture) {
 		wlr_texture_destroy(texture);

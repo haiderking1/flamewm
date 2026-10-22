@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+#include "gl/gl.h"
 #include "render/acquire.h"
 #include "render/schedule.h"
 #include "scene/scene.h"
@@ -37,11 +38,14 @@ enum flame_layer {
 };
 
 // the gpu side: renderer, buffers, and the scene everything gets drawn from.
-// flame decides what to draw and when (frame.c), the wlroots renderer only
-// gets told "this texture here" and "this rect there"
+// flame decides what to draw and when (frame.c) and draws it itself (gl/),
+// wlroots' renderer turns client buffers into textures for it
 struct flame_render {
 	struct flame_server *server;
 	struct wlr_renderer *renderer;
+	// flame's own drawing, in renderer's GL context. unusable without GL:
+	// wlroots' render pass draws then, see render/pass.h
+	struct flame_gl gl;
 	struct wlr_allocator *allocator;
 	// client buffers turn into textures for our renderer here
 	struct wlr_compositor *compositor;

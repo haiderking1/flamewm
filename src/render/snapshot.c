@@ -5,7 +5,6 @@
 #include <string.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/drm_format_set.h>
-#include <wlr/render/pass.h>
 #include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
@@ -18,6 +17,7 @@
 #include "render/coords.h"
 #include "render/elements.h"
 #include "render/frame.h"
+#include "render/pass.h"
 #include "render/render.h"
 #include "scene/scene.h"
 
@@ -75,15 +75,15 @@ void render_snapshot_warm(struct flame_frame *frame) {
 		return;
 	}
 	struct wlr_renderer *renderer = frame->render->renderer;
-	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(renderer, buffer, NULL);
-	if (pass) {
-		wlr_render_pass_submit(pass);
+	struct flame_pass pass;
+	if (pass_begin(&pass, frame->render, buffer, NULL, 0)) {
+		pass_submit(&pass);
 	}
 	wlr_texture_destroy(wlr_texture_from_buffer(renderer, buffer));
 	wlr_buffer_unlock(buffer);
 }
 
-static void draw(struct wlr_render_pass *pass, const struct flame_render_target *target,
+static void draw(struct flame_pass *pass, const struct flame_render_target *target,
 		const struct flame_element_list *list) {
 	for (size_t i = 0; i < list->len; i++) {
 		const struct flame_element *element = &list->data[i];
@@ -94,22 +94,18 @@ static void draw(struct wlr_render_pass *pass, const struct flame_render_target 
 			(unsigned)element->clip.width, (unsigned)element->clip.height);
 		target_region_to_buffer(target, &clip, true);
 		if (element->type == FLAME_ELEMENT_RECT) {
-			wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-				.box = dst,
-				.color = {element->color[0], element->color[1], element->color[2],
-					element->color[3]},
-				.clip = &clip,
-			});
+			pass_rect(pass, dst, element->color, &clip, true);
 		} else if (element->texture) {
 			struct wlr_linux_drm_syncobj_surface_v1_state *sync = element->surface
 				? wlr_linux_drm_syncobj_v1_get_surface_state(element->surface) : NULL;
-			wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+			pass_texture(pass, &(struct gl_texture_options){
 				.texture = element->texture,
-				.src_box = element->src,
-				.dst_box = dst,
+				.src = element->src,
+				.dst = dst,
 				.transform = wlr_output_transform_invert(element->transform),
 				.clip = &clip,
-				.blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
+				.alpha = 1,
+				.blend = true,
 				.wait_timeline = sync ? sync->acquire_timeline : element->wait_timeline,
 				.wait_point = sync ? sync->acquire_point : element->wait_point,
 			});
@@ -128,18 +124,14 @@ bool render_elements_to_buffer(struct flame_render *render,
 		.trans_width = buffer->width,
 		.trans_height = buffer->height,
 	};
-	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(render->renderer, buffer,
-		NULL);
-	if (!pass) {
+	struct flame_pass pass;
+	if (!pass_begin(&pass, render, buffer, NULL, 0)) {
 		return false;
 	}
-	wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-		.box = {0, 0, buffer->width, buffer->height},
-		.color = {0, 0, 0, 0},
-		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
-	});
-	draw(pass, &target, list);
-	return wlr_render_pass_submit(pass);
+	pass_rect(&pass, (struct wlr_box){0, 0, buffer->width, buffer->height},
+		(const float[4]){0, 0, 0, 0}, NULL, false);
+	draw(&pass, &target, list);
+	return pass_submit(&pass);
 }
 
 struct wlr_texture *render_snapshot(struct flame_frame *frame, struct flame_node *node,
@@ -174,20 +166,16 @@ struct wlr_texture *render_snapshot(struct flame_frame *frame, struct flame_node
 	elements_init(&list);
 	bool ok = elements_collect_node(&list, node, area);
 	struct wlr_renderer *renderer = frame->render->renderer;
-	struct wlr_render_pass *pass = ok
-		? wlr_renderer_begin_buffer_pass(renderer, buffer, NULL) : NULL;
-	if (pass) {
+	struct flame_pass pass;
+	ok = ok && pass_begin(&pass, frame->render, buffer, NULL, 0);
+	if (ok) {
 		// only its part of the buffer is ever shown
-		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
-			.box = shown,
-			.color = {0, 0, 0, 0},
-			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
-		});
-		draw(pass, &target, &list);
-		ok = wlr_render_pass_submit(pass);
+		pass_rect(&pass, shown, (const float[4]){0, 0, 0, 0}, NULL, false);
+		draw(&pass, &target, &list);
+		ok = pass_submit(&pass);
 	}
 	elements_finish(&list);
-	struct wlr_texture *texture = ok && pass ? wlr_texture_from_buffer(renderer, buffer) : NULL;
+	struct wlr_texture *texture = ok ? wlr_texture_from_buffer(renderer, buffer) : NULL;
 	// the texture holds on to the buffer while a ghost shows it, the
 	// swapchain hands it out again after
 	if (kept) {

@@ -55,6 +55,15 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 		wlr_log(WLR_ERROR, "failed to create renderer");
 		return false;
 	}
+	// flame draws its frames itself. FLAME_RENDERER=wlroots leaves it to
+	// wlroots' render pass: to compare against, or to get around a bug of ours
+	const char *drawer = getenv("FLAME_RENDERER");
+	if (!drawer || strcmp(drawer, "wlroots")) {
+		gl_init(&render->gl, render->renderer);
+	} else {
+		render->gl = (struct flame_gl){0};
+		wlr_log(WLR_INFO, "FLAME_RENDERER=wlroots: wlroots draws the frames");
+	}
 	if (!wlr_renderer_init_wl_shm(render->renderer, server->display)) {
 		wlr_log(WLR_ERROR, "failed to set up wl_shm");
 		return false;
@@ -149,5 +158,6 @@ void render_unhook(struct flame_render *render) {
 void render_finish(struct flame_render *render) {
 	scene_finish(&render->scene);
 	wlr_allocator_destroy(render->allocator);
+	gl_finish(&render->gl);
 	wlr_renderer_destroy(render->renderer);
 }

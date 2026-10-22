@@ -13,7 +13,6 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/drm_format_set.h>
 #include <wlr/render/drm_syncobj.h>
-#include <wlr/render/pass.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_compositor.h>
@@ -26,6 +25,7 @@
 #include "anim/window.h"
 #include "core/server.h"
 #include "game/pacer.h"
+#include "render/pass.h"
 #include "util/listener.h"
 #include "util/timer.h"
 #include "xbridge/xbridge.h"
@@ -1043,20 +1043,20 @@ static bool copy_frame(struct xpresent *xp) {
 	}
 	struct wlr_drm_syncobj_timeline *timeline = xshell->copy_timeline;
 	uint64_t point = ++xshell->copy_point;
-	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(renderer, copy->buffer,
-		&(struct wlr_buffer_pass_options){
-			.signal_timeline = timeline,
-			.signal_point = point,
-		});
-	if (pass) {
-		wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
-			.texture = xp->pixmap->texture,
-			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	struct flame_pass pass;
+	bool drawn = pass_begin(&pass, &xshell->server->render, copy->buffer, timeline, point);
+	if (drawn) {
+		struct wlr_texture *texture = xp->pixmap->texture;
+		pass_texture(&pass, &(struct gl_texture_options){
+			.texture = texture,
+			.dst = {0, 0, texture->width, texture->height},
+			.alpha = 1,
 			.wait_timeline = timeline ? xp->acquire : NULL,
 			.wait_point = xp->acquire_point,
 		});
+		drawn = pass_submit(&pass);
 	}
-	if (!pass || !wlr_render_pass_submit(pass)) {
+	if (!drawn) {
 		copy_put(layer, copy);
 		return false;
 	}
