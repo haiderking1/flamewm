@@ -722,6 +722,31 @@ $CTL pointer button left release > /dev/null
 sleep 0.6
 $CTL settings | python3 -I -c \"import json, sys; v = json.load(sys.stdin)['values']; print('after', v['animations.enabled'], v['gap'])\"" \
 	'"app_id":"flamesettings"' "window 900 600" "before True 6" "after False 39"
+case_run "flamesettings: a search finds settings on any page, the window resizes but no smaller than it draws" "
+$CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
+$CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
+sleep 1.5
+$CTL pointer move 640 400 > /dev/null
+for k in a n i; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done
+sleep 0.4
+$CTL pointer move 1028 184 > /dev/null; sleep 0.2
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.4
+$CTL settings | python3 -I -c \"import json, sys; print('found', json.load(sys.stdin)['values']['animations.enabled'])\"
+win() { $CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('\$1', w['width'], w['height'], w['floating'])\"; }
+win opened
+$CTL pointer move 1000 600 > /dev/null
+$CTL key Super_L press > /dev/null; $CTL pointer button right press > /dev/null
+for x in 1040 1080 1120 1160; do $CTL pointer move \$x 640 > /dev/null; sleep 0.05; done
+$CTL pointer button right release > /dev/null; $CTL key Super_L release > /dev/null
+sleep 0.6
+win bigger
+$CTL pointer move 1100 620 > /dev/null
+$CTL key Super_L press > /dev/null; $CTL pointer button right press > /dev/null
+for x in 900 700 500 300; do $CTL pointer move \$x 200 > /dev/null; sleep 0.05; done
+$CTL pointer button right release > /dev/null; $CTL key Super_L release > /dev/null
+sleep 0.6
+win squeezed" "found False" "opened 900 600 True" "bigger 1060 640 True" "squeezed 780 480 True"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "

@@ -3,6 +3,7 @@
 // VALUE` and flame applies it live and keeps it in settings.lua. what
 // init.lua sets shows locked: init.lua wins
 
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -16,8 +17,10 @@
 #include "../flameui/flameui.h"
 #include "json.h"
 
-#define W 900
-#define H 600
+// the window's size, what flame made it: read every frame
+static int W = 900, H = 600;
+#define MIN_W 780
+#define MIN_H 480
 #define SIDEBAR_W 220
 #define CONTENT_X 248
 #define CONTENT_W (W - CONTENT_X - 26)
@@ -123,6 +126,9 @@ struct app {
 		char text[128];
 	} fields[8];
 	int fields_len;
+	// searching all the pages at once, and how many rows each had last frame
+	char query[64];
+	int matches[8];
 };
 
 static void refresh(struct app *app) {
@@ -217,26 +223,42 @@ struct page {
 	struct app *app;
 	struct fui *ui;
 	double y; // the next row's top
-	double card_top; // the card being drawn, 0 for none
 	bool first_row;
+	// searching: the page and card being drawn match too, and the rows shown
+	const char *query, *section, *card_title;
+	int shown;
 };
 
 #define ROW_H 52
 #define CARD_PAD 16
 
-static void card_begin(struct page *p, const char *title) {
-	if (title) {
-		fui_text(p->ui, CONTENT_X + 4, p->y, title, F_CARD_TITLE, TEXT_DIM, FUI_LEFT, 0);
-		p->y += 22;
+// needle in hay, any case
+static bool has(const char *hay, const char *needle, size_t len) {
+	for (; hay && *hay; hay++) {
+		if (!strncasecmp(hay, needle, len)) {
+			return true;
+		}
 	}
-	p->card_top = p->y;
-	p->first_row = true;
+	return false;
 }
 
-static void card_end(struct page *p, double rows_bottom) {
-	(void)rows_bottom;
-	p->y += 18;
-	p->card_top = 0;
+// a row shows unless there's a search it doesn't match: every word of it
+// somewhere in the row, its card or its page
+static bool shown(struct page *p, const char *label, const char *detail, const char *key) {
+	const char *q = p->query;
+	while (q && *q) {
+		while (*q == ' ') {
+			q++;
+		}
+		size_t len = strcspn(q, " ");
+		if (len && !has(label, q, len) && !has(detail, q, len) && !has(key, q, len)
+				&& !has(p->card_title, q, len) && !has(p->section, q, len)) {
+			return false;
+		}
+		q += len;
+	}
+	p->shown++;
+	return true;
 }
 
 // the card behind rows from top to bottom: drawn first, rows go over it
@@ -287,6 +309,9 @@ static double row_mid(double top, bool detail) {
 // ---- rows bound to flame's settings ----
 
 static void toggle_row(struct page *p, const char *key, const char *label, const char *detail) {
+	if (!shown(p, label, detail, key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, label, detail, locked, 40);
 	bool on = json_bool(value(p->app, key), false);
@@ -299,6 +324,9 @@ static void toggle_row(struct page *p, const char *key, const char *label, const
 static void slider_row(struct page *p, const char *key, const char *label, const char *detail,
 		double min, double max, double step, const char *fmt, double show_scale,
 		const char *zero) {
+	if (!shown(p, label, detail, key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, label, detail, locked, 264);
 	double v = json_num(value(p->app, key), min);
@@ -325,6 +353,9 @@ static void slider_row(struct page *p, const char *key, const char *label, const
 
 static void choice_row(struct page *p, const char *key, const char *label, const char *detail,
 		const char *const *labels, const char *const *values, int count) {
+	if (!shown(p, label, detail, key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, label, detail, locked, fui_segmented_width(p->ui, labels, count));
 	const char *current = json_str(value(p->app, key), "");
@@ -342,6 +373,9 @@ static void choice_row(struct page *p, const char *key, const char *label, const
 
 static void color_row(struct page *p, const char *key, const char *label, const char *detail,
 		const uint32_t *colors, int count) {
+	if (!shown(p, label, detail, key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, label, detail, locked, count * 32.0);
 	const char *current = json_str(value(p->app, key), "");
@@ -379,6 +413,9 @@ static char *field_text(struct app *app, const char *key) {
 
 static void field_row(struct page *p, const char *key, const char *label, const char *detail,
 		const char *placeholder) {
+	if (!shown(p, label, detail, key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, label, detail, locked, 220);
 	char *text = field_text(p->app, key);
@@ -389,6 +426,9 @@ static void field_row(struct page *p, const char *key, const char *label, const 
 }
 
 static void info_row(struct page *p, const char *label, const char *text) {
+	if (!shown(p, label, text, NULL)) {
+		return;
+	}
 	double top = row(p, label, NULL, false, 0);
 	fui_text(p->ui, RIGHT, row_mid(top, false) - 8, text, F_TEXT, TEXT_DIM, FUI_RIGHT,
 		CONTENT_W * 0.6);
@@ -400,17 +440,37 @@ static void info_row(struct page *p, const char *label, const char *text) {
 typedef void (*rows_fn)(struct page *p);
 
 static void card(struct page *p, const char *title, rows_fn rows) {
-	card_begin(p, title);
+	double start = p->y;
+	p->y += title ? 22 : 0;
+	p->card_title = title;
+	p->first_row = true;
 	double top = p->y;
 	cairo_t *cr = fui_cairo(p->ui);
 	cairo_push_group(cr);
 	rows(p);
 	cairo_pattern_t *drawn = cairo_pop_group(cr);
+	p->card_title = NULL;
+	if (p->y == top) {
+		// a search left none of its rows
+		cairo_pattern_destroy(drawn);
+		p->y = start;
+		return;
+	}
+	if (title) {
+		// searching, every page at once: whose card it is
+		char whose[160];
+		snprintf(whose, sizeof(whose), "%s%s%s", p->query ? p->section : "",
+			p->query ? "  ·  " : "", title);
+		for (char *c = whose; *c; c++) {
+			*c = (char)toupper((unsigned char)*c);
+		}
+		fui_text(p->ui, CONTENT_X + 4, start, whose, F_CARD_TITLE, TEXT_DIM, FUI_LEFT, 0);
+	}
 	card_back(p, top, p->y);
 	cairo_set_source(cr, drawn);
 	cairo_paint(cr);
 	cairo_pattern_destroy(drawn);
-	card_end(p, p->y);
+	p->y += 18;
 }
 
 // ---- pages ----
@@ -461,6 +521,9 @@ static void display_rows(struct page *p) {
 	snprintf(key, sizeof(key), "output.%s.scale", name);
 	static const char *const labels[] = {"100%", "125%", "150%", "175%", "200%"};
 	static const double scales[] = {1, 1.25, 1.5, 1.75, 2};
+	if (!shown(p, "Scale", "Bigger text and windows, sharp at any of these", key)) {
+		return;
+	}
 	bool locked = pinned(p->app, key);
 	double top = row(p, "Scale", "Bigger text and windows, sharp at any of these", locked,
 		fui_segmented_width(p->ui, labels, 5));
@@ -544,6 +607,10 @@ static void privacy_keys(struct page *p) {
 }
 
 static void privacy_soon(struct page *p) {
+	if (!shown(p, "App permissions", "Apps ask once for your screen or your keys, you decide "
+			"here. Coming soon", "permissions")) {
+		return;
+	}
 	double top = row(p, "App permissions", "Apps ask once for your screen or your keys, you "
 		"decide here. Coming soon", false, 0);
 	(void)top;
@@ -561,6 +628,9 @@ static void about_rows(struct page *p) {
 
 static void page_about(struct page *p) {
 	card(p, "FLAME", about_rows);
+	if (p->query) {
+		return; // searching: only the rows
+	}
 	fui_paragraph(p->ui, CONTENT_X + 4, p->y, CONTENT_W - 8, "Every change here applies right "
 		"away and is kept in settings.lua. Anything init.lua sets wins and shows locked.",
 		F_SMALL, TEXT_FAINT);
@@ -648,16 +718,25 @@ static void icon(struct fui *ui, enum icon kind, double x, double y, uint32_t co
 	}
 }
 
+// where scroll and fades are kept for the search, past the pages
+#define SEARCH_SLOT 7
+
 static void sidebar(struct app *app) {
 	struct fui *ui = app->ui;
-	const double top = 16, item_h = 30, x = 10, w = SIDEBAR_W - 20;
-	// the highlight glides to the page that's open
+	const double x = 10, w = SIDEBAR_W - 20, item_h = 30, top = 54;
+	fui_search(ui, fui_id("search", 0), x, 14, w, app->query, sizeof(app->query));
+	bool searching = app->query[0] != '\0';
+	// the highlight glides to the page that's open, gone while searching
 	double sel_y = fui_ease(ui, fui_id("selection", 0), top + app->page * (item_h + 2), 22);
-	fui_fill_rounded(ui, x, sel_y, w, item_h, 8, 0xff7a2aff);
+	double sel = fui_ease(ui, fui_id("selection", 1), searching ? 0 : 1, 18);
+	if (sel > 0.01) {
+		fui_fill_rounded(ui, x, sel_y, w, item_h, 8, (uint32_t)(0xff7a2a00 | (uint32_t)(0xff * sel)));
+	}
 	for (int i = 0; i < PAGES; i++) {
 		double y = top + i * (item_h + 2);
 		bool hover = fui_hover(ui, x, y, w, item_h);
-		double lit = fui_ease(ui, fui_id(pages[i].name, 1), hover && i != app->page ? 1 : 0, 20);
+		bool current = i == app->page && !searching;
+		double lit = fui_ease(ui, fui_id(pages[i].name, 1), hover && !current ? 1 : 0, 20);
 		if (lit > 0.01) {
 			fui_fill_rounded(ui, x, y, w, item_h, 8, (uint32_t)(0xffffff00 | (uint32_t)(0x14 * lit)));
 		}
@@ -665,10 +744,19 @@ static void sidebar(struct app *app) {
 			fui_cursor_pointer(ui);
 		}
 		if (fui_clicked(ui, x, y, w, item_h)) {
+			// a page picked: the search is done with
 			app->page = i;
+			app->query[0] = '\0';
 		}
+		// searching: the pages nothing was found on fade back
+		double found = fui_ease(ui, fui_id(pages[i].name, 2),
+			!searching || app->matches[i] ? 1 : 0.35, 16);
+		cairo_t *cr = fui_cairo(ui);
+		cairo_push_group(cr);
 		icon(ui, pages[i].icon, x + 6, y + 4, pages[i].color);
 		fui_text(ui, x + 38, y + 6, pages[i].name, F_SIDEBAR, TEXT, FUI_LEFT, w - 46);
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, found);
 	}
 }
 
@@ -682,22 +770,46 @@ static void content(struct app *app) {
 			"start flame and open them again", F_TEXT, TEXT_DIM, FUI_CENTER, 0);
 		return;
 	}
+	bool searching = app->query[0] != '\0';
+	int slot = searching ? SEARCH_SLOT : app->page;
 	// a page switching fades in from a little lower
-	double shown = fui_ease(ui, fui_id("page", (uint64_t)app->page), 1, 14);
-	double *scroll = &app->scroll[app->page];
+	double shown = fui_ease(ui, fui_id("page", (uint64_t)slot), 1, 14);
+	double *scroll = &app->scroll[slot];
 	if (fui_hover(ui, CONTENT_X - 20, 0, W - CONTENT_X + 20, H)) {
 		*scroll += fui_scrolled(ui);
 	}
-	double eased = fui_ease(ui, fui_id("scroll", (uint64_t)app->page), *scroll, 24);
+	double eased = fui_ease(ui, fui_id("scroll", (uint64_t)slot), *scroll, 24);
 
 	cairo_save(cr);
 	cairo_rectangle(cr, CONTENT_X - 12, 0, W - CONTENT_X + 12, H);
 	cairo_clip(cr);
 	cairo_push_group(cr);
 	struct page p = {.app = app, .ui = ui, .y = 24 - eased + (1 - shown) * 10};
-	fui_text(ui, CONTENT_X + 4, p.y, pages[app->page].title, F_TITLE, TEXT, FUI_LEFT, 0);
-	p.y += 48;
-	pages[app->page].draw(&p);
+	if (searching) {
+		// every page at once, only what matches
+		fui_text(ui, CONTENT_X + 4, p.y, "Search", F_TITLE, TEXT, FUI_LEFT, 0);
+		p.y += 48;
+		p.query = app->query;
+		int total = 0;
+		for (int i = 0; i < PAGES; i++) {
+			p.section = pages[i].name;
+			p.shown = 0;
+			pages[i].draw(&p);
+			app->matches[i] = p.shown;
+			total += p.shown;
+		}
+		if (!total) {
+			char none[160];
+			snprintf(none, sizeof(none), "Nothing matches “%s”", app->query);
+			fui_text(ui, CONTENT_X + 4, p.y, none, F_TEXT, TEXT_DIM, FUI_LEFT, CONTENT_W - 8);
+			p.y += 30;
+		}
+	} else {
+		fui_text(ui, CONTENT_X + 4, p.y, pages[app->page].title, F_TITLE, TEXT, FUI_LEFT, 0);
+		p.y += 48;
+		p.section = pages[app->page].name;
+		pages[app->page].draw(&p);
+	}
 	cairo_pop_group_to_source(cr);
 	cairo_paint_with_alpha(cr, shown);
 	cairo_restore(cr);
@@ -721,6 +833,8 @@ static void content(struct app *app) {
 
 static void frame(struct fui *ui, void *data) {
 	struct app *app = data;
+	W = fui_width(ui);
+	H = fui_height(ui);
 	// the window: one pane of frosted glass, the desktop glowing through it
 	// vivid, and over its right part the content's solid dark: the sidebar
 	// is what's left of the glass
@@ -763,6 +877,8 @@ int main(int argc, char **argv) {
 		.title = "Settings",
 		.width = W,
 		.height = H,
+		.min_width = MIN_W,
+		.min_height = MIN_H,
 		.corner_radius = 18,
 		.frame = frame,
 		.data = &app,
