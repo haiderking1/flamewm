@@ -79,8 +79,8 @@ static bool buffer_make(struct fui *ui, struct fui_buffer *b, int width, int hei
 
 // a free buffer the window's size at its scale now
 static struct fui_buffer *buffer_get(struct fui *ui) {
-	int width = (int)ceil(ui->config.width * ui->scale120 / 120.0);
-	int height = (int)ceil(ui->config.height * ui->scale120 / 120.0);
+	int width = (int)ceil(ui->width * ui->scale120 / 120.0);
+	int height = (int)ceil(ui->height * ui->scale120 / 120.0);
 	for (int i = 0; i < 2; i++) {
 		struct fui_buffer *b = &ui->buffers[i];
 		if (b->busy) {
@@ -139,7 +139,7 @@ static void draw(struct fui *ui) {
 
 	glass_send(ui);
 	if (ui->viewport) {
-		wp_viewport_set_destination(ui->viewport, ui->config.width, ui->config.height);
+		wp_viewport_set_destination(ui->viewport, ui->width, ui->height);
 	} else {
 		wl_surface_set_buffer_scale(ui->surface, (int32_t)(ui->scale120 / 120));
 	}
@@ -216,6 +216,14 @@ static const struct xdg_surface_listener xdg_surface_listener = {xdg_surface_con
 
 static void toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width,
 		int32_t height, struct wl_array *states) {
+	struct fui *ui = data;
+	// 0: flame leaves it to us. a fixed window keeps its size
+	if (!ui->config.min_width || width <= 0 || height <= 0) {
+		return;
+	}
+	ui->width = width > ui->config.min_width ? width : ui->config.min_width;
+	ui->height = height > ui->config.min_height ? height : ui->config.min_height;
+	fui_redraw(ui);
 }
 
 static void toplevel_close(void *data, struct xdg_toplevel *toplevel) {
@@ -517,8 +525,14 @@ struct fui *fui_create(const struct fui_config *config) {
 	xdg_toplevel_add_listener(ui->toplevel, &toplevel_listener, ui);
 	xdg_toplevel_set_title(ui->toplevel, config->title);
 	xdg_toplevel_set_app_id(ui->toplevel, config->app_id);
-	xdg_toplevel_set_min_size(ui->toplevel, config->width, config->height);
-	xdg_toplevel_set_max_size(ui->toplevel, config->width, config->height);
+	ui->width = config->width;
+	ui->height = config->height;
+	if (config->min_width) {
+		xdg_toplevel_set_min_size(ui->toplevel, config->min_width, config->min_height);
+	} else {
+		xdg_toplevel_set_min_size(ui->toplevel, config->width, config->height);
+		xdg_toplevel_set_max_size(ui->toplevel, config->width, config->height);
+	}
 	wl_surface_commit(ui->surface);
 	ui->running = true;
 	return ui;

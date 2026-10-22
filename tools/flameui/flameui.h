@@ -25,7 +25,10 @@ struct fui_pane {
 
 struct fui_config {
 	const char *app_id, *title;
-	int width, height; // fixed: flame floats it
+	int width, height; // what it opens at
+	// how small the user can make it. 0: it can't be resized, it stays
+	// width x height (flame floats it)
+	int min_width, min_height;
 	// the window's rounded corners: flame draws no border around it, the
 	// app draws its own edge. 0 for a plain window with flame's border
 	double corner_radius;
@@ -54,6 +57,9 @@ void fui_after(struct fui *ui, int ms, void (*f)(struct fui *ui, void *data), vo
 // ---- inside frame ----
 
 cairo_t *fui_cairo(struct fui *ui);
+// the window's size now, layout units: what flame made it
+int fui_width(const struct fui *ui);
+int fui_height(const struct fui *ui);
 double fui_time(const struct fui *ui); // seconds, monotonic
 
 // a value easing toward target, kept by id from frame to frame. speed:
@@ -107,6 +113,11 @@ bool fui_swatches(struct fui *ui, uint64_t id, double right, double y, const uin
 // (or click away) with it changed
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 	int size, const char *placeholder, bool enabled);
+// a search field, w wide: what's typed is searched as it's typed, true
+// when text changed this frame. typing anywhere with no other field taking
+// the keys types into it, escape clears it
+bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
+	int size);
 // a plain button, true when clicked
 bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *label);
 
