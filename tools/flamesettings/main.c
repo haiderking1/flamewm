@@ -18,8 +18,8 @@
 
 #define W 900
 #define H 600
-#define SIDEBAR_W 210
-#define CONTENT_X 244
+#define SIDEBAR_W 220
+#define CONTENT_X 248
 #define CONTENT_W (W - CONTENT_X - 26)
 
 #define TEXT 0xffffffeb
@@ -650,39 +650,16 @@ static void icon(struct fui *ui, enum icon kind, double x, double y, uint32_t co
 
 static void sidebar(struct app *app) {
 	struct fui *ui = app->ui;
-	// the close dot, top left
-	bool over = fui_hover(ui, 20, 20, 14, 14);
-	if (over) {
-		fui_cursor_pointer(ui);
-	}
-	if (fui_clicked(ui, 20, 20, 14, 14)) {
-		fui_quit(ui);
-	}
-	cairo_t *cr = fui_cairo(ui);
-	cairo_arc(cr, 27, 27, 6, 0, 2 * M_PI);
-	fui_color(ui, 0xff5f57ff);
-	cairo_fill(cr);
-	if (over) {
-		fui_color(ui, 0x4d0000c0);
-		cairo_set_line_width(cr, 1.3);
-		cairo_move_to(cr, 24.6, 24.6);
-		cairo_line_to(cr, 29.4, 29.4);
-		cairo_move_to(cr, 29.4, 24.6);
-		cairo_line_to(cr, 24.6, 29.4);
-		cairo_stroke(cr);
-	}
-	fui_text(ui, 42, 19, "Settings", "Inter Semi-Bold 10.5", TEXT_DIM, FUI_LEFT, 0);
-
-	const double top = 56, item_h = 34, x = 20, w = SIDEBAR_W - 20;
+	const double top = 16, item_h = 30, x = 10, w = SIDEBAR_W - 20;
 	// the highlight glides to the page that's open
 	double sel_y = fui_ease(ui, fui_id("selection", 0), top + app->page * (item_h + 2), 22);
-	fui_fill_rounded(ui, x, sel_y, w, item_h, 9, 0xffffff26);
+	fui_fill_rounded(ui, x, sel_y, w, item_h, 8, 0xff7a2aff);
 	for (int i = 0; i < PAGES; i++) {
 		double y = top + i * (item_h + 2);
 		bool hover = fui_hover(ui, x, y, w, item_h);
 		double lit = fui_ease(ui, fui_id(pages[i].name, 1), hover && i != app->page ? 1 : 0, 20);
 		if (lit > 0.01) {
-			fui_fill_rounded(ui, x, y, w, item_h, 9, (uint32_t)(0xffffff00 | (uint32_t)(0x12 * lit)));
+			fui_fill_rounded(ui, x, y, w, item_h, 8, (uint32_t)(0xffffff00 | (uint32_t)(0x14 * lit)));
 		}
 		if (hover) {
 			fui_cursor_pointer(ui);
@@ -690,8 +667,8 @@ static void sidebar(struct app *app) {
 		if (fui_clicked(ui, x, y, w, item_h)) {
 			app->page = i;
 		}
-		icon(ui, pages[i].icon, x + 8, y + 6, pages[i].color);
-		fui_text(ui, x + 40, y + 8, pages[i].name, F_SIDEBAR, TEXT, FUI_LEFT, w - 48);
+		icon(ui, pages[i].icon, x + 6, y + 4, pages[i].color);
+		fui_text(ui, x + 38, y + 6, pages[i].name, F_SIDEBAR, TEXT, FUI_LEFT, w - 46);
 	}
 }
 
@@ -744,21 +721,29 @@ static void content(struct app *app) {
 
 static void frame(struct fui *ui, void *data) {
 	struct app *app = data;
-	// the window: dark glass, the sidebar lighter glass floating on it
-	struct fui_pane panes[] = {
-		{0, 0, W, H, 18, 34, 0x16161dd0, 1.6, 0.35, 0},
-		{10, 10, SIDEBAR_W, H - 20, 13, 22, 0xffffff10, 1.8, 0.8, 5},
-	};
-	fui_set_glass(ui, panes, 2);
+	// the window: one pane of frosted glass, the desktop glowing through it
+	// vivid, and over its right part the content's solid dark: the sidebar
+	// is what's left of the glass
+	struct fui_pane pane = {0, 0, W, H, 18, 40, 0x1e1e2470, 1.9, 0.25, 0};
+	fui_set_glass(ui, &pane, 1);
+	cairo_t *cr = fui_cairo(ui);
 	if (!fui_has_glass(ui)) {
-		// no flame glass: a plain dark window
-		fui_fill_rounded(ui, 0, 0, W, H, 18, 0x16161dff);
-		fui_fill_rounded(ui, 10, 10, SIDEBAR_W, H - 20, 13, 0xffffff10);
+		fui_fill_rounded(ui, 0, 0, W, H, 18, 0x2a2a30ff); // no flame glass: plain
 	}
-	fui_rounded(ui, 0.5, 0.5, W - 1, H - 1, 18);
+	const double r = 18;
+	cairo_new_path(cr);
+	cairo_move_to(cr, SIDEBAR_W, 0);
+	cairo_arc(cr, W - r, r, r, -M_PI / 2, 0);
+	cairo_arc(cr, W - r, H - r, r, 0, M_PI / 2);
+	cairo_line_to(cr, SIDEBAR_W, H);
+	cairo_close_path(cr);
+	fui_color(ui, 0x1c1c20ff);
+	cairo_fill(cr);
+	fui_fill_rounded(ui, SIDEBAR_W, 0, 1, H, 0, 0x00000066);
+	fui_rounded(ui, 0.5, 0.5, W - 1, H - 1, r);
 	fui_color(ui, 0xffffff1c);
-	cairo_set_line_width(fui_cairo(ui), 1);
-	cairo_stroke(fui_cairo(ui));
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
 	sidebar(app);
 	content(app);
 }
