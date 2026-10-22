@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Flame Settings
+Comment=flame's settings: appearance, displays, games, keyboard and mouse
+Exec=flamesettings
+Icon=preferences-system
+Categories=Settings;DesktopSettings;
+OnlyShowIn=flamewm;

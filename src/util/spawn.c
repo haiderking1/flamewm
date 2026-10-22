@@ -1,10 +1,35 @@
 #include "util/spawn.h"
 
+#include <limits.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wlr/util/log.h>
+
+// a bare name next to flame's own binary first: flame's tools (flamectl,
+// flamesettings) run from wherever flame does, installed or a build dir.
+// returns only when there's none
+static void exec_near_flame(const char *const argv[]) {
+	if (strchr(argv[0], '/')) {
+		return;
+	}
+	char path[PATH_MAX];
+	ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+	if (len <= 0) {
+		return;
+	}
+	path[len] = '\0';
+	char *slash = strrchr(path, '/');
+	if (!slash || (size_t)(slash - path) + 2 + strlen(argv[0]) > sizeof(path)) {
+		return;
+	}
+	strcpy(slash + 1, argv[0]);
+	if (access(path, X_OK) == 0) {
+		execv(path, (char *const *)argv);
+	}
+}
 
 void spawn(const char *const argv[]) {
 	pid_t pid = fork();
@@ -26,6 +51,7 @@ void spawn(const char *const argv[]) {
 
 		pid_t child = fork();
 		if (child == 0) {
+			exec_near_flame(argv);
 			execvp(argv[0], (char *const *)argv);
 			_exit(127);
 		}

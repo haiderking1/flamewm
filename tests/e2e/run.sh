@@ -705,6 +705,23 @@ sleep 1.2
 grim -t ppm blur.ppm
 $ROUGH candy.ppm candy
 $ROUGH blur.ppm blur" "glass up" "candy smooth over sharp" "blur smooth over sharp"
+case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
+$CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
+$CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
+sleep 1.5
+$CTL state | grep -o '\"app_id\":\"flamesettings\"'
+$CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('window', w['width'], w['height'])\"
+$CTL settings | python3 -I -c \"import json, sys; v = json.load(sys.stdin)['values']; print('before', v['animations.enabled'], v['gap'])\"
+$CTL pointer move 1028 440 > /dev/null; sleep 0.2
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.2
+$CTL pointer move 814 184 > /dev/null; sleep 0.1
+$CTL pointer button left press > /dev/null
+for x in 830 860 900 940 980; do $CTL pointer move \$x 184 > /dev/null; sleep 0.03; done
+$CTL pointer button left release > /dev/null
+sleep 0.6
+$CTL settings | python3 -I -c \"import json, sys; v = json.load(sys.stdin)['values']; print('after', v['animations.enabled'], v['gap'])\"" \
+	'"app_id":"flamesettings"' "window 900 600" "before True 6" "after False 39"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "

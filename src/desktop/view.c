@@ -1,9 +1,9 @@
 #include "desktop/view.h"
 
-
 #include "anim/window.h"
 #include "config/config.h"
 #include "core/server.h"
+#include "eyecandy/eyecandy.h"
 #include "util/macros.h"
 
 static const struct flame_config *view_config(struct flame_view *view) {
@@ -38,8 +38,17 @@ void view_finish(struct flame_view *view) {
 	scene_node_destroy(&view->tree->node);
 }
 
+int view_border_width(struct flame_view *view, bool fullscreen) {
+	// a window with a rounded edge of its own (flame's glass apps) has none
+	struct wlr_surface *surface = view->impl->surface ? view->impl->surface(view) : NULL;
+	if (fullscreen || (surface && eyecandy_shaped(surface))) {
+		return 0;
+	}
+	return view_config(view)->border_width;
+}
+
 static int border_width(struct flame_view *view, bool fullscreen) {
-	return fullscreen ? 0 : view_config(view)->border_width;
+	return view_border_width(view, fullscreen);
 }
 
 void view_content_size(struct flame_view *view, struct wlr_box box, bool fullscreen,

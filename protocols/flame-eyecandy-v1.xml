@@ -82,6 +82,19 @@
       </description>
     </request>
 
+    <request name="set_shape">
+      <description summary="the window is a rounded shape of its own">
+        The surface is a whole window that draws its own rounded edge: its
+        corners rounded by radius, outside them nothing. flame draws no
+        border around it then. 0 (the start) for a plain window, flame's
+        border around it.
+
+        Double buffered like the panes, made current by wl_surface.commit.
+        Only a window's main surface means anything by it.
+      </description>
+      <arg name="radius" type="fixed"/>
+    </request>
+
     <request name="add_pane">
       <description summary="one more pane">
         A pane added to the pending set, drawn after the ones before it.

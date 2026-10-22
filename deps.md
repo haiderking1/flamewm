@@ -29,7 +29,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | libEGL (libglvnd) | `egl` | flame's renderer (`src/gl/`): its shaders draw every frame in the GL context wlroots made, fences through EGL_ANDROID_native_fence_sync. gpu timing too. GL functions are loaded through it so GLES itself isn't linked |
 | libxshmfence | `xshmfence` | flame's X server: the fences X11 apps share with it for their gpu buffers (DRI3), triggered when flame is done with a buffer |
 | lua 5.4 | `lua5.4` | the config: `~/.config/flame/init.lua`, see `src/config/lua.c` for what it can say |
-| pango, cairo | `pangocairo` | the share picker: its labels drawn as text |
+| pango, cairo | `pangocairo` | the share picker: its labels drawn as text. flamesettings (flameui) draws everything with them |
+| wayland (client side), libxkbcommon | `wayland-client` `xkbcommon` | flamesettings: flame's own apps are wayland clients (flameui, `tools/flameui`) |
 | pipewire | `libpipewire-0.3` | screen sharing: flame's portal streams what's shared into pipewire itself, drawn straight into the stream's gpu buffers (or shared memory for apps that can't take those) |
 | sd-bus (systemd) | `libsystemd` | flame's portal on the session bus, what xdg-desktop-portal calls for screen sharing and screenshots |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
@@ -47,6 +48,7 @@ not linked, flame works without them, these features don't.
 | --- | --- |
 | xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
+| Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
 | (xdg-desktop-portal-wlr, if you'd rather) | flame's ext-image-copy-capture still serves it, `flamectl share-pick --dmenu` as its dmenu chooser gets you flame's picker |
 
 ## tests

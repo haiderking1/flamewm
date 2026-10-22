@@ -113,6 +113,9 @@ void view_finish(struct flame_view *view);
 void view_content_size(struct flame_view *view, struct wlr_box box, bool fullscreen,
 	int *width, int *height);
 uint32_t view_configure(struct flame_view *view, struct wlr_box box, bool fullscreen);
+// the border flame draws around it: none fullscreen, none for a window with
+// a rounded edge of its own, else the config's
+int view_border_width(struct flame_view *view, bool fullscreen);
 // put it on screen in this box, only the transaction calls this
 void view_place(struct flame_view *view, struct wlr_box box, bool fullscreen);
 void view_hide(struct flame_view *view);
