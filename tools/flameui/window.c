@@ -308,19 +308,39 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 	fui_redraw(ui);
 }
 
+// a wheel notch comes as 15: about three lines here, like elsewhere. notches
+// coming quick one after another go further each (up to WHEEL_ACCEL_MAX
+// times), a fast spin flies through a long folder. fingers on a touchpad
+// move it exactly as far as they go
+#define WHEEL_SPEED 3.0
+#define WHEEL_ACCEL_MAX 2.5
+
 static void pointer_axis(void *data, struct wl_pointer *pointer, uint32_t time,
 		uint32_t axis, wl_fixed_t value) {
 	struct fui *ui = data;
-	if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-		ui->scroll += wl_fixed_to_double(value);
-		fui_redraw(ui);
+	if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL) {
+		return;
 	}
+	double v = wl_fixed_to_double(value);
+	if (ui->axis_source == WL_POINTER_AXIS_SOURCE_WHEEL
+			|| ui->axis_source == WL_POINTER_AXIS_SOURCE_WHEEL_TILT) {
+		double now = fui_now();
+		bool spinning = now - ui->wheel_at < 0.08 && (v > 0) == (ui->wheel_last > 0);
+		ui->wheel_accel = spinning ? fmin(ui->wheel_accel * 1.2, WHEEL_ACCEL_MAX) : 1;
+		ui->wheel_at = now;
+		ui->wheel_last = v;
+		v *= WHEEL_SPEED * ui->wheel_accel;
+	}
+	ui->scroll += v;
+	fui_redraw(ui);
 }
 
 static void pointer_frame(void *data, struct wl_pointer *pointer) {
 }
 
 static void pointer_axis_source(void *data, struct wl_pointer *pointer, uint32_t source) {
+	struct fui *ui = data;
+	ui->axis_source = source;
 }
 
 static void pointer_axis_stop(void *data, struct wl_pointer *pointer, uint32_t time,
