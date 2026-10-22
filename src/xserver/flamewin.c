@@ -95,6 +95,11 @@ struct xs_window *xserver_top_level_at(struct flame_xserver *xserver, int x, int
 	return xs_window_child_at(xserver->root, x, y);
 }
 
+void xserver_window_set_hidden(struct flame_xserver *xserver, struct xs_window *window,
+		bool hidden) {
+	window->wm_hidden = hidden;
+}
+
 void xserver_window_root_position(struct xs_window *window, int *x, int *y) {
 	xs_window_origin(window, x, y);
 }

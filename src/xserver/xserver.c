@@ -942,6 +942,15 @@ bool xs_window_viewable(const struct xs_window *window) {
 	return true;
 }
 
+bool xs_window_shown(const struct xs_window *window) {
+	for (; window; window = window->parent) {
+		if (!window->mapped || window->wm_hidden) {
+			return false;
+		}
+	}
+	return true;
+}
+
 struct xs_property *xserver_property(struct flame_xserver *xserver, struct xs_window *window,
 		const char *name) {
 	uint32_t atom = xs_atom_intern(&xserver->atoms, name, strlen(name), false);

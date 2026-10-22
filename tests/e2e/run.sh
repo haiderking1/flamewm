@@ -110,16 +110,26 @@ case_run "dnd: wayland to an X window without XDND" \
 case_run "dnd: X to a wayland window that won't take it" \
 	"$(two "$BIN/xdnd source 'x' 6" "$BIN/wldnd source 'not a target' 6")" "source: cancelled"
 
-case_run "X windows on a hidden workspace are out of X's way" "
+case_run "X windows on a hidden workspace are out of X's way, and stay where they are" "
 $BIN/xdnd target 8 > /dev/null 2>&1 &
 sleep 0.8
 echo before: \$($BIN/xwins | grep target)
 $CTL workspace 2 > /dev/null
 sleep 0.3
-echo hidden: \$($BIN/xwins | grep target)
+echo hidden: \$($BIN/xwins | grep -c target)
+echo where: \$($BIN/xwins all | grep target)
 $CTL workspace 1 > /dev/null
 sleep 0.3
-echo back: \$($BIN/xwins | grep target)" "hidden: target -32000,-32000" "back: target 8,8"
+echo back: \$($BIN/xwins | grep target)" "hidden: 0" "where: target 8,8" "unviewable" "back: target 8,8"
+
+case_run "nothing's under the pointer on an empty workspace, not a hidden X window" "
+$BIN/xdnd target 8 > /dev/null 2>&1 &
+sleep 0.8
+$CTL pointer move 640 360 > /dev/null
+$BIN/xwins under | sed 's/^/shown, /'
+$CTL workspace 2 > /dev/null
+sleep 0.3
+$BIN/xwins under | sed 's/^/hidden, /'" "shown, under: target" "hidden, under: nothing"
 
 case_run "focus and workspaces with X menus open: flame keeps up, menus stay on top" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &

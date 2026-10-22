@@ -101,7 +101,7 @@ struct flame_xwindow {
 	// itself. flame tiles, floats and borders what's inside, X has all of it
 	int ext_left, ext_right, ext_top, ext_bottom;
 	struct wlr_box placed; // where flame put it last, layout coords
-	bool parked; // on a workspace that doesn't show: X has it out of sight
+	bool hidden; // on a workspace that doesn't show: X apps see it unviewable
 
 	// drawn with the cpu: its backing as a texture, updated where it changed,
 	// and the key telling frames it's a new picture. the top-level's own
