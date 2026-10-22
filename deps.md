@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg make pkgconf foot
 ```
 
 ## build
@@ -34,6 +34,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | pipewire | `libpipewire-0.3` | screen sharing: flame's portal streams what's shared into pipewire itself, drawn straight into the stream's gpu buffers (or shared memory for apps that can't take those) |
 | sd-bus (systemd) | `libsystemd` | flame's portal on the session bus, what xdg-desktop-portal calls for screen sharing and screenshots |
 | libjpeg-turbo, libpng, libwebp | `libturbojpeg` `libpng` `libwebp` | wallpapers (`src/image/`): flame reads the picture itself, on a worker thread, a jpeg straight at a fraction of its size when less is needed. flamesettings' wallpaper thumbnails too |
+| ffmpeg's libraries | `libavformat` `libavcodec` `libswscale` `libavutil` | flame's apps (flameui) only: videos' previews (a frame a tenth of the way in, not a black one) and songs' covers in flamefiles. md5 for the thumbnail cache's names |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
 
 `flamectl` and the ipc socket are plain libc (unix sockets), nothing extra.
@@ -58,6 +59,7 @@ not linked, flame works without them, these features don't.
 
 | dep | pkg-config | why |
 | --- | --- | --- |
+| ffmpeg (the command) | - | makes the videos and songs flamefiles' preview test reads |
 | libxcb and its extension libs (come with `libxcb`) | `xcb` `xcb-xinput` `xcb-randr` `xcb-xkb` `xcb-xfixes` `xcb-xinerama` `xcb-screensaver` `xcb-dpms` `xcb-xtest` `xcb-shape` `xcb-render` | the X server tests: plain xcb clients against flame's X server, run by `tests/xserver/harness.c`, and `make e2e`'s X cursors |
 | libxkbcommon-x11 (comes with `libxkbcommon`) | `xkbcommon-x11` | the XKB test reads the keymap back the way kitty and alacritty do |
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland clients (drag and drop, window sharing, a fullscreen game asking to tear) |

@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
-#include "image/image.h"
 #include "internal.h"
 
 // thumbnails of picture files: worker threads read and shrink them (a
@@ -46,12 +46,80 @@ struct fui_thumbs {
 	struct thumb *queue; // asked for, not started, under lock
 };
 
+// image as a cairo surface it can be drawn from (the surface borrows its pixels)
+static cairo_surface_t *surface_of(struct image *image) {
+	return cairo_image_surface_create_for_data((unsigned char *)image->data, CAIRO_FORMAT_ARGB32,
+		image->width, image->height, image->stride);
+}
+
+// image no bigger than size on its longest side, in place
+static bool shrink(struct image *image, int size) {
+	double s = fmin((double)size / image->width, (double)size / image->height);
+	if (s >= 1) {
+		return true;
+	}
+	struct image small = {.width = (int)fmax(round(image->width * s), 1),
+		.height = (int)fmax(round(image->height * s), 1)};
+	small.stride = small.width * 4;
+	small.data = calloc((size_t)small.stride * (size_t)small.height, 1);
+	cairo_surface_t *in = surface_of(image), *out = small.data ? surface_of(&small) : NULL;
+	if (!out || cairo_surface_status(in) || cairo_surface_status(out)) {
+		if (out) {
+			cairo_surface_destroy(out);
+		}
+		cairo_surface_destroy(in);
+		free(small.data);
+		return false;
+	}
+	cairo_t *cr = cairo_create(out);
+	cairo_scale(cr, (double)small.width / image->width, (double)small.height / image->height);
+	cairo_set_source_surface(cr, in, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_flush(out);
+	cairo_surface_destroy(out);
+	cairo_surface_destroy(in);
+	image_finish(image);
+	*image = small;
+	return true;
+}
+
+// path's picture (a video's frame, a song's cover) at the cache's size for
+// what's wanted: from the cache, else read and put there
+static bool source(const char *path, int want, struct image *image) {
+	struct stat st;
+	if (stat(path, &st) < 0 || !S_ISREG(st.st_mode)) {
+		return false;
+	}
+	int size = fui_cache_size(want);
+	if (fui_cache_read(path, st.st_mtime, size, image)) {
+		return true;
+	}
+	char why[96];
+	bool media = image_sniff(path) == IMAGE_NONE && fui_media_name(path);
+	bool read = media ? fui_media_frame(path, size, size, image)
+		: image_load(path, size, size, image, why, sizeof(why));
+	if (!read) {
+		return false;
+	}
+	// a small picture's quicker read again than from the cache
+	bool keep = media || image->width > size || image->height > size;
+	if (!shrink(image, size)) {
+		image_finish(image);
+		return false;
+	}
+	if (keep) {
+		fui_cache_write(path, st.st_mtime, size, image);
+	}
+	return true;
+}
+
 // the picture cut to cover width x height, or fit in it whole (never
 // bigger than it is)
 static cairo_surface_t *make(const char *path, int width, int height, bool fit) {
 	struct image image;
-	char why[96];
-	if (!image_load(path, width, height, &image, why, sizeof(why))) {
+	if (!source(path, width > height ? width : height, &image)) {
 		return NULL;
 	}
 	if (fit) {
@@ -60,8 +128,7 @@ static cairo_surface_t *make(const char *path, int width, int height, bool fit) 
 		height = (int)fmax(round(image.height * s), 1);
 	}
 	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	cairo_surface_t *in = cairo_image_surface_create_for_data((unsigned char *)image.data,
-		CAIRO_FORMAT_ARGB32, image.width, image.height, image.stride);
+	cairo_surface_t *in = surface_of(&image);
 	if (cairo_surface_status(out) || cairo_surface_status(in)) {
 		cairo_surface_destroy(out);
 		cairo_surface_destroy(in);
