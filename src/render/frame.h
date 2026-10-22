@@ -93,6 +93,9 @@ struct flame_frame {
 	// tearing and vrr, see render/sync.h. tearing: the fullscreen app wants
 	// it and gets it (or would, KMS willing): frames go out asap
 	struct sync sync;
+	// the fullscreen game paced on this output (game/pacer.h), at this many
+	// frames a second. 0: none
+	double pace_fps;
 	bool tearing_logged; // KMS refusing it was said once
 	bool vrr_logged;
 

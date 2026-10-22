@@ -68,6 +68,31 @@ display can do it at all: false usually means freesync is off in the
 display's own menu. turn it on there and flame sees it straight away, no
 replug.
 
+### pacing
+
+the fullscreen X game you're in gets its frames on screen at an even pace,
+the fastest one it can hold: a flat frametime line, nothing to set. flame
+measures how long each frame takes the game (cpu and gpu), paces to what
+nine frames in ten fit in, and glides: up slowly when there's room, down
+quick when there isn't, so with vrr nothing on screen jumps. after a hitch
+(a shader compiling) the frames that piled up keep the pace instead of
+rushing out.
+
+it's all on flame's side of the X server, no injecting into the game: a
+game starts its next frame when it gets a buffer back, so flame hands one
+back just in time for the frame to be ready at its slot (the input it
+draws is the freshest it can be, like reflex), and shows it on the slot. a
+game that kept a spare buffer (a frame ahead, lag) loses it once that shows.
+
+```lua
+flame.set { pace = "vrr", pace_fps = 0 } -- the defaults
+-- pace: "off", "vrr" (while the display runs vrr, it shows any pace
+-- evenly), "always". pace_fps: a cap on top, 0 for none
+```
+
+a hitch is still a hitch: a frame that isn't drawn yet can't be shown.
+`flamectl state` and frame timing say the pace (`pace_fps`).
+
 ### cursor
 
 flame owns the pointer image, wlroots never draws one. on a real tty it goes
@@ -92,6 +117,7 @@ output every two seconds, only observing, nothing about rendering changes:
   frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
 - `asap` / `vrr`: frames go out the moment they're ready (a game tearing,
   or vrr on), and whether the display runs adaptive sync
+- `pace_fps`: the fullscreen game's pace (see pacing), 0 when none is paced
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
 - `composited` / `scanout` / `cursor` / `failed`: frames we drew, client
   buffers sent straight to KMS, the same buffer again because only the
@@ -133,6 +159,7 @@ src/
   input/        seat, keyboards, cursor
   bindings/     keybind matching + the actions they run
   config/       compiled in defaults, lua later
+  game/         what's for games: the pacer (an even frame pace, the fastest held)
   ipc/          flame's own socket for bars and scripts: commands in, state out
   util/         listener helpers, spawn, macros, string buffers
 
@@ -205,7 +232,8 @@ the state is one json line:
 {"event":"state","workspace":1,
  "workspaces":[{"id":1,"name":"1","windows":2,"active":true,"fullscreen":false}, ...],
  "window":{"app_id":"foot","title":"~","fullscreen":false},
- "outputs":[{"name":"DP-2","scanout":false,"tearing":false,"vrr":false,"vrr_capable":true}]}
+ "outputs":[{"name":"DP-2","scanout":false,"tearing":false,"vrr":false,"vrr_capable":true,
+   "pace_fps":0.0}]}
 ```
 
 `flamectl` does it from a shell: `flamectl workspace 3`, `flamectl subscribe`.

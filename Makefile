@@ -58,7 +58,7 @@ $(BUILD)/gen/%-protocol.h: protocols/%.xml
 
 # pure logic modules get unit tests, sanitizers on
 TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test $(BUILD)/tests/sync_test \
-	$(BUILD)/tests/mode_test
+	$(BUILD)/tests/mode_test $(BUILD)/tests/pacer_test
 
 $(BUILD)/tests/schedule_test: tests/schedule_test.c src/render/schedule.c
 	@mkdir -p $(dir $@)
@@ -73,6 +73,10 @@ $(BUILD)/tests/hiccup_test: tests/hiccup_test.c src/render/hiccup.c
 	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
 
 $(BUILD)/tests/mode_test: tests/mode_test.c src/output/mode.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
+
+$(BUILD)/tests/pacer_test: tests/pacer_test.c src/game/pacer.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
 

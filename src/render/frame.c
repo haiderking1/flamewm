@@ -819,6 +819,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		again = frame->hooks.before_render(frame->hooks.data, target);
 	}
 
+	frame->timing.pace_fps = frame->pace_fps;
 	struct flame_render_target target;
 	target_init(&target, output, *frame->area);
 	pixman_region32_t damage;

@@ -23,6 +23,8 @@
 //     "combos": X apps see keys typed in wayland windows, push to talk),
 //     allow_tearing = true (fullscreen games with vsync off tear, if they ask),
 //     vrr = "fullscreen" ("off", "always": adaptive sync where the screen can),
+//     pace = "vrr" ("off", "always": the fullscreen game's frames at an even
+//     pace, the fastest it holds), pace_fps = 0 (a cap, 0 for none),
 //     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
 //     keyboard = { layout = "us,ara", variant = "", model = "",
 //       options = "grp:alt_shift_toggle", rules = "" } }
@@ -292,6 +294,15 @@ static int l_set(lua_State *L) {
 		} else if (!strcmp(key, "vrr")) {
 			ok = lua_isstring(L, value)
 				&& sync_vrr_policy_parse(lua_tostring(L, value), &config->vrr);
+		} else if (!strcmp(key, "pace")) {
+			ok = lua_isstring(L, value)
+				&& pacer_mode_parse(lua_tostring(L, value), &config->pace);
+		} else if (!strcmp(key, "pace_fps")) {
+			lua_Integer fps = luaL_checkinteger(L, value);
+			ok = fps >= 0 && fps <= 1000;
+			if (ok) {
+				config->pace_fps = (int)fps;
+			}
 		} else if (!strcmp(key, "x_global_keys")) {
 			static const char *const names[] = {"never", "modifiers", "combos", "always"};
 			const char *name = lua_tostring(L, value);

@@ -25,6 +25,7 @@
 
 #include "anim/window.h"
 #include "core/server.h"
+#include "game/pacer.h"
 #include "util/listener.h"
 #include "util/timer.h"
 #include "xbridge/xbridge.h"
@@ -240,6 +241,18 @@ struct xlayer {
 	int64_t draw_time;
 	int64_t woken; // when the last complete went out, while drawing
 	bool drawing;
+	// the game, paced (game/pacer.h): its frames show on their slots, and it
+	// gets one buffer back for its next frame at release_at, the others
+	// wait in held_back. NULL while it isn't paced
+	struct pacer *pacer;
+	int64_t release_at; // INT64_MAX: it got its one for this frame
+	struct wl_list held_back; // xpresent.held_link, oldest first
+	// frames in a row that came well before their slot: the game has a
+	// spare buffer, and given one a frame it stays a frame ahead for good
+	// (lag). the next release is skipped once that's clear, the spare's used
+	int early_frames;
+	bool skip_release;
+	int64_t last_present; // when it last presented, a game stuck on us hasn't
 };
 
 struct xpresent {
@@ -296,6 +309,14 @@ struct xpresent {
 	bool held;
 	int64_t held_until, done_when;
 	uint64_t done_msc;
+	// paced: its gpu work done (0 not yet) and its slot (0 not worked out
+	// yet). back_held: its buffer waits for the release since held_since,
+	// back_paced: let go, it goes back as soon as it can
+	int64_t ready_at, show_at;
+	int64_t shown_at; // when it went up, paced or not
+	bool back_held, back_paced;
+	int64_t held_since;
+	struct wl_list held_link; // xlayer.held_back
 };
 
 // a buffer of ours a present got copied into, and its texture
@@ -337,6 +358,7 @@ static void stop_acquiring(struct xpresent *xp) {
 
 static void xpresent_free(struct xpresent *xp) {
 	wl_list_remove(&xp->link);
+	wl_list_remove(&xp->held_link);
 	stop_acquiring(xp);
 	if (xp->waiting) {
 		wlr_drm_syncobj_timeline_waiter_finish(&xp->waiter);
@@ -507,6 +529,173 @@ static void deliver_held(struct xlayer *layer) {
 }
 
 static void give_back(struct xpresent *xp);
+static void arm_msc_timer(struct flame_xshell *xshell);
+
+// ---- pacing the game, see game/pacer.h ----
+
+// no frame for this long with buffers held: the game waits on one,
+// whatever the pacer thinks, they go back. it never freezes on us
+#define PACE_STUCK_NS 100000000LL
+// a slot this close is due, the timer isn't finer
+#define PACE_EARLY_NS 200000LL
+// frames well early in a row before the game counts as a buffer ahead
+#define PACE_EARLY_FRAMES 8
+
+// paced: the game has its one buffer for this frame, the rest wait for the
+// release. true: xp waits
+static bool pace_holds(struct xpresent *xp) {
+	struct xlayer *layer = xp->layer;
+	if (!layer->pacer || xp->back_paced) {
+		return false;
+	}
+	int64_t now = now_ns();
+	if (now < layer->release_at) {
+		if (!xp->back_held) {
+			xp->back_held = true;
+			xp->held_since = now;
+			wl_list_insert(layer->held_back.prev, &xp->held_link);
+			arm_msc_timer(layer->window->xshell);
+		}
+		return true;
+	}
+	// the release was due before this one was free: it's the one
+	layer->release_at = INT64_MAX;
+	if (!layer->pacer->released) {
+		pacer_released(layer->pacer, now);
+	}
+	return false;
+}
+
+// the oldest held buffer goes back, the game starts its next frame on it
+static void pace_release(struct xlayer *layer, int64_t now) {
+	struct xpresent *xp = wl_container_of(layer->held_back.next, xp, held_link);
+	wl_list_remove(&xp->held_link);
+	wl_list_init(&xp->held_link);
+	xp->back_held = false;
+	xp->back_paced = true;
+	if (layer->pacer) {
+		layer->release_at = INT64_MAX;
+		if (!layer->pacer->released) {
+			pacer_released(layer->pacer, now);
+		}
+	}
+	give_back(xp);
+}
+
+// the release came, or a buffer waited too long
+static void pace_tick(struct xlayer *layer, int64_t now) {
+	if (wl_list_empty(&layer->held_back)) {
+		return;
+	}
+	if (now - layer->last_present >= PACE_STUCK_NS) {
+		pace_release(layer, now); // it waits on it, whatever we think
+	} else if (now >= layer->release_at) {
+		if (layer->skip_release) {
+			// it's drawing into its spare: this frame it goes without
+			layer->skip_release = false;
+			layer->early_frames = 0;
+			layer->release_at = INT64_MAX;
+		} else {
+			pace_release(layer, now);
+		}
+	}
+}
+
+// when the next held buffer goes back, 0 for none held
+static int64_t pace_next_release(const struct xlayer *layer) {
+	if (wl_list_empty(&layer->held_back)) {
+		return 0;
+	}
+	int64_t stuck = layer->last_present + PACE_STUCK_NS;
+	return layer->release_at < stuck ? layer->release_at : stuck;
+}
+
+// a frame ready for the screen waits for its slot. true: due now
+static bool pace_slot_due(struct xlayer *layer, struct xpresent *xp, int64_t now) {
+	if (!xp->show_at) {
+		int64_t ready = xp->ready_at ? xp->ready_at : now;
+		pacer_frame(layer->pacer, xp->requested, ready);
+		xp->show_at = pacer_slot(layer->pacer, ready);
+		// let go just in time it's ready a margin before its slot. half a
+		// pace or more, frame after frame: it had a buffer of its own
+		if (xp->show_at - ready > layer->pacer->interval / 2) {
+			if (++layer->early_frames >= PACE_EARLY_FRAMES) {
+				layer->skip_release = true;
+			}
+		} else {
+			layer->early_frames = 0;
+		}
+	}
+	return now >= xp->show_at - PACE_EARLY_NS;
+}
+
+// the game's frame went on screen: when it's let go for the next one
+static void pace_shown(struct xlayer *layer) {
+	int64_t now = now_ns();
+	pacer_shown(layer->pacer, now);
+	layer->release_at = pacer_release_at(layer->pacer);
+	struct flame_frame *frame = layer->window->xshell->clock.frame;
+	if (frame) {
+		frame->pace_fps = pacer_fps(layer->pacer);
+	}
+}
+
+// back to plain: whatever's held goes back
+static void pace_stop(struct xlayer *layer) {
+	struct flame_xshell *xshell = layer->window->xshell;
+	wlr_log(WLR_INFO, "xshell: 0x%x isn't paced anymore", layer->id);
+	free(layer->pacer);
+	layer->pacer = NULL;
+	if (xshell->clock.frame) {
+		xshell->clock.frame->pace_fps = 0;
+	}
+	int64_t now = now_ns();
+	while (!wl_list_empty(&layer->held_back)) {
+		pace_release(layer, now);
+	}
+}
+
+// the fullscreen app the user is in, on a display that shows any pace evenly
+static bool pace_wanted(struct xlayer *layer) {
+	struct flame_xshell *xshell = layer->window->xshell;
+	const struct flame_config *config = xshell->server->config;
+	struct flame_view *view = &layer->window->view;
+	struct flame_frame *frame = xshell->clock.frame;
+	if (config->pace == PACER_OFF || !frame || xshell->server->desktop.focused != view
+			|| !view->fullscreen_shown) {
+		return false;
+	}
+	return config->pace == PACER_ALWAYS
+		|| frame->output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
+}
+
+static void pace_update(struct xlayer *layer) {
+	struct flame_xshell *xshell = layer->window->xshell;
+	bool want = pace_wanted(layer);
+	if (!want) {
+		if (layer->pacer) {
+			pace_stop(layer);
+		}
+		return;
+	}
+	const struct flame_config *config = xshell->server->config;
+	int64_t fastest = xshell->clock.frame->schedule.period;
+	int64_t fixed = config->pace_fps > 0 ? 1000000000LL / config->pace_fps : 0;
+	if (layer->pacer) {
+		pacer_set_limits(layer->pacer, fastest, fixed);
+		return;
+	}
+	layer->pacer = calloc(1, sizeof(*layer->pacer));
+	if (!layer->pacer) {
+		return;
+	}
+	pacer_init(layer->pacer, fastest, fixed);
+	layer->release_at = 0;
+	const char *app = layer->window->view.impl->app_id
+		? layer->window->view.impl->app_id(&layer->window->view) : NULL;
+	wlr_log(WLR_INFO, "xshell: 0x%x of %s is paced: its frames at the fastest even pace it holds",
+		layer->id, app ? app : "an app with no name");
+}
 
 static void handle_back_ready(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 	struct xpresent *xp = wl_container_of(waiter, xp, back_waiter);
@@ -551,6 +740,9 @@ static void give_back(struct xpresent *xp) {
 	}
 	if (older_out(xp)) {
 		xp->back_wanted = true; // the older one going back sends this one
+		return;
+	}
+	if (pace_holds(xp)) {
 		return;
 	}
 	xp->given_back = true;
@@ -923,7 +1115,11 @@ static void core_update(struct flame_xwindow *window) {
 static void show(struct xlayer *layer, struct xpresent *xp) {
 	struct xpresent *old = layer->shown;
 	layer->shown = xp;
+	xp->shown_at = now_ns();
 	wl_list_init(&xp->link);
+	if (layer->pacer) {
+		pace_shown(layer);
+	}
 	if (layer->copying && !xp->copied) {
 		copy_frame(xp);
 	}
@@ -972,8 +1168,14 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 		if (shown && shown->held) {
 			next = !next || shown->held_until < next ? shown->held_until : next;
 		}
+		int64_t release = layer->pacer ? pace_next_release(layer) : 0;
+		if (release) {
+			next = !next || release < next ? release : next;
+		}
 		if (shown && !shown->completed && !shown->drawn_id && shown->target - now_msc < MSC_FAR) {
 			int64_t at = msc_time(xshell, shown->target + 1);
+			int64_t up = shown->shown_at + clock_period(xshell);
+			at = at > up ? at : up;
 			next = !next || at < next ? at : next;
 		}
 		struct xpresent *xp;
@@ -993,6 +1195,10 @@ static void arm_msc_timer(struct flame_xshell *xshell) {
 		if (first->target - now_msc < MSC_FAR) {
 			// at the refresh before: the frame after that one shows it
 			int64_t at = msc_time(xshell, first->target - 1);
+			next = !next || at < next ? at : next;
+		}
+		if (layer->pacer && first->show_at && !first->acquiring) {
+			int64_t at = first->show_at - PACE_EARLY_NS;
 			next = !next || at < next ? at : next;
 		}
 	}
@@ -1022,19 +1228,30 @@ static void process_msc(struct flame_xshell *xshell, int64_t now) {
 				deliver(xp, true);
 			}
 		}
+		if (layer->pacer) {
+			pace_tick(layer, now);
+		}
 		while (!wl_list_empty(&layer->queue)) {
 			struct xpresent *first = wl_container_of(layer->queue.next, first, link);
 			if (first->acquiring || first->target > now_msc + 1) {
 				break; // the ones behind it wait too, order stays
 			}
+			if (layer->pacer && !pace_slot_due(layer, first, now)) {
+				break; // on its slot
+			}
 			wl_list_remove(&first->link);
 			show(layer, first);
 		}
+		if (layer->pacer) {
+			pace_tick(layer, now);
+		}
 		// a refresh past its msc and nothing drew it: the window is covered or
 		// on another workspace. it completes anyway like a copy on Xorg, or a
-		// FIFO app waits on it forever
+		// FIFO app waits on it forever. a refresh up at least: one shown late
+		// on its slot (paced) gets drawn right after
 		struct xpresent *shown = layer->shown;
-		if (shown && !shown->completed && !shown->drawn_id && shown->target < now_msc) {
+		if (shown && !shown->completed && !shown->drawn_id && shown->target < now_msc
+				&& now - shown->shown_at >= clock_period(xshell)) {
 			complete(shown, shown->copied ? MODE_COPY : MODE_FLIP, msc_time(xshell, now_msc),
 				now_msc);
 		}
@@ -1064,6 +1281,7 @@ static void handle_msc_timer(void *data) {
 static void handle_acquired(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 	struct xpresent *xp = wl_container_of(waiter, xp, acquire_waiter);
 	stop_acquiring(xp);
+	xp->ready_at = now_ns();
 	process_msc(xp->layer->window->xshell, now_ns());
 }
 
@@ -1180,6 +1398,7 @@ static struct xlayer *layer_get(struct flame_xwindow *window, uint32_t id) {
 	wl_list_init(&layer->queue);
 	wl_list_init(&layer->retiring);
 	wl_list_init(&layer->spare);
+	wl_list_init(&layer->held_back);
 	wl_list_insert(window->layers.prev, &layer->link);
 	layers_order(window);
 	return layer;
@@ -1205,6 +1424,13 @@ static void layer_destroy(struct xlayer *layer) {
 	struct xcopy *copy, *ctmp;
 	wl_list_for_each_safe(copy, ctmp, &layer->spare, link) {
 		copy_destroy(copy);
+	}
+	if (layer->pacer) {
+		free(layer->pacer);
+		layer->pacer = NULL;
+		if (layer->window->xshell->clock.frame) {
+			layer->window->xshell->clock.frame->pace_fps = 0;
+		}
 	}
 	scene_node_destroy(&layer->node->node);
 	wl_list_remove(&layer->link);
@@ -1271,6 +1497,8 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 			layer->drawing = false;
 		}
 		deliver_held(layer);
+		layer->last_present = now_ns();
+		pace_update(layer);
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);
@@ -1303,6 +1531,7 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		return;
 	}
 	xp->layer = layer;
+	wl_list_init(&xp->held_link);
 	xp->serial = present->serial;
 	xp->pixmap_id = present->pixmap->id;
 	xp->idle_fence = present->idle_fence;
@@ -1324,9 +1553,11 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		: present_target(present->target_msc, present->divisor, present->remainder, now_msc);
 	if (xp->acquire && !acquired(xp)) {
 		enqueue(layer, xp);
-	} else if (xp->target <= now_msc + 1 && wl_list_empty(&layer->queue)) {
+	} else if (!layer->pacer && xp->target <= now_msc + 1 && wl_list_empty(&layer->queue)) {
+		xp->ready_at = xp->requested;
 		show(layer, xp);
 	} else {
+		xp->ready_at = xp->requested;
 		enqueue(layer, xp);
 		process_msc(xshell, xp->requested);
 	}
@@ -1394,7 +1625,9 @@ static void check_presented(struct flame_xshell *xshell, struct xpresent *xp,
 	// at the flip, that frame waits a whole refresh for flame's next render.
 	// told just in time, it makes that render, like wayland's frame callbacks
 	int64_t now = now_ns();
-	int64_t wake = app_wake(xp->layer, schedule_render_at(&frame->schedule, now));
+	// paced, the buffers are what lets it go: the complete goes out now
+	int64_t wake = xp->layer->pacer ? 0
+		: app_wake(xp->layer, schedule_render_at(&frame->schedule, now));
 	if (wake > now) {
 		xp->held = true;
 		xp->held_until = wake;

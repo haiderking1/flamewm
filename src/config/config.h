@@ -7,6 +7,7 @@
 
 #include "anim/anim.h"
 #include "bindings/keybind.h"
+#include "game/pacer.h"
 #include "render/sync.h"
 
 struct flame_lua;
@@ -93,6 +94,11 @@ struct flame_config {
 	// the display waits for frames instead of frames for the display, where
 	// it can: off, fullscreen (while something fullscreen shows), always
 	enum sync_vrr_policy vrr;
+	// the fullscreen game's frames at an even pace, the fastest it holds
+	// (game/pacer.h): off, vrr (while the display runs it), always. pace_fps
+	// caps it, 0 for none
+	enum pacer_mode pace;
+	int pace_fps;
 
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;

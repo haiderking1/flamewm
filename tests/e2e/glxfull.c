@@ -2,12 +2,16 @@
 // swapped as fast as they're taken for a few seconds. flame should show its
 // buffers themselves (direct scanout) and hand them back so it never stalls
 // vsyncoff: swap interval 0, a game with vsync off. its presents ask to tear
-// usage: glxfull SECONDS [vsyncoff]
+// jitter: each frame takes 0 to 15 ms more, an uneven game. prints how even
+// its frames came out (the spread of the gaps between swaps, after the first
+// second) and how many a second
+// usage: glxfull SECONDS [vsyncoff] [jitter]
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <X11/Xatom.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <time.h>
 
@@ -51,6 +55,10 @@ int main(int argc, char **argv) {
 		puts("no context");
 		return 1;
 	}
+	bool jitter = false;
+	for (int i = 2; i < argc; i++) {
+		jitter |= !strcmp(argv[i], "jitter");
+	}
 	if (argc > 2 && !strcmp(argv[2], "vsyncoff")) {
 		PFNGLXSWAPINTERVALEXTPROC interval = (PFNGLXSWAPINTERVALEXTPROC)
 			glXGetProcAddress((const GLubyte *)"glXSwapIntervalEXT");
@@ -60,17 +68,34 @@ int main(int argc, char **argv) {
 		}
 		interval(d, w, 0);
 	}
-	int swaps = 0;
-	double start = now();
+	int swaps = 0, gaps = 0;
+	double start = now(), last = 0, lo = 1e9, hi = 0;
+	srand(7);
 	while (now() - start < seconds) {
+		if (jitter) {
+			struct timespec work = {0, (rand() % 16) * 1000000L};
+			nanosleep(&work, NULL);
+		}
 		glClearColor(0, 1, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
 		glXSwapBuffers(d, w);
 		swaps++;
+		double t = now();
+		if (t - start > 1 && last > 0) {
+			double gap = (t - last) * 1000;
+			lo = gap < lo ? gap : lo;
+			hi = gap > hi ? gap : hi;
+			gaps++;
+		}
+		last = t;
 	}
 	glFinish();
 	printf("swaps %d in %.1fs\n", swaps, seconds);
 	printf("kept going: %s\n", swaps > seconds * 20 ? "yes" : "no");
+	if (gaps > 0) {
+		printf("gaps %.1f to %.1f ms, %.0f a second\n", lo, hi, gaps / (seconds - 1));
+		printf("even: %s\n", hi - lo < 4 ? "yes" : "no");
+	}
 	glXMakeCurrent(d, None, NULL);
 	glXDestroyContext(d, ctx);
 	XCloseDisplay(d);
