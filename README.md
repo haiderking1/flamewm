@@ -63,7 +63,10 @@ flame.set { allow_tearing = true, vrr = "fullscreen" } -- the defaults
 ```
 
 `flamectl state` says per output whether it's scanning out, tearing and
-running vrr right now, so does frame timing.
+running vrr right now, so does frame timing. `vrr_capable` is whether the
+display can do it at all: false usually means freesync is off in the
+display's own menu. turn it on there and flame sees it straight away, no
+replug.
 
 ### cursor
 
@@ -202,7 +205,7 @@ the state is one json line:
 {"event":"state","workspace":1,
  "workspaces":[{"id":1,"name":"1","windows":2,"active":true,"fullscreen":false}, ...],
  "window":{"app_id":"foot","title":"~","fullscreen":false},
- "outputs":[{"name":"DP-2","scanout":false,"tearing":false,"vrr":false}]}
+ "outputs":[{"name":"DP-2","scanout":false,"tearing":false,"vrr":false,"vrr_capable":true}]}
 ```
 
 `flamectl` does it from a shell: `flamectl workspace 3`, `flamectl subscribe`.

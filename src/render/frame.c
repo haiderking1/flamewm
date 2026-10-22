@@ -62,6 +62,13 @@ static void queue_process(struct flame_frame *frame) {
 	}
 }
 
+void frame_display_changed(struct flame_frame *frame) {
+	sync_reset(&frame->sync); // KMS gets another chance at tearing and vrr
+	frame->tearing_logged = false;
+	frame->vrr_logged = false;
+	frame_request(frame);
+}
+
 void frame_request(struct flame_frame *frame) {
 	schedule_request_redraw(&frame->schedule);
 	queue_process(frame);
@@ -136,10 +143,7 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 			| WLR_OUTPUT_STATE_TRANSFORM | WLR_OUTPUT_STATE_ENABLED)) {
 		frame->whole = true;
 		schedule_set_period(&frame->schedule, refresh_period(frame->output));
-		sync_reset(&frame->sync); // KMS gets another chance at tearing and vrr
-		frame->tearing_logged = false;
-		frame->vrr_logged = false;
-		frame_request(frame);
+		frame_display_changed(frame);
 	}
 }
 

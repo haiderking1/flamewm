@@ -173,6 +173,24 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
 	desktop_arrange(&outputs->server->desktop);
 }
 
+// a display changed under the same plug: freesync turned on or off in its
+// own menu. wlroots took vrr support from the plug, so it's read again here
+static void handle_hotplug(struct wl_listener *listener, void *data) {
+	struct flame_outputs *outputs = wl_container_of(listener, outputs, hotplug);
+	struct flame_output *output;
+	wl_list_for_each(output, &outputs->list, link) {
+		bool capable;
+		if (!backend_vrr_capable(output->wlr, &capable)
+				|| capable == output->wlr->adaptive_sync_supported) {
+			continue;
+		}
+		wlr_log(WLR_INFO, "%s: the display %s vrr now", output->wlr->name,
+			capable ? "can do" : "can't do");
+		output->wlr->adaptive_sync_supported = capable;
+		frame_display_changed(&output->frames);
+	}
+}
+
 bool outputs_init(struct flame_outputs *outputs, struct flame_server *server) {
 	outputs->server = server;
 	wl_list_init(&outputs->list);
@@ -188,12 +206,14 @@ bool outputs_init(struct flame_outputs *outputs, struct flame_server *server) {
 		handle_new_output);
 	listener_connect(&outputs->layout_change, &outputs->layout->events.change,
 		handle_layout_change);
+	listener_connect(&outputs->hotplug, &server->backend.events.hotplug, handle_hotplug);
 	return true;
 }
 
 void outputs_finish(struct flame_outputs *outputs) {
 	listener_disconnect(&outputs->new_output);
 	listener_disconnect(&outputs->layout_change);
+	listener_disconnect(&outputs->hotplug);
 }
 
 void outputs_schedule_frame(struct flame_outputs *outputs) {

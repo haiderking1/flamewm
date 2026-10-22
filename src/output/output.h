@@ -30,6 +30,7 @@ struct flame_outputs {
 
 	struct wl_listener new_output;
 	struct wl_listener layout_change;
+	struct wl_listener hotplug;
 
 	struct {
 		// an output's frames are set up, struct flame_frame *
