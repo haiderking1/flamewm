@@ -222,13 +222,21 @@ static void apply_float_resize(struct flame_drag *drag) {
 		box.y += dy;
 		box.height -= dy;
 	}
-	if (box.width < MIN_TILE_SIZE) {
-		box.x -= drag->float_right ? 0 : MIN_TILE_SIZE - box.width;
-		box.width = MIN_TILE_SIZE;
+	// no smaller than a tile gets, or than the window says it can be
+	int min_w = 0, min_h = 0;
+	if (drag->view->impl->min_size) {
+		drag->view->impl->min_size(drag->view, &min_w, &min_h);
 	}
-	if (box.height < MIN_TILE_SIZE) {
-		box.y -= drag->float_bottom ? 0 : MIN_TILE_SIZE - box.height;
-		box.height = MIN_TILE_SIZE;
+	int border = 2 * view_border_width(drag->view, false);
+	min_w = min_w + border > MIN_TILE_SIZE ? min_w + border : MIN_TILE_SIZE;
+	min_h = min_h + border > MIN_TILE_SIZE ? min_h + border : MIN_TILE_SIZE;
+	if (box.width < min_w) {
+		box.x -= drag->float_right ? 0 : min_w - box.width;
+		box.width = min_w;
+	}
+	if (box.height < min_h) {
+		box.y -= drag->float_bottom ? 0 : min_h - box.height;
+		box.height = min_h;
 	}
 	floating_set_box(&drag->server->desktop, drag->view, box, true);
 }
