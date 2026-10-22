@@ -334,6 +334,12 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 		if (focused && focused != view && (!pid || pid != xshell_view_pid(xshell, focused))) {
 			wlr_log(WLR_DEBUG, "xshell: 0x%x asks for the focus, another app has it: refused",
 				id);
+			// and it hears so: the root says again who's active. wine moves
+			// its own foreground first and then asks, unanswered it keeps
+			// thinking its game is in front, and takes the raw clicks made
+			// in other windows (push to talk's) as the game's
+			xshell->ewmh.active_set = false;
+			ewmh_update(xshell);
 			return;
 		}
 		focus_view(desktop, view);
