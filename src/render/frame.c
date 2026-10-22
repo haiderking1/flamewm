@@ -641,6 +641,7 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 
 	draw_background(&pass, target, &frame->cur, &repaint, buffer->width, buffer->height);
 	for (size_t i = 0; i < frame->cur.len; i++) {
+		pass_glass_group(&pass, target, &frame->cur, i);
 		draw_element(frame, &pass, target, &frame->cur.data[i], &repaint);
 	}
 	pixman_region32_fini(&repaint);

@@ -62,6 +62,9 @@ struct gl_pass {
 	float proj[9];
 	struct wlr_drm_syncobj_timeline *signal;
 	uint64_t signal_point;
+	// glass reads this instead of what's drawn now, see gl_pass_backdrop.
+	// empty for none
+	struct wlr_box backdrop;
 };
 
 // signal: reaches point once the gpu is done with everything drawn, NULL
@@ -105,6 +108,12 @@ struct gl_glass_options {
 void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options);
 // how far around its box glass reads, buffer pixels
 int gl_glass_reach(float blur, float refraction);
+// what's in area now is kept, and glass reads that from here on instead of
+// what's drawn over it since: a window's panes all frost what's behind the
+// window, not each other. area: every pane's box and reach. an empty area
+// (gl_pass_backdrop_end) goes back to reading what's drawn
+void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area);
+void gl_pass_backdrop_end(struct gl_pass *pass);
 // false: the gpu can't be trusted with what it drew
 bool gl_pass_submit(struct gl_pass *pass);
 

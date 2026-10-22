@@ -30,6 +30,13 @@ void pass_texture(struct flame_pass *pass, const struct gl_texture_options *opti
 // frosted glass over what's drawn so far (see gl_pass_glass), only its tint
 // without flame's renderer
 void pass_glass(struct flame_pass *pass, const struct gl_glass_options *options);
+// before drawing list's element i: at the start of a surface's panes what
+// they all read is kept, so each frosts what's behind the surface and not
+// the panes before it. after them, glass reads what's drawn again
+struct flame_element_list;
+struct flame_render_target;
+void pass_glass_group(struct flame_pass *pass, const struct flame_render_target *target,
+	const struct flame_element_list *list, size_t i);
 // a scene glass's look at an output's scale, faded to alpha
 struct flame_glass_style;
 void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,

@@ -87,6 +87,7 @@ static void draw(struct flame_pass *pass, const struct flame_render_target *targ
 		const struct flame_element_list *list) {
 	for (size_t i = 0; i < list->len; i++) {
 		const struct flame_element *element = &list->data[i];
+		pass_glass_group(pass, target, list, i);
 		struct wlr_box dst = element->box;
 		target_box_to_buffer(target, &dst);
 		pixman_region32_t clip;
