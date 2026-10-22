@@ -91,6 +91,9 @@ struct fui {
 	int click_count; // this press's place in a quick run of them
 	double last_press, last_press_x, last_press_y;
 	double scroll;
+	// what scrolls (a wheel, fingers), and a wheel spinning faster and faster
+	uint32_t axis_source;
+	double wheel_at, wheel_last, wheel_accel;
 	uint32_t pointer_serial;
 	int cursor_shape, cursor_shown; // wp_cursor_shape_device_v1 shapes
 
