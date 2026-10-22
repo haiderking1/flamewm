@@ -13,6 +13,7 @@
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "../flameui/flameui.h"
@@ -134,6 +135,11 @@ struct app {
 	// the Wallpaper page's folder and thumbnails
 	struct browser browser;
 	bool browsing;
+	// flamefiles picking a picture: its stdout, what it said so far
+	int picking;
+	pid_t picker_pid;
+	char picked[PATH_MAX];
+	size_t picked_len;
 };
 
 static void refresh(struct app *app) {
@@ -756,108 +762,92 @@ static void wallpaper_current(struct page *p) {
 	p->y = top + ph + 28;
 }
 
-// a folder in a tile
-static void folder_glyph(struct fui *ui, double cx, double cy, double s) {
-	cairo_t *cr = fui_cairo(ui);
-	cairo_new_path(cr);
-	cairo_move_to(cr, cx - 14 * s, cy - 9 * s);
-	cairo_line_to(cr, cx - 4 * s, cy - 9 * s);
-	cairo_line_to(cr, cx - 1 * s, cy - 6 * s);
-	cairo_line_to(cr, cx + 14 * s, cy - 6 * s);
-	cairo_line_to(cr, cx + 14 * s, cy + 10 * s);
-	cairo_line_to(cr, cx - 14 * s, cy + 10 * s);
-	cairo_close_path(cr);
-	fui_color(ui, 0x5aa9f0ff);
-	cairo_fill(cr);
-	fui_fill_rounded(ui, cx - 14 * s, cy - 3 * s, 28 * s, 13 * s, 2 * s, 0x7cc0ffff);
+static void picked_wallpaper(struct fui *ui, int fd, void *data);
+
+// flamefiles asked to pick a picture, from the folder open. it says the
+// path on its stdout, read down a pipe the window's loop watches
+static void browse(struct app *app) {
+	if (app->picking >= 0) {
+		return; // one open already
+	}
+	int out[2];
+	if (pipe(out) < 0) {
+		return;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		dup2(out[1], STDOUT_FILENO);
+		close(out[0]);
+		close(out[1]);
+		// next to flamesettings first, flame's own build, then $PATH
+		char self[PATH_MAX];
+		ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
+		if (n > 0) {
+			self[n] = '\0';
+			char *slash = strrchr(self, '/');
+			if (slash) {
+				snprintf(slash + 1, sizeof(self) - (size_t)(slash + 1 - self), "flamefiles");
+				execl(self, "flamefiles", "--pick", "--images", app->browser.dir, (char *)NULL);
+			}
+		}
+		execlp("flamefiles", "flamefiles", "--pick", "--images", app->browser.dir, (char *)NULL);
+		_exit(127);
+	}
+	close(out[1]);
+	if (pid < 0) {
+		close(out[0]);
+		return;
+	}
+	app->picking = out[0];
+	app->picker_pid = pid;
+	app->picked_len = 0;
+	fui_watch(app->ui, out[0], picked_wallpaper, app);
 }
 
-// the open folder: back, where it is (each part a way back up)
+static void picked_wallpaper(struct fui *ui, int fd, void *data) {
+	struct app *app = data;
+	ssize_t n = read(fd, app->picked + app->picked_len, sizeof(app->picked) - 1 - app->picked_len);
+	if (n > 0) {
+		app->picked_len += (size_t)n;
+		return;
+	}
+	// it's gone: what it said, if anything, is the wallpaper
+	fui_unwatch(ui, fd);
+	close(fd);
+	app->picking = -1;
+	waitpid(app->picker_pid, NULL, 0);
+	app->picked[app->picked_len] = '\0';
+	app->picked[strcspn(app->picked, "\n")] = '\0';
+	if (app->picked[0] == '/') {
+		set_string(app, "wallpaper", app->picked);
+		char dir[PATH_MAX];
+		snprintf(dir, sizeof(dir), "%s", app->picked);
+		char *slash = strrchr(dir, '/');
+		if (slash && slash != dir) {
+			*slash = '\0';
+			browser_open(&app->browser, dir);
+		}
+	}
+	fui_redraw(ui);
+}
+
+// the folder the pictures are from, and a way to any other
 static void wallpaper_path(struct page *p) {
 	struct fui *ui = p->ui;
 	struct browser *b = &p->app->browser;
 	const double y = p->y;
-	bool at_root = !strcmp(b->dir, "/");
-	bool hover = !at_root && fui_hover(ui, CONTENT_X, y, 28, 28);
-	if (hover) {
-		fui_cursor_pointer(ui);
-	}
-	fui_fill_rounded(ui, CONTENT_X, y, 28, 28, 8, hover ? 0xffffff24 : 0xffffff12);
-	cairo_t *cr = fui_cairo(ui);
-	fui_color(ui, at_root ? TEXT_FAINT : TEXT);
-	cairo_set_line_width(cr, 1.8);
-	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-	cairo_move_to(cr, CONTENT_X + 16, y + 9);
-	cairo_line_to(cr, CONTENT_X + 11, y + 14);
-	cairo_line_to(cr, CONTENT_X + 16, y + 19);
-	cairo_stroke(cr);
-	char go[PATH_MAX] = "";
-	if (!at_root && fui_clicked(ui, CONTENT_X, y, 28, 28)) {
-		snprintf(go, sizeof(go), "%s", b->dir);
-		char *slash = strrchr(go, '/');
-		if (slash == go) {
-			go[1] = '\0';
-		} else if (slash) {
-			*slash = '\0';
-		}
-	}
-	// the parts: Home for the home folder, then each folder down
 	const char *home = home_dir();
 	size_t hl = strlen(home);
 	bool under_home = hl > 1 && !strncmp(b->dir, home, hl) && (!b->dir[hl] || b->dir[hl] == '/');
-	double x = CONTENT_X + 40;
-	const char *rest = b->dir + (under_home ? hl : 0);
-	char upto[PATH_MAX];
-	snprintf(upto, sizeof(upto), "%s", under_home ? home : "");
-	const char *first = under_home ? "Home" : "/";
-	for (int part = 0; x < RIGHT; part++) {
-		const char *name;
-		char piece[NAME_MAX + 1];
-		if (part == 0) {
-			name = first;
-			if (!under_home) {
-				snprintf(upto, sizeof(upto), "/");
-			}
-		} else {
-			while (*rest == '/') {
-				rest++;
-			}
-			if (!*rest) {
-				break;
-			}
-			size_t len = strcspn(rest, "/");
-			snprintf(piece, sizeof(piece), "%.*s", (int)len, rest);
-			name = piece;
-			size_t ul = strlen(upto);
-			snprintf(upto + ul, sizeof(upto) - ul, "%s%s", ul && upto[ul - 1] == '/' ? "" : "/",
-				piece);
-			rest += len;
-		}
-		const char *after = rest;
-		while (*after == '/') {
-			after++;
-		}
-		bool last = !*after;
-		if (part > 0) {
-			x += fui_text(ui, x, y + 6, "›", F_TEXT, TEXT_FAINT, FUI_LEFT, 0) + 8;
-		}
-		double w = fui_text_width(ui, name, last ? F_LABEL : F_TEXT);
-		bool over = !last && fui_hover(ui, x - 4, y, w + 8, 28);
-		if (over) {
-			fui_cursor_pointer(ui);
-		}
-		fui_text(ui, x, y + 6, name, last ? F_LABEL : F_TEXT, last ? TEXT : over ? TEXT
-			: TEXT_DIM, FUI_LEFT, RIGHT - x);
-		if (!last && fui_clicked(ui, x - 4, y, w + 8, 28)) {
-			snprintf(go, sizeof(go), "%s", upto);
-		}
-		x += w + 8;
+	char shown[PATH_MAX];
+	snprintf(shown, sizeof(shown), "%s%s", under_home ? "~" : "", b->dir + (under_home ? hl : 0));
+	double bw = fui_text_width(ui, "Browse…", "Inter Medium 10.5") + 28;
+	fui_text(ui, CONTENT_X + 4, y + 6, shown, F_LABEL, TEXT_DIM, FUI_LEFT,
+		CONTENT_W - bw - 20);
+	if (fui_button(ui, fui_id("browse", 0), RIGHT + CARD_PAD - bw, y, "Browse…")) {
+		browse(p->app);
 	}
 	p->y += 40;
-	if (*go && browser_open(b, go)) {
-		p->app->scroll[p->app->page] = 0;
-	}
 }
 
 // does every word of the search show up in name
@@ -876,8 +866,8 @@ static bool name_matches(const char *name, const char *query) {
 	return true;
 }
 
-// the folder's folders and pictures, tiles in rows. searching: only the
-// pictures whose names match
+// the folder's pictures, tiles in rows. searching: only the ones whose
+// names match
 static void wallpaper_grid(struct page *p) {
 	struct fui *ui = p->ui;
 	struct app *app = p->app;
@@ -890,11 +880,10 @@ static void wallpaper_grid(struct page *p) {
 	const double tw = (CONTENT_W - (cols - 1) * gap) / cols, th = tw * THUMB_H / THUMB_W;
 	int col = 0, count = 0;
 	double y = p->y;
-	char go[PATH_MAX] = "";
 	for (size_t i = 0; i < b->len; i++) {
 		const struct browser_entry *e = &b->entries[i];
-		if (p->query && (e->folder || !name_matches(e->name, p->query))) {
-			continue;
+		if (e->folder || (p->query && !name_matches(e->name, p->query))) {
+			continue; // pictures only: other folders are Browse's
 		}
 		count++;
 		char path[PATH_MAX];
@@ -902,15 +891,10 @@ static void wallpaper_grid(struct page *p) {
 		double x = CONTENT_X + col * (tw + gap);
 		// only what's on screen gets drawn, and thumbnails asked for
 		if (y + th + label_h > 0 && y < H) {
-			bool hover = fui_hover(ui, x, y, tw, th) && (e->folder || !locked);
-			bool picked = !e->folder && !strcmp(path, current);
+			bool hover = fui_hover(ui, x, y, tw, th) && !locked;
+			bool picked = !strcmp(path, current);
 			double lift = fui_ease(ui, fui_id(path, 7), hover ? 1 : 0, 18);
-			if (e->folder) {
-				fui_fill_rounded(ui, x, y, tw, th, 10, (uint32_t)(0xffffff0c + (uint32_t)(10 * lift)));
-				folder_glyph(ui, x + tw / 2, y + th / 2, 1.3 + 0.08 * lift);
-			} else {
-				picture_in(p, path, x, y, tw, th, 10);
-			}
+			picture_in(p, path, x, y, tw, th, 10);
 			if (picked || lift > 0.01) {
 				fui_rounded(ui, x - 3, y - 3, tw + 6, th + 6, 13);
 				fui_color(ui, picked ? 0xff7a2aff : (uint32_t)(0xffffff00 | (uint32_t)(0x50 * lift)));
@@ -923,11 +907,7 @@ static void wallpaper_grid(struct page *p) {
 				fui_cursor_pointer(ui);
 			}
 			if (hover && fui_clicked(ui, x, y, tw, th)) {
-				if (e->folder) {
-					snprintf(go, sizeof(go), "%s", path);
-				} else {
-					set_string(app, "wallpaper", path);
-				}
+				set_string(app, "wallpaper", path);
 			}
 		}
 		if (++col == cols) {
@@ -939,15 +919,12 @@ static void wallpaper_grid(struct page *p) {
 		y += th + label_h + gap;
 	}
 	if (!count && !p->query) {
-		fui_text(ui, CONTENT_X + 4, y, "No pictures or folders here", F_TEXT, TEXT_DIM,
+		fui_text(ui, CONTENT_X + 4, y, "No pictures here", F_TEXT, TEXT_DIM,
 			FUI_LEFT, 0);
 		y += 30;
 	}
 	p->shown += p->query ? count : 0;
 	p->y = y;
-	if (*go && browser_open(b, go)) {
-		app->scroll[app->page] = 0;
-	}
 }
 
 static void page_wallpaper(struct page *p) {
@@ -1229,7 +1206,7 @@ static void frame(struct fui *ui, void *data) {
 }
 
 int main(int argc, char **argv) {
-	struct app app = {0};
+	struct app app = {.picking = -1};
 	for (int i = 1; i < argc; i++) {
 		for (int p = 0; p < PAGES; p++) {
 			if (!strcasecmp(argv[i], pages[p].name) || (!strncasecmp(argv[i], pages[p].name, 4))) {
