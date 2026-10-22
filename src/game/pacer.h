@@ -8,8 +8,8 @@
 // flame lets the game start each frame (gives it a buffer back) just in
 // time for the frame to be ready at its slot, and shows it on the slot: the
 // line stays flat and what's on screen is the freshest input. the pace
-// follows the game, gliding: slowly faster when it has room, quick to back
-// off when it doesn't, so nothing on screen jumps. after a hitch the frames
+// follows how the frames turn out, gliding: slowly faster while they make
+// their slots, backing off when one's late, so nothing on screen jumps. after a hitch the frames
 // that pile up keep the pace instead of rushing out. pure logic, times in
 // ns, see game/pacer.c. what lets the game go and what shows the frames is
 // the X server's business (xshell)
@@ -26,22 +26,19 @@ enum pacer_mode {
 // NULL is the default, vrr. false for anything else than off/vrr/always
 bool pacer_mode_parse(const char *value, enum pacer_mode *mode);
 
-// frames remembered for what the game can do, about a second of them
-#define PACER_SAMPLES 96
-
 struct pacer {
 	int64_t fastest; // the shortest interval the display does, its top refresh
 	int64_t slowest; // slower than this isn't worth pacing, the game shows as it comes
 	int64_t fixed; // a pace from the config, 0: follow the game
 	int64_t interval; // the pace now: ns between frames on screen
 
-	// per frame: let go -> picture ready on the gpu (lead), and the busier
-	// of its cpu and gpu parts (cost: how often it could make one)
-	int64_t lead[PACER_SAMPLES], cost[PACER_SAMPLES];
-	int len, at;
+	// let go -> picture ready on the gpu: how far ahead of its slot to let
+	// the game go. up at once, down slowly
+	int64_t lead;
 
 	int64_t released; // when the game was let go for the frame it's on, 0 none
-	int64_t last_ready; // when the last frame's gpu work was done
+	bool held; // and it was waiting for that
+	int64_t last_ready; // when the frame before was ready
 	int64_t last_shown; // the last frame's slot, 0 before the first
 };
 
@@ -50,8 +47,9 @@ struct pacer {
 void pacer_init(struct pacer *pacer, int64_t fastest, int64_t fixed);
 // the display or the config changed
 void pacer_set_limits(struct pacer *pacer, int64_t fastest, int64_t fixed);
-// the game is let go for its next frame at t
-void pacer_released(struct pacer *pacer, int64_t t);
+// the game is let go for its next frame at t. held: it was waiting for
+// that (it got its buffer at our release), not let go the moment it could
+void pacer_released(struct pacer *pacer, int64_t t, bool held);
 // a frame came: presented at presented, its gpu work done at ready
 void pacer_frame(struct pacer *pacer, int64_t presented, int64_t ready);
 // when a frame ready at ready goes on screen: on its slot, or right away

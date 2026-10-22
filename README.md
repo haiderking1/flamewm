@@ -71,18 +71,23 @@ replug.
 ### pacing
 
 the fullscreen X game you're in gets its frames on screen at an even pace,
-the fastest one it can hold: a flat frametime line, nothing to set. flame
-measures how long each frame takes the game (cpu and gpu), paces to what
-nine frames in ten fit in, and glides: up slowly when there's room, down
-quick when there isn't, so with vrr nothing on screen jumps. after a hitch
-(a shader compiling) the frames that piled up keep the pace instead of
-rushing out.
+the fastest one it can hold: a flat frametime line, nothing to set. the
+pace follows how the frames turn out, whatever the game does inside (dx12
+games present from a thread of their own): a frame that needed longer than
+the pace once it could start backs it off, frames on time speed it up a
+hair. it glides, so with vrr nothing on screen jumps, and settles where
+nearly every frame makes its slot. after a hitch (a shader compiling) the
+frames that piled up keep the pace instead of rushing out.
 
 it's all on flame's side of the X server, no injecting into the game: a
 game starts its next frame when it gets a buffer back, so flame hands one
 back just in time for the frame to be ready at its slot (the input it
 draws is the freshest it can be, like reflex), and shows it on the slot. a
-game that kept a spare buffer (a frame ahead, lag) loses it once that shows.
+game that kept a spare buffer (it presents with nothing handed back, a
+frame ahead, lag) loses it, and frames lining up for their slots drop to
+the newest. a new swapchain (fullscreen, a resize) gets its old buffers
+back at once, and a game that waits 100ms on held ones gets them all back
+(`pace_stuck` in frame timing counts that).
 
 ```lua
 flame.set { pace = "vrr", pace_fps = 0 } -- the defaults
@@ -117,7 +122,8 @@ output every two seconds, only observing, nothing about rendering changes:
   frames ahead right now, and what it thinks a frame costs (cpu + gpu + margin)
 - `asap` / `vrr`: frames go out the moment they're ready (a game tearing,
   or vrr on), and whether the display runs adaptive sync
-- `pace_fps`: the fullscreen game's pace (see pacing), 0 when none is paced
+- `pace_fps` / `pace_stuck`: the fullscreen game's pace (see pacing), 0 when
+  none is paced, and times it waited on buffers the pacer held
 - `flips` / `flip_hz`: pageflips that reached the screen, not app fps
 - `composited` / `scanout` / `cursor` / `failed`: frames we drew, client
   buffers sent straight to KMS, the same buffer again because only the
