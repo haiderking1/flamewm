@@ -27,6 +27,11 @@ void sync_tearing_result(struct sync *sync, bool refused) {
 	}
 }
 
+// how long the fullscreen it's seen has to hold: quick on, slow off
+static int64_t debounce(const struct sync *sync) {
+	return sync->vrr_seen ? SYNC_VRR_DEBOUNCE_NS : SYNC_VRR_OFF_DEBOUNCE_NS;
+}
+
 bool sync_vrr_wanted(struct sync *sync, enum sync_vrr_policy policy, bool supported,
 		bool fullscreen, int64_t now) {
 	// the debounce follows fullscreen whatever the policy, so switching the
@@ -35,7 +40,7 @@ bool sync_vrr_wanted(struct sync *sync, enum sync_vrr_policy policy, bool suppor
 		sync->vrr_seen = fullscreen;
 		sync->vrr_since = now;
 	}
-	if (sync->vrr_seen != sync->vrr_fullscreen && now - sync->vrr_since >= SYNC_VRR_DEBOUNCE_NS) {
+	if (sync->vrr_seen != sync->vrr_fullscreen && now - sync->vrr_since >= debounce(sync)) {
 		sync->vrr_fullscreen = sync->vrr_seen;
 	}
 	if (!supported || sync->vrr_off) {
@@ -61,7 +66,7 @@ bool sync_vrr_switch(const struct sync *sync, bool wanted, bool enabled) {
 }
 
 int64_t sync_vrr_settles_at(const struct sync *sync) {
-	return sync->vrr_seen != sync->vrr_fullscreen ? sync->vrr_since + SYNC_VRR_DEBOUNCE_NS : 0;
+	return sync->vrr_seen != sync->vrr_fullscreen ? sync->vrr_since + debounce(sync) : 0;
 }
 
 bool sync_vrr_policy_parse(const char *value, enum sync_vrr_policy *policy) {

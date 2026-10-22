@@ -70,10 +70,13 @@ static void test_vrr_debounce(void) {
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t));
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, true, t + 100 * MS));
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, true, t + SYNC_VRR_DEBOUNCE_NS));
-	// out for good: off once the debounce passes
+	// out for a few seconds (a look at another workspace): still on
 	t += SYNC_VRR_DEBOUNCE_NS + 100 * MS;
 	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t));
-	CHECK(!sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t + SYNC_VRR_DEBOUNCE_NS));
+	CHECK(sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t + 5000 * MS));
+	CHECK(sync_vrr_settles_at(&s) == t + SYNC_VRR_OFF_DEBOUNCE_NS);
+	// out for good: off once the off debounce passes
+	CHECK(!sync_vrr_wanted(&s, SYNC_VRR_FULLSCREEN, true, false, t + SYNC_VRR_OFF_DEBOUNCE_NS));
 }
 
 // a display that won't switch (nested backends can't turn it off): it's left

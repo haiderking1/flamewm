@@ -54,6 +54,9 @@ never tear.
 
 vrr (adaptive sync) lets the display wait for frames. with it on, flame
 sends every frame the moment it's ready instead of at the repaint window.
+it comes on half a second into fullscreen and goes off 20 seconds after:
+a quick look at another workspace and back to the game switches nothing
+(a switch costs nvidia a ~200ms hitch).
 switching it rides on a frame and gets a KMS test first, so a display that
 won't switch never costs one, it just stays how it is.
 
