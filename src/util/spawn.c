@@ -1,6 +1,9 @@
 #include "util/spawn.h"
 
 #include <limits.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -8,27 +11,58 @@
 #include <unistd.h>
 #include <wlr/util/log.h>
 
+// the folder flame's own binary is in, into dir. false when it can't tell
+static bool flame_dir(char *dir, size_t size) {
+	ssize_t len = readlink("/proc/self/exe", dir, size - 1);
+	if (len <= 0) {
+		return false;
+	}
+	dir[len] = '\0';
+	char *slash = strrchr(dir, '/');
+	if (!slash) {
+		return false;
+	}
+	*slash = '\0';
+	return true;
+}
+
 // a bare name next to flame's own binary first: flame's tools (flamectl,
 // flamesettings) run from wherever flame does, installed or a build dir.
 // returns only when there's none
 static void exec_near_flame(const char *const argv[]) {
-	if (strchr(argv[0], '/')) {
-		return;
-	}
 	char path[PATH_MAX];
-	ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-	if (len <= 0) {
+	if (strchr(argv[0], '/') || !flame_dir(path, sizeof(path))
+			|| strlen(path) + 2 + strlen(argv[0]) > sizeof(path)) {
 		return;
 	}
-	path[len] = '\0';
-	char *slash = strrchr(path, '/');
-	if (!slash || (size_t)(slash - path) + 2 + strlen(argv[0]) > sizeof(path)) {
-		return;
-	}
-	strcpy(slash + 1, argv[0]);
+	strcat(path, "/");
+	strcat(path, argv[0]);
 	if (access(path, X_OK) == 0) {
 		execv(path, (char *const *)argv);
 	}
+}
+
+// what's started finds flame's tools the same way, whatever it runs
+// (autostart's shell lines, a terminal typing flamectl): flame's folder
+// first on its PATH, when it isn't there already
+static void path_near_flame(void) {
+	char dir[PATH_MAX];
+	if (!flame_dir(dir, sizeof(dir))) {
+		return;
+	}
+	const char *path = getenv("PATH");
+	size_t len = strlen(dir);
+	for (const char *at = path; at && *at;) {
+		const char *end = strchr(at, ':');
+		size_t n = end ? (size_t)(end - at) : strlen(at);
+		if (n == len && !strncmp(at, dir, len)) {
+			return; // there already
+		}
+		at = end ? end + 1 : at + n;
+	}
+	char joined[PATH_MAX * 2];
+	snprintf(joined, sizeof(joined), "%s%s%s", dir, path && *path ? ":" : "", path ? path : "");
+	setenv("PATH", joined, 1);
 }
 
 void spawn(const char *const argv[]) {
@@ -51,6 +85,7 @@ void spawn(const char *const argv[]) {
 
 		pid_t child = fork();
 		if (child == 0) {
+			path_near_flame();
 			exec_near_flame(argv);
 			execvp(argv[0], (char *const *)argv);
 			_exit(127);
