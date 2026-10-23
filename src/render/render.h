@@ -34,6 +34,8 @@ enum flame_layer {
 	// layer surfaces holding the keyboard (launchers), above fullscreen
 	FLAME_LAYER_GRAB,
 	FLAME_LAYER_OVERLAY,
+	// the session's locked: the locker over all of it
+	FLAME_LAYER_LOCK,
 	FLAME_LAYER_COUNT,
 };
 

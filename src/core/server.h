@@ -13,6 +13,7 @@
 #include "input/input.h"
 #include "ipc/ipc.h"
 #include "layers/layers.h"
+#include "lock/lock.h"
 #include "picker/picker.h"
 #include "portal/portal.h"
 #include "screencast/screencast.h"
@@ -47,6 +48,7 @@ struct flame_server {
 	struct flame_input input;
 	struct flame_xdg xdg;
 	struct flame_layers layers;
+	struct flame_lock lock;
 	struct flame_ipc ipc;
 	struct flame_xbridge xbridge;
 	struct flame_xshell xshell;

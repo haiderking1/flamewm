@@ -38,6 +38,10 @@ struct wallpaper_screen {
 	// what it shows, and the one before it fading out under it
 	struct picture now, old;
 	struct flame_anim fade;
+	// the mirror's: the color, now's picture over it
+	struct flame_tree *mirror;
+	struct flame_rect *mirror_color;
+	struct flame_buffer_node *mirror_picture;
 };
 
 // a picture made for a screen, by the worker
@@ -184,6 +188,41 @@ static void restack(struct wallpaper_screen *screen) {
 	scene_node_lower_to_bottom(&screen->output->background->node);
 }
 
+// the mirror shows what the screen does now (no fade: it's not seen
+// changing), made the first time
+static void mirror_sync(struct wallpaper_screen *screen) {
+	struct flame_wallpaper *wallpaper = screen->wallpaper;
+	if (!wallpaper->mirror) {
+		return;
+	}
+	if (!screen->mirror) {
+		screen->mirror = scene_tree_create(wallpaper->mirror);
+		screen->mirror_color = screen->mirror
+			? scene_rect_create(screen->mirror, 0, 0, wallpaper->color) : NULL;
+		screen->mirror_picture = screen->mirror_color
+			? scene_buffer_create(screen->mirror, NULL, NULL) : NULL;
+		if (!screen->mirror_picture) {
+			if (screen->mirror) {
+				scene_node_destroy(&screen->mirror->node);
+			}
+			screen->mirror = NULL;
+			return;
+		}
+	}
+	scene_node_set_position(&screen->mirror->node, screen->box.x, screen->box.y);
+	scene_rect_set_size(screen->mirror_color, screen->box.width, screen->box.height);
+	scene_rect_set_color(screen->mirror_color, wallpaper->color);
+	scene_buffer_set(screen->mirror_picture, screen->now.texture, screen->now.texture,
+		screen->box.width, screen->box.height, true, NULL, 0);
+}
+
+static void mirror_drop(struct wallpaper_screen *screen) {
+	if (screen->mirror) {
+		scene_node_destroy(&screen->mirror->node);
+		screen->mirror = NULL;
+	}
+}
+
 // now goes, faded out or not
 static void fade_to(struct wallpaper_screen *screen, struct picture next) {
 	struct flame_wallpaper *wallpaper = screen->wallpaper;
@@ -192,6 +231,7 @@ static void fade_to(struct wallpaper_screen *screen, struct picture next) {
 	screen->old = screen->now;
 	screen->now = next;
 	restack(screen);
+	mirror_sync(screen);
 	const struct flame_config *config = wallpaper->server->config;
 	if (!config->anim.enabled || wallpaper->server->terminating
 			|| (!screen->old.tree && !screen->now.tree)) {
@@ -328,6 +368,7 @@ void wallpaper_output_changed(struct flame_wallpaper *wallpaper, struct flame_ou
 				screen->box.width, screen->box.height, true, NULL, 0);
 		}
 	}
+	mirror_sync(screen);
 	int width, height;
 	wlr_output_transformed_resolution(output->wlr, &width, &height);
 	if (width != screen->width || height != screen->height) {
@@ -344,6 +385,7 @@ void wallpaper_output_gone(struct flame_wallpaper *wallpaper, struct flame_outpu
 		return;
 	}
 	anim_cancel(&screen->fade);
+	mirror_drop(screen); // before the picture it shows goes
 	picture_drop(&screen->now);
 	picture_drop(&screen->old);
 	wl_list_remove(&screen->link);
@@ -365,6 +407,7 @@ void wallpaper_config_changed(struct flame_wallpaper *wallpaper) {
 	memcpy(wallpaper->color, config->background_color, sizeof(wallpaper->color));
 	struct wallpaper_screen *screen;
 	wl_list_for_each(screen, &wallpaper->screens, link) {
+		mirror_sync(screen); // the color now, the picture once it's made
 		remake(screen);
 	}
 }
@@ -380,6 +423,7 @@ bool wallpaper_init(struct flame_wallpaper *wallpaper, struct flame_server *serv
 	wallpaper->path = config->wallpaper ? strdup(config->wallpaper) : NULL;
 	wallpaper->mode = config->wallpaper_mode;
 	memcpy(wallpaper->color, config->background_color, sizeof(wallpaper->color));
+	wallpaper->mirror = server->lock.backdrop;
 	// without the worker flame still runs, just without a wallpaper
 	bool piped = pipe(wallpaper->notify) == 0;
 	for (int i = 0; piped && i < 2; i++) {

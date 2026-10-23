@@ -1043,6 +1043,40 @@ $CTL state | python3 -I -c \"import json, sys; print('opened', json.load(sys.std
 echo running \$(kill -0 \$pid 2>/dev/null && echo still)
 cat search.log" \
 	"sum 14" "running still" "told 0" "opened flamefiles"
+case_run "lock: only the locker shows and gets keys, a second one's turned away, one that dies leaves it locked, a new one unlocks" "
+# the middle of the screen: the locker's red, the cover's black, else the window
+center() { grim -t ppm c.ppm; python3 -I -c \"
+d = open('c.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+r, g, b = px[(h // 2 * w + w // 2) * 3:][:3]
+print('\$1', 'red' if (r, g, b) == (255, 0, 0) else 'black' if (r, g, b) == (0, 0, 0) else 'the window')
+\"; }
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
+windows() { $CTL state | python3 -I -c \"import json, sys; print('\$1', sum(w['windows'] for w in json.load(sys.stdin)['workspaces']))\"; }
+$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+sleep 1.5
+center before
+$BIN/wllock unlock 2500 > one.txt 2>&1 &
+sleep 0.8
+center locked
+key a; key b
+$BIN/wllock second
+sleep 2.2
+center unlocked
+cat one.txt
+$BIN/wllock crash
+sleep 0.3
+center crashed
+# a bind does nothing while it's locked (super+e: another flamefiles)
+$CTL key Super_L press > /dev/null; key e; $CTL key Super_L release > /dev/null
+sleep 1
+windows still
+$BIN/wllock unlock 300
+sleep 0.4
+center back" \
+	"before the window" "locked red" "finished" "unlocked the window" "locked" "key 30" "key 48" \
+	"unlocked" "crashed black" "still 1" "back the window"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
