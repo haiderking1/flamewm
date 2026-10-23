@@ -38,6 +38,8 @@ double player_aspect(const struct player *player);
 double player_duration(const struct player *player);
 bool player_has_video(const struct player *player);
 bool player_has_audio(const struct player *player);
+// its picture's a song's cover, not a video
+bool player_has_cover(const struct player *player);
 const char *player_title(const struct player *player);
 
 // decoded on the gpu: its pictures are images there, made by
@@ -46,6 +48,23 @@ const char *player_title(const struct player *player);
 bool player_gpu(const struct player *player);
 bool player_gpu_images(struct player *player, int count, struct gpu_image *out);
 void player_use_software(struct player *player);
+
+// its sounds (languages, commentary) and subtitles to pick from: their
+// names, which is on. subtitles from the file and from files beside it
+// (movie.srt, movie.en.srt), the ones on when it opens: a file beside it,
+// else what the file says must be shown
+enum player_track_kind { PLAYER_AUDIO, PLAYER_SUBTITLES };
+struct player_track {
+	char name[96];
+	bool on;
+};
+int player_tracks(struct player *player, enum player_track_kind kind, struct player_track *out,
+	int max);
+// track i on (subtitles: -1 for none): the sound changes over where it is
+void player_set_track(struct player *player, enum player_track_kind kind, int i);
+// the subtitles on to draw (subs.h), NULL for none
+struct subs;
+struct subs *player_subs(struct player *player);
 
 // the pictures frames go into, width x height each (player_size), before
 // it plays

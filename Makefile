@@ -116,12 +116,13 @@ $(PLAY_GEN)/convert.spv.inc: tools/flameplay/convert.comp
 	@mkdir -p $(dir $@)
 	glslc --target-env=vulkan1.3 -O -mfmt=c -o $@ $<
 
-PLAY_SRCS := tools/flameplay/main.c tools/flameplay/player.c tools/flameplay/gpu.c
-$(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h \
-		$(PLAY_GEN)/convert.spv.inc $(FLAMEUI_DEPS)
+PLAY_SRCS := tools/flameplay/main.c tools/flameplay/player.c tools/flameplay/gpu.c \
+	tools/flameplay/resume.c tools/flameplay/subs.c
+$(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h tools/flameplay/resume.h \
+		tools/flameplay/subs.h $(PLAY_GEN)/convert.spv.inc $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -I$(PLAY_GEN) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
-		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3)
+		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3 libass uchardet)
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c

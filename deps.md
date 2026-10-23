@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg vulkan-headers shaderc make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg libass uchardet vulkan-headers shaderc make pkgconf foot
 ```
 
 ## build
@@ -38,6 +38,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | libjpeg-turbo, libpng, libwebp | `libturbojpeg` `libpng` `libwebp` | wallpapers (`src/image/`): flame reads the picture itself, on a worker thread, a jpeg straight at a fraction of its size when less is needed. flamesettings' wallpaper thumbnails too |
 | ffmpeg's libraries | `libavformat` `libavcodec` `libswscale` `libavutil` | flame's apps (flameui) only: videos' previews (a frame a tenth of the way in, not a black one) and songs' covers in flamefiles. md5 for the thumbnail cache's names |
 | libswresample, pipewire | `libswresample` `libpipewire-0.3` | flameplay: its sound resampled to 48 kHz and played through pipewire, the clock its picture follows |
+| uchardet | `uchardet` | flameplay: what encoding a subtitle file that isn't utf-8 is in (old .srt files: windows' arabic, cyrillic, western...), read as that |
+| libass | `libass` | flameplay's subtitles: every text kind (srt, ass, webvtt, a video's own) drawn by it, a styled one the way it was made, a plain one in flame's look. fonts through fontconfig and the ones a file brings |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
 
 `flamectl` and the ipc socket are plain libc (unix sockets), nothing extra.
@@ -54,6 +56,7 @@ not linked, flame works without them, these features don't.
 | xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
 | Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
+| `noto-fonts` | text Inter has no letters for: arabic, hebrew, thai... in flameplay's subtitles and flame's apps, found through fontconfig. without it they come out in whatever font has them, or as boxes |
 | a vulkan driver that decodes video (nvidia's, mesa's radv or anv) | flameplay decodes on the gpu (h264, h265, vp9, av1) and hands flame its frames as they are. without one, or for what it can't decode, it decodes on the cpu. `FLAMEPLAY_HWDEC=no` makes it always the cpu |
 | (vulkan-validation-layers, debugging only) | `VK_LOADER_LAYERS_ENABLE='*validation'` checks flameplay's gpu pass |
 | (xdg-desktop-portal-wlr, if you'd rather) | flame's ext-image-copy-capture still serves it, `flamectl share-pick --dmenu` as its dmenu chooser gets you flame's picker |
