@@ -97,11 +97,17 @@ static void draw(struct flame_pass *pass, const struct flame_render_target *targ
 		if (element->type == FLAME_ELEMENT_RECT) {
 			pass_rect(pass, dst, element->color, &clip, true);
 		} else if (element->type == FLAME_ELEMENT_GLASS) {
-			pass_glass_style(pass, &element->glass, dst, &clip, target->scale, 1);
+			pass_glass_style(pass, &element->glass, dst, &clip, target->scale, element->alpha);
 		} else if (element->texture) {
 			struct wlr_linux_drm_syncobj_surface_v1_state *sync = element->surface
 				? wlr_linux_drm_syncobj_v1_get_surface_state(element->surface) : NULL;
+			struct wlr_box shape = element->shape;
+			if (element->shape_radius > 0) {
+				target_box_to_buffer(target, &shape);
+			}
 			pass_texture(pass, &(struct gl_texture_options){
+				.shape = shape,
+				.shape_radius = element->shape_radius * target->scale,
 				.texture = element->texture,
 				.src = element->src,
 				.dst = dst,

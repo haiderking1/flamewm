@@ -20,6 +20,7 @@ struct wlr_texture;
 struct gl_program {
 	unsigned program;
 	int proj, tex_proj, tex, alpha, color; // uniforms, -1 for none
+	int dst, shape, shape_radius; // textures cut to a rounded window
 	int pos; // the vertex attribute
 	// glass and blur
 	int texel, offset, bounds, box, reach, radius, tint, saturation, edge, refraction,
@@ -85,6 +86,10 @@ struct gl_texture_options {
 	float alpha; // 1 for opaque
 	bool blend; // premultiplied over what's there, off replaces it
 	bool nearest; // pixel exact scaling, bilinear otherwise
+	// the rounded window it's part of (buffer pixels): outside it, nothing
+	// shows. a radius of 0 for none
+	struct wlr_box shape;
+	float shape_radius;
 	// the gpu work that made it, waited on before it's read. NULL: none
 	struct wlr_drm_syncobj_timeline *wait_timeline;
 	uint64_t wait_point;

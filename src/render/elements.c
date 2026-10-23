@@ -90,6 +90,9 @@ struct collect {
 	// a snapshot: surfaces just unmapped still have their last buffer
 	bool unmapped_too;
 	bool failed;
+	// the rounded window being flattened (transformed), a radius of 0 for none
+	struct wlr_box shape;
+	float shape_radius;
 };
 
 static void mark(struct flame_element *element, const struct collect *collect) {
@@ -144,7 +147,9 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	// its glass first, right under it: what's behind it, frosted
 	size_t panes_len;
 	const struct eyecandy_pane *panes = eyecandy_panes(surface, &panes_len);
-	for (size_t i = 0; i < panes_len; i++) {
+	// faded all together (set_opacity), all the way: none of them
+	float opacity = (float)eyecandy_opacity(surface);
+	for (size_t i = 0; opacity > 0 && i < panes_len; i++) {
 		// clipped to the surface in its own coords first: "all of it" comes as
 		// 0, 0, INT32_MAX, INT32_MAX (foot's blur), moved before it's cut
 		// down it would overflow
@@ -176,6 +181,7 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 		pane->glass.blur *= collect->t.ax;
 		pane->glass.refraction *= collect->t.ax;
 		mark(pane, collect);
+		pane->alpha *= opacity;
 	}
 
 	struct flame_element *element = push(collect->list);
@@ -187,6 +193,8 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	element->id = surface;
 	element->box = box;
 	element->clip = clip;
+	element->shape = collect->shape;
+	element->shape_radius = collect->shape_radius;
 	element->surface = surface;
 	element->texture = texture;
 	wlr_surface_get_buffer_source_box(surface, &element->src);
@@ -285,9 +293,24 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 		collect->x = x;
 		collect->y = y;
 		collect->clip = wlr_box_empty(&surface_node->clip) ? NULL : &node_clip;
+		// a window rounded by itself (set_shape): all its surfaces cut to it,
+		// its window geometry. filling the screen (fullscreen): no corners
+		double radius = eyecandy_shape(surface_node->surface);
+		if (radius > 0) {
+			struct wlr_box window = collect->clip ? node_clip : (struct wlr_box){x, y,
+				surface_node->surface->current.width, surface_node->surface->current.height};
+			collect->shape = apply(&collect->t, window);
+			collect->shape_radius = (float)(radius * collect->t.ax);
+			struct wlr_box covered;
+			if (wlr_box_intersection(&covered, &collect->shape, &collect->area)
+					&& wlr_box_equal(&covered, &collect->area)) {
+				collect->shape_radius = 0;
+			}
+		}
 		// subsurfaces below, the surface, subsurfaces above. unmapped ones skipped
 		wlr_surface_for_each_surface(surface_node->surface, collect_surface, collect);
 		collect->clip = NULL;
+		collect->shape_radius = 0;
 		break;
 	case FLAME_NODE_BUFFER:;
 		struct flame_buffer_node *buffer = wl_container_of(node, buffer, node);
@@ -422,6 +445,19 @@ void elements_occlude(struct flame_element_list *list) {
 			pixman_region32_translate(&element->opaque, element->box.x, element->box.y);
 			pixman_region32_intersect_rect(&element->opaque, &element->opaque, clip.x,
 				clip.y, clip.width, clip.height);
+			if (element->shape_radius > 0) {
+				// its window's corners show what's behind them
+				struct wlr_box s = element->shape;
+				int r = (int)ceilf(element->shape_radius);
+				pixman_region32_t corners;
+				pixman_region32_init_rect(&corners, s.x, s.y, r, r);
+				pixman_region32_union_rect(&corners, &corners, s.x + s.width - r, s.y, r, r);
+				pixman_region32_union_rect(&corners, &corners, s.x, s.y + s.height - r, r, r);
+				pixman_region32_union_rect(&corners, &corners, s.x + s.width - r,
+					s.y + s.height - r, r, r);
+				pixman_region32_subtract(&element->opaque, &element->opaque, &corners);
+				pixman_region32_fini(&corners);
+			}
 		}
 		pixman_region32_union(&above, &above, &element->opaque);
 	}

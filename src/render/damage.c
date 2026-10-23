@@ -36,7 +36,8 @@ static bool looks_the_same(const struct flame_element *a, const struct flame_ele
 		return !memcmp(&a->glass, &b->glass, sizeof(a->glass));
 	}
 	// a new buffer comes with commit damage, that's handled by the commit
-	return a->transform == b->transform && fbox_equal(&a->src, &b->src);
+	return a->transform == b->transform && fbox_equal(&a->src, &b->src)
+		&& a->shape_radius == b->shape_radius && wlr_box_equal(&a->shape, &b->shape);
 }
 
 // the id may be a freed surface's address taken by a new one, so a surface

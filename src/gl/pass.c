@@ -226,8 +226,15 @@ void gl_pass_texture(struct gl_pass *pass, const struct gl_texture_options *opti
 	src.width /= texture->width;
 	src.height /= texture->height;
 
-	set_blend((attribs.has_alpha || options->alpha < 1.0f) && options->blend);
+	// rounded: its corners see through, even an opaque texture's
+	bool shaped = options->shape_radius > 0 && !wlr_box_empty(&options->shape);
+	set_blend((attribs.has_alpha || options->alpha < 1.0f || shaped) && options->blend);
 	fglUseProgram(program->program);
+	fglUniform4f(program->dst, options->dst.x, options->dst.y, options->dst.width,
+		options->dst.height);
+	fglUniform4f(program->shape, options->shape.x, options->shape.y, options->shape.width,
+		options->shape.height);
+	fglUniform1f(program->shape_radius, shaped ? options->shape_radius : 0);
 	fglActiveTexture(GL_TEXTURE0);
 	fglBindTexture(attribs.target, attribs.tex);
 	GLint filter = options->nearest ? GL_NEAREST : GL_LINEAR;

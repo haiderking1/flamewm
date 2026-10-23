@@ -5,6 +5,7 @@
 #include <pixman.h>
 #include <time.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
 
@@ -250,6 +251,15 @@ static void handle_child_commit(struct wl_listener *listener, void *data) {
 	struct old_size old = {child->old_buffer_width, child->old_buffer_height,
 		child->old_width, child->old_height};
 	bool redrawn = redraws(surface, old, whole_surface, child->was_opaque, &child->unfinished);
+	// a video's scaled frame at the new size is the finished one: its picture
+	// doesn't depend on the size, there's nothing better coming (a paused one
+	// would leave it waiting out the deadline)
+	struct wlr_content_type_manager_v1 *types = view->desktop->server->render.content_type;
+	if (types && wlr_surface_get_content_type_v1(types, surface) == WP_CONTENT_TYPE_V1_TYPE_VIDEO
+			&& (surface->pending.width != child->old_width
+				|| surface->pending.height != child->old_height)) {
+		redrawn = true;
+	}
 
 	if (!child->locked) {
 		// old size frames still fit the old box, let them through

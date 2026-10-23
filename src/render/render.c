@@ -7,6 +7,7 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
@@ -95,6 +96,7 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 
 	// fullscreen games ask to tear (vsync off) through this, see frame.c
 	render->tearing = wlr_tearing_control_manager_v1_create(server->display, 1);
+	render->content_type = wlr_content_type_manager_v1_create(server->display, 1);
 	if (!render->tearing) {
 		wlr_log(WLR_ERROR, "failed to create the tearing control manager");
 		return false;

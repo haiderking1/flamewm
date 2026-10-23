@@ -41,6 +41,7 @@ struct surface_glass {
 	bool candy_dirty, blur_dirty;
 	double shape_pending, shape; // set_shape's radius, 0 for none
 	bool shape_dirty;
+	double opacity_pending, opacity; // all its panes faded to this, 1 for not at all
 	// what the frame reads: both, candy's over blur's
 	struct pane_set all;
 	struct wl_listener commit;
@@ -76,6 +77,7 @@ static void handle_arrange(void *data) {
 
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct surface_glass *glass = wl_container_of(listener, glass, commit);
+	glass->opacity = glass->opacity_pending;
 	if (glass->shape_dirty) {
 		glass->shape_dirty = false;
 		if (glass->shape != glass->shape_pending) {
@@ -136,6 +138,7 @@ static struct surface_glass *glass_get(struct flame_server *server,
 	}
 	glass->server = server;
 	glass->surface = surface;
+	glass->opacity = glass->opacity_pending = 1;
 	wlr_addon_init(&glass->addon, &surface->addons, NULL, &addon_impl);
 	listener_connect(&glass->commit, &surface->events.commit, handle_commit);
 	return glass;
@@ -144,6 +147,16 @@ static struct surface_glass *glass_get(struct flame_server *server,
 bool eyecandy_shaped(struct wlr_surface *surface) {
 	struct surface_glass *glass = glass_of(surface);
 	return glass && glass->shape > 0;
+}
+
+double eyecandy_opacity(struct wlr_surface *surface) {
+	struct surface_glass *glass = glass_of(surface);
+	return glass ? glass->opacity : 1;
+}
+
+double eyecandy_shape(struct wlr_surface *surface) {
+	struct surface_glass *glass = glass_of(surface);
+	return glass ? glass->shape : 0;
 }
 
 const struct eyecandy_pane *eyecandy_panes(struct wlr_surface *surface, size_t *len) {
@@ -211,10 +224,19 @@ static void glass_handle_set_shape(struct wl_client *client, struct wl_resource 
 	}
 }
 
+static void glass_handle_set_opacity(struct wl_client *client, struct wl_resource *resource,
+		wl_fixed_t opacity) {
+	struct surface_glass *glass = wl_resource_get_user_data(resource);
+	if (glass) {
+		glass->opacity_pending = clampf((float)wl_fixed_to_double(opacity), 0, 1);
+	}
+}
+
 static const struct flame_glass_v1_interface glass_impl = {
 	.destroy = glass_handle_destroy,
 	.clear = glass_handle_clear,
 	.set_shape = glass_handle_set_shape,
+	.set_opacity = glass_handle_set_opacity,
 	.add_pane = glass_handle_add_pane,
 };
 
@@ -382,7 +404,7 @@ bool eyecandy_init(struct flame_eyecandy *eyecandy, struct flame_server *server)
 		return true;
 	}
 	eyecandy->eyecandy = wl_global_create(server->display, &flame_eyecandy_manager_v1_interface,
-		1, eyecandy, bind_eyecandy);
+		2, eyecandy, bind_eyecandy);
 	eyecandy->background = wl_global_create(server->display,
 		&ext_background_effect_manager_v1_interface, 1, eyecandy, bind_background);
 	return eyecandy->eyecandy && eyecandy->background;

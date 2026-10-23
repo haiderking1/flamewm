@@ -31,6 +31,10 @@ void eyecandy_finish(struct flame_eyecandy *eyecandy);
 // surface is a whole window with a rounded edge of its own (set_shape):
 // flame draws no border around it
 bool eyecandy_shaped(struct wlr_surface *surface);
+// how much of its panes shows (set_opacity), 1 for all
+double eyecandy_opacity(struct wlr_surface *surface);
+// its corners' radius, surface local units, 0 for none
+double eyecandy_shape(struct wlr_surface *surface);
 // surface's panes as last committed, bottom to top, NULL with none. good
 // till the surface's next commit
 const struct eyecandy_pane *eyecandy_panes(struct wlr_surface *surface, size_t *len);
