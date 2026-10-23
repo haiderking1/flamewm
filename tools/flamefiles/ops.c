@@ -13,12 +13,23 @@
 
 // ---- quick ones ----
 
-void ops_open(const char *path) {
-	// twice forked: the app isn't ours to wait for, and never a zombie
+// app (a flame app: next to flamefiles first, then $PATH; NULL: xdg-open)
+// run on path, twice forked: it isn't ours to wait for, and never a zombie
+static void run(const char *app, const char *path) {
 	pid_t pid = fork();
 	if (pid == 0) {
 		setsid();
 		if (fork() == 0) {
+			if (app) {
+				char self[PATH_MAX];
+				ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
+				char *slash = n > 0 ? (self[n] = '\0', strrchr(self, '/')) : NULL;
+				if (slash) {
+					snprintf(slash + 1, sizeof(self) - (size_t)(slash + 1 - self), "%s", app);
+					execl(self, app, path, (char *)NULL);
+				}
+				execlp(app, app, path, (char *)NULL);
+			}
 			execlp("xdg-open", "xdg-open", path, (char *)NULL);
 			_exit(127);
 		}
@@ -27,6 +38,14 @@ void ops_open(const char *path) {
 	if (pid > 0) {
 		waitpid(pid, NULL, 0);
 	}
+}
+
+void ops_open(const char *path) {
+	run(NULL, path);
+}
+
+void ops_open_with(const char *app, const char *path) {
+	run(app, path);
 }
 
 static bool exists(const char *path) {

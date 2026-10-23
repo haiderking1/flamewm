@@ -849,9 +849,10 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 void config_window_rules(const struct flame_config *config, const char *app_id,
 		const char *title, struct flame_window_rule *out) {
 	*out = (struct flame_window_rule){.open = -1, .close = -1};
-	// flame's own settings and file chooser float, they can be any size:
-	// init.lua's rules can still say otherwise
-	if (app_id && (!strcmp(app_id, "flamesettings") || !strcmp(app_id, "flamefiles-chooser"))) {
+	// flame's own settings, file chooser and player float, they can be any
+	// size: init.lua's rules can still say otherwise
+	if (app_id && (!strcmp(app_id, "flamesettings") || !strcmp(app_id, "flamefiles-chooser")
+			|| !strcmp(app_id, "flameplay"))) {
 		out->floating_set = out->floating = true;
 	}
 	lua_State *L = config->lua ? config->lua->L : NULL;

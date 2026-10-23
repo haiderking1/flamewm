@@ -49,13 +49,52 @@ static int brightness(const AVFrame *frame) {
 	return n ? (int)(sum / n) : 255;
 }
 
+// a frame's pixels to rgb the way it says it was made: its colour space
+// (hd's bt.709 when it doesn't say and it's hd) and its range (the "jpeg"
+// formats are full range, said in the format itself, which swscale won't
+// take any more)
+static enum AVPixelFormat plain_format(enum AVPixelFormat format, bool *full) {
+	switch (format) {
+	case AV_PIX_FMT_YUVJ420P:
+		*full = true;
+		return AV_PIX_FMT_YUV420P;
+	case AV_PIX_FMT_YUVJ422P:
+		*full = true;
+		return AV_PIX_FMT_YUV422P;
+	case AV_PIX_FMT_YUVJ444P:
+		*full = true;
+		return AV_PIX_FMT_YUV444P;
+	case AV_PIX_FMT_YUVJ440P:
+		*full = true;
+		return AV_PIX_FMT_YUV440P;
+	default:
+		return format;
+	}
+}
+
+static void colours(struct SwsContext *sws, const AVFrame *frame) {
+	bool full = frame->color_range == AVCOL_RANGE_JPEG;
+	plain_format(frame->format, &full);
+	// not said: full range comes from a jpeg's world (bt.601), hd video
+	// from bt.709's
+	int space = frame->colorspace == AVCOL_SPC_BT709 ? SWS_CS_ITU709
+		: frame->colorspace == AVCOL_SPC_BT2020_NCL || frame->colorspace == AVCOL_SPC_BT2020_CL
+		? SWS_CS_BT2020 : frame->colorspace == AVCOL_SPC_UNSPECIFIED && !full
+		&& frame->height >= 720 ? SWS_CS_ITU709 : SWS_CS_ITU601;
+	const int *coefficients = sws_getCoefficients(space);
+	sws_setColorspaceDetails(sws, coefficients, full, sws_getCoefficients(SWS_CS_DEFAULT), 1, 0,
+		1 << 16, 1 << 16);
+}
+
 // frame into out, w x h, cairo's ARGB32 (opaque)
 static bool convert(const AVFrame *frame, int w, int h, struct image *out) {
-	struct SwsContext *sws = sws_getContext(frame->width, frame->height, frame->format, w, h,
-		AV_PIX_FMT_BGRA, SWS_BICUBIC, NULL, NULL, NULL);
+	bool full = false;
+	struct SwsContext *sws = sws_getContext(frame->width, frame->height,
+		plain_format(frame->format, &full), w, h, AV_PIX_FMT_BGRA, SWS_BICUBIC, NULL, NULL, NULL);
 	if (!sws) {
 		return false;
 	}
+	colours(sws, frame);
 	*out = (struct image){.width = w, .height = h, .stride = w * 4};
 	out->data = malloc((size_t)out->stride * (size_t)h);
 	if (!out->data) {

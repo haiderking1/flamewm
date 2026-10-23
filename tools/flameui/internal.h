@@ -14,6 +14,7 @@
 // for the app and draws the controls
 
 #define FUI_EASES 512
+#define FUI_CURSOR_HIDDEN -2 // cursor_shape: no cursor at all
 #define FUI_KEYS 32
 #define FUI_TIMERS 16
 #define FUI_FONTS 16
@@ -60,6 +61,8 @@ struct fui {
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
+	struct wl_subcompositor *subcompositor;
+	struct wp_content_type_manager_v1 *content_type;
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
@@ -78,6 +81,7 @@ struct fui {
 	struct wp_viewport *viewport;
 	struct flame_glass_v1 *glass;
 	bool configured;
+	bool fullscreen; // flame made it so
 	int width, height; // layout units, as flame last configured it
 	uint32_t scale120; // the screen's scale, 120ths
 	struct fui_buffer buffers[2];
@@ -121,6 +125,8 @@ struct fui {
 	char typed[64]; // fui_typed's
 	bool click_used; // a control took this frame's press
 
+	uint32_t eyecandy_version;
+	double glass_opacity, glass_opacity_sent; // all the glass faded to this
 	struct fui_pane panes[16];
 	int panes_len;
 	bool panes_dirty;

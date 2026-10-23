@@ -713,7 +713,8 @@ w, h = map(int, d.split(b'\\\\n')[1].split())
 px = d[-(w * h * 3):]
 i = ((h // 2) * w + w // 2) * 3
 r, g, b = px[i], px[i + 1], px[i + 2]
-print(sys.argv[2], 'red' if r > 200 and g < 40 and b < 40 else 'blue' if b > 200 and r < 40 else (r, g, b))
+print(sys.argv[2], 'red' if r > 200 and g < 40 and b < 40 else 'blue' if b > 200 and r < 40
+	else 'green' if g > 100 and r < 40 and b < 40 else (r, g, b))
 \""
 case_run "wallpaper: flame draws a png or a jpeg over the background, refuses what isn't a picture, unset takes it off" "
 $CTL set background '#ff0000' > /dev/null; sleep 0.5
@@ -900,6 +901,31 @@ sleep 0.6
 win squeezed" "found False" "opened 900 600 True" "bigger 1060 640 True" "squeezed 780 480 True"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
+case_run "flameplay: a video floats at its size, pauses, seeks to the exact frame, goes fullscreen and back; a song shows its cover" "
+ffmpeg -v error -f lavfi -i 'color=c=red:size=640x360:rate=30:duration=5[r];color=c=blue:size=640x360:rate=30:duration=5[b];[r][b]concat=n=2:v=1' -c:v libx264 -pix_fmt yuv420p redblue.mp4
+ffmpeg -v error -f lavfi -i color=c=green:size=300x300 -frames:v 1 cover.png
+ffmpeg -v error -f lavfi -i sine=duration=3 -i cover.png -map 0:a -map 1:v -c:a libmp3lame -c:v png -disposition:v attached_pic song.mp3
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; sleep \${2:-0.5}; }
+win() { $CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('\$1', w['app_id'], w['floating'], w['width'], w['height'], w.get('fullscreen'))\"; }
+$(dirname $CTL)/flameplay \$PWD/redblue.mp4 > /dev/null 2>&1 &
+play=\$!
+sleep 2
+win opened
+grim -t ppm a.ppm; $CENTER a.ppm start
+key space
+key Right 0.8
+grim -t ppm b.ppm; $CENTER b.ppm seeked
+key f 1
+win full
+key Escape 1
+win back
+key q
+wait \$play; echo quit \$?
+$(dirname $CTL)/flameplay \$PWD/song.mp3 > /dev/null 2>&1 &
+sleep 2
+grim -t ppm c.ppm; $CENTER c.ppm song" \
+	"opened flameplay True 640 360 False" "start red" "seeked blue" "full flameplay True 1280 720 True" \
+	"back flameplay True 640 360 False" "quit 0" "song green"
 CASE_ENV=
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
 $CTL set border_width 5 > /dev/null

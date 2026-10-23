@@ -15,6 +15,9 @@
 
 // path opened with the user's app for it (xdg-open), not waited on
 void ops_open(const char *path);
+// with one of flame's own apps (flameplay): next to flamefiles, else on
+// $PATH, else the user's app for it after all
+void ops_open_with(const char *app, const char *path);
 // a new folder in dir, "untitled folder" (" 2" and on if it's there): its
 // name in out. false with error
 bool ops_new_folder(const char *dir, char *out, size_t size, const char **error);
