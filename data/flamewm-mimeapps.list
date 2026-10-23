@@ -1,0 +1,4 @@
+# what opens what under flame (XDG_CURRENT_DESKTOP=flamewm): folders in
+# flamefiles. a default you pick yourself still wins
+[Default Applications]
+inode/directory=flamefiles.desktop

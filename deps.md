@@ -34,7 +34,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | pango, cairo | `pangocairo` | the share picker: its labels drawn as text. flamesettings (flameui) draws everything with them |
 | wayland (client side), libxkbcommon | `wayland-client` `xkbcommon` | flamesettings: flame's own apps are wayland clients (flameui, `tools/flameui`) |
 | pipewire | `libpipewire-0.3` | screen sharing: flame's portal streams what's shared into pipewire itself, drawn straight into the stream's gpu buffers (or shared memory for apps that can't take those) |
-| sd-bus (systemd) | `libsystemd` | flame's portal on the session bus, what xdg-desktop-portal calls for screen sharing and screenshots |
+| sd-bus (systemd) | `libsystemd` | flame's portal on the session bus, what xdg-desktop-portal calls for screen sharing, screenshots and apps' open and save dialogs (flamefiles). "show in folder" (org.freedesktop.FileManager1) too |
 | libjpeg-turbo, libpng, libwebp | `libturbojpeg` `libpng` `libwebp` | wallpapers (`src/image/`): flame reads the picture itself, on a worker thread, a jpeg straight at a fraction of its size when less is needed. flamesettings' wallpaper thumbnails too |
 | ffmpeg's libraries | `libavformat` `libavcodec` `libswscale` `libavutil` | flame's apps (flameui) only: videos' previews (a frame a tenth of the way in, not a black one) and songs' covers in flamefiles. md5 for the thumbnail cache's names |
 | libswresample, pipewire | `libswresample` `libpipewire-0.3` | flameplay: its sound resampled to 48 kHz and played through pipewire, the clock its picture follows |
@@ -57,8 +57,8 @@ not linked, flame works without them, these features don't.
 
 | dep | why |
 | --- | --- |
-| xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
-| xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
+| xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. apps' open and save dialogs the same way, flamefiles as the dialog. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
+| xdg-desktop-portal-gtk | the rest of the portal: what flame doesn't serve itself (settings, app chooser and such) |
 | Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
 | networkmanager, bluez, an mpris player | what flamebar's control center shows: the network and wi-fi, bluetooth, what's playing. without one its tile says so. neither is started by the bar |
 | upower | a laptop's battery in flamebar (its "display device": the system's batteries, never a mouse's). without it the bar reads the kernel's own files. a desktop shows none either way |
@@ -81,7 +81,7 @@ not linked, flame works without them, these features don't.
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland clients (drag and drop, window sharing, a fullscreen game asking to tear) |
 | gbm (mesa or the nvidia driver), libdrm | `gbm` `libdrm` | `make e2e`: window sharing into gpu buffers, the way the portal takes frames |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
-| python-gobject | - | `make e2e`: the battery test's fake upower (tests/e2e/fakepower.py) |
+| python-gobject | - | `make e2e`: the battery test's fake upower (tests/e2e/fakepower.py), an app asking for file dialogs (tests/e2e/askfile.py) |
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |

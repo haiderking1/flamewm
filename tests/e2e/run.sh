@@ -465,6 +465,62 @@ cat shot.out
 f=\$(grep -o '/tmp/flamewm-screenshot-[A-Za-z0-9]*.png' shot.out)
 file \"\$f\"
 rm -f \"\$f\"" '"uri" s "file:///tmp/flamewm-screenshot-' "PNG image data, 1280 x 720"
+# apps' open and save dialogs, and "show in folder": flamefiles. the
+# chooser's own places (trash, thumbnails) the case's
+CASE_ENV="FLAME_PORTAL=1 XDG_DATA_HOME=$WORK/data XDG_CACHE_HOME=$WORK/cache"
+ASK="python3 -I $TESTS/askfile.py"
+KEY="key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }"
+case_run "portal: an app's open dialog is flamefiles where it said, only what it takes picked, several at once, a close or escape cancels" "
+$KEY
+mkdir box; echo a > box/a.txt; echo b > box/b.md; echo c > box/c.txt
+$ASK OpenFile /r/1 'Open a note' current_folder=\$PWD/box filter='*.txt' &
+sleep 2
+$CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print(w['app_id'], w['title'], w['floating'])\"
+key b; sleep 0.3; key Return; sleep 1.2
+jobs | grep -q Running && echo still choosing
+key a; sleep 0.3; key Return
+wait
+$ASK OpenFile /r/2 'Open notes' current_folder=\$PWD/box multiple=1 accept_label=Add &
+sleep 2
+$CTL key Control_L press > /dev/null; key a; $CTL key Control_L release > /dev/null
+sleep 0.3; key Return
+wait
+$ASK OpenFile /r/3 Open &
+sleep 1.5
+gdbus call --session --dest org.freedesktop.impl.portal.desktop.flamewm --object-path /r/3 \
+	--method org.freedesktop.impl.portal.Request.Close > /dev/null
+wait
+$ASK OpenFile /r/4 Open current_folder=\$PWD/box &
+sleep 1.5
+key Escape
+wait" "flamefiles-chooser Open a note True" "still choosing" "OpenFile 0 /box/a.txt" \
+	"OpenFile 0 /box/a.txt /box/b.md /box/c.txt" "OpenFile 1 " "OpenFile 1 "
+case_run "portal: an app's save dialog: its name saved with enter, one that's there only the second time, several into a folder" "
+$KEY
+mkdir box; echo a > box/a.txt
+$ASK SaveFile /r/1 'Save the note' current_folder=\$PWD/box current_name=new.txt &
+sleep 2
+key Return
+wait
+$ASK SaveFile /r/2 'Save over' current_file=\$PWD/box/a.txt &
+sleep 2
+key Return; sleep 1
+jobs | grep -q Running && echo asked first
+key Return
+wait
+$ASK SaveFiles /r/3 'Save these' current_folder=\$PWD files=x.png,y.png &
+sleep 2
+key b; sleep 0.3; key Return; sleep 0.5; key Return
+wait" "SaveFile 0 /box/new.txt" "asked first" "SaveFile 0 /box/a.txt" \
+	"SaveFiles 0 /box/x.png /box/y.png"
+case_run "portal: \"show in folder\" (org.freedesktop.FileManager1) is flamefiles at it" "
+mkdir box; echo a > box/a.txt
+busctl --user status org.freedesktop.FileManager1 | grep -o '^Comm=flamewm'
+gdbus call --session --dest org.freedesktop.FileManager1 --object-path /org/freedesktop/FileManager1 \
+	--method org.freedesktop.FileManager1.ShowItems \"['file://\$PWD/box/a.txt']\" '' > /dev/null
+sleep 1.5
+$CTL state | python3 -I -c \"import json, sys; print('shown', json.load(sys.stdin)['window']['app_id'])\"
+ps -eo args= | grep -q \"^flamefiles \$PWD/box/a.txt\$\" && echo at the file" "Comm=flamewm" "shown flamefiles" "at the file"
 CASE_WRAP=
 CASE_ENV=
 case_run "sharing a wayland window on a hidden workspace: drawn, and frames keep coming" "

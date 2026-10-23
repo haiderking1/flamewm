@@ -424,6 +424,8 @@ install: release
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop
 	install -Dm644 data/flameplay.desktop $(DESTDIR)$(PREFIX)/share/applications/flameplay.desktop
+	install -Dm644 data/flamewm-mimeapps.list \
+		$(DESTDIR)$(PREFIX)/share/applications/flamewm-mimeapps.list
 	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
 	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
 
