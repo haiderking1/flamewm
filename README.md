@@ -24,6 +24,9 @@ Xwayland needed, Steam and Proton games included.
   flamefiles (`super+e`), and a video and music player, flameplay:
   decoded on the gpu (vulkan), subtitles, audio tracks, it remembers where
   you stopped
+- **search** (`super+space`): one field over everything, apps and files in
+  your home as you type, a sum's answer, the web. what you open most comes
+  up first
 - **its own bar**, flamebar: see through over the wallpaper, the app in
   front and the workspaces in use, the time, and a control center of glass
   tiles (sound, what's playing, network, bluetooth, do not disturb).
@@ -76,6 +79,7 @@ mod is super.
 | `super+c` | close window |
 | `super+,` | settings |
 | `super+e` | files |
+| `super+space` | search: apps, files, sums |
 | `super+j` / `super+k` | focus next / prev |
 | `super+f` | fullscreen |
 | `super+1..0` | go to workspace |

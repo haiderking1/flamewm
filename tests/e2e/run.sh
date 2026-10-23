@@ -1017,6 +1017,32 @@ sleep 0.5
 echo action \$(cat act.txt)
 kill \$buspid" \
 	"('flame', 'flame', '0.1', '1.2')" "focused right" "card shown" "beside 4" "action default"
+case_run "flamesearch: a sum's answer copied, run again it's the same one up, a folder found opens in flamefiles" "
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
+shifted() { $CTL key Shift_L press > /dev/null; key \$1; $CTL key Shift_L release > /dev/null; }
+# a home of the case's own: what it finds is what's here
+mkdir -p home/Work/flamereports
+HOME=\$PWD/home $(dirname $CTL)/flamesearch > search.log 2>&1 &
+pid=\$!
+sleep 1.5
+key 2; shifted equal; key 3; shifted 8; key 4
+sleep 0.3
+key Return
+sleep 0.6
+echo sum \$(wl-paste -n)
+echo running \$(kill -0 \$pid 2>/dev/null && echo still)
+# run again: the one running comes up, this one's gone at once
+HOME=\$PWD/home $(dirname $CTL)/flamesearch
+echo told \$?
+sleep 0.5
+for c in f l a m e r e p; do key \$c; done
+sleep 0.5
+key Return
+sleep 2
+$CTL state | python3 -I -c \"import json, sys; print('opened', json.load(sys.stdin)['window']['app_id'])\"
+echo running \$(kill -0 \$pid 2>/dev/null && echo still)
+cat search.log" \
+	"sum 14" "running still" "told 0" "opened flamefiles"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
