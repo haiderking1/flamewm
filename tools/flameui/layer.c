@@ -7,6 +7,7 @@
 
 #include "content-type-v1-client-protocol.h"
 #include "internal.h"
+#include "linux-dmabuf-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 
 // a layer: a surface of its own under the window's, showing pictures the
@@ -84,6 +85,30 @@ void fui_layer_destroy(struct fui_layer *layer) {
 	free(layer);
 }
 
+// a picture of gpu memory: flame takes it (created) or can't (failed),
+// heard before fui_picture_create_dmabuf returns
+struct dmabuf_answer {
+	struct wl_buffer *buffer;
+	bool answered;
+};
+
+static void dmabuf_created(void *data, struct zwp_linux_buffer_params_v1 *params,
+		struct wl_buffer *buffer) {
+	struct dmabuf_answer *answer = data;
+	answer->buffer = buffer;
+	answer->answered = true;
+}
+
+static void dmabuf_failed(void *data, struct zwp_linux_buffer_params_v1 *params) {
+	struct dmabuf_answer *answer = data;
+	answer->answered = true;
+}
+
+static const struct zwp_linux_buffer_params_v1_listener dmabuf_listener = {
+	.created = dmabuf_created,
+	.failed = dmabuf_failed,
+};
+
 static void picture_release(void *data, struct wl_buffer *buffer) {
 	struct fui_picture *picture = data;
 	struct fui_layer *layer = picture->layer;
@@ -129,6 +154,37 @@ struct fui_picture *fui_picture_create(struct fui_layer *layer, int width, int h
 	return picture;
 }
 
+struct fui_picture *fui_picture_create_dmabuf(struct fui_layer *layer, int width, int height,
+		uint32_t fourcc, uint64_t modifier, int fd, uint32_t offset, uint32_t stride) {
+	struct fui *ui = layer->ui;
+	if (!ui->dmabuf) {
+		return NULL;
+	}
+	struct fui_picture *picture = calloc(1, sizeof(*picture));
+	if (!picture) {
+		return NULL;
+	}
+	struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(ui->dmabuf);
+	struct dmabuf_answer answer = {0};
+	zwp_linux_buffer_params_v1_add_listener(params, &dmabuf_listener, &answer);
+	zwp_linux_buffer_params_v1_add(params, fd, 0, offset, stride, (uint32_t)(modifier >> 32),
+		(uint32_t)modifier);
+	zwp_linux_buffer_params_v1_create(params, width, height, fourcc, 0);
+	while (!answer.answered && wl_display_roundtrip(ui->display) >= 0) {
+	}
+	zwp_linux_buffer_params_v1_destroy(params);
+	if (!answer.buffer) {
+		free(picture);
+		return NULL;
+	}
+	picture->layer = layer;
+	picture->buffer = answer.buffer;
+	picture->width = width;
+	picture->height = height;
+	wl_buffer_add_listener(picture->buffer, &picture_listener, picture);
+	return picture;
+}
+
 void fui_picture_destroy(struct fui_picture *picture) {
 	if (!picture) {
 		return;
@@ -137,7 +193,9 @@ void fui_picture_destroy(struct fui_picture *picture) {
 		picture->layer->shown = NULL;
 	}
 	wl_buffer_destroy(picture->buffer);
-	munmap(picture->pixels, picture->size);
+	if (picture->pixels) {
+		munmap(picture->pixels, picture->size);
+	}
 	free(picture);
 }
 

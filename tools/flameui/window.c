@@ -16,6 +16,7 @@
 #include "flame-eyecandy-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "internal.h"
+#include "linux-dmabuf-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -529,6 +530,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wp_cursor_shape_manager_v1_interface.name)) {
 		ui->cursor_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (!strcmp(interface, zwp_linux_dmabuf_v1_interface.name) && version >= 3) {
+		ui->dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 3);
 	} else if (!strcmp(interface, wp_content_type_manager_v1_interface.name)) {
 		ui->content_type = wl_registry_bind(registry, name, &wp_content_type_manager_v1_interface,
 			1);

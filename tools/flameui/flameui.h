@@ -76,6 +76,10 @@ void fui_layer_destroy(struct fui_layer *layer);
 // a picture of the layer's, width x height, XRGB (cairo's RGB24): its
 // pixels anyone's to write, from any thread, while it isn't on screen
 struct fui_picture *fui_picture_create(struct fui_layer *layer, int width, int height);
+// a picture in gpu memory (a dmabuf, one plane: fd's the caller's still),
+// NULL when flame can't take it. its pixels aren't for the cpu
+struct fui_picture *fui_picture_create_dmabuf(struct fui_layer *layer, int width, int height,
+	uint32_t fourcc, uint64_t modifier, int fd, uint32_t offset, uint32_t stride);
 void fui_picture_destroy(struct fui_picture *picture);
 void *fui_picture_pixels(struct fui_picture *picture, int *stride);
 bool fui_picture_on_screen(const struct fui_picture *picture);

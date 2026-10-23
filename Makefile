@@ -66,6 +66,7 @@ UI_PROTOCOLS := $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
 	$(WL_PROTOCOLS)/stable/viewporter/viewporter.xml \
 	$(WL_PROTOCOLS)/staging/cursor-shape/cursor-shape-v1.xml \
 	$(WL_PROTOCOLS)/staging/content-type/content-type-v1.xml \
+	$(WL_PROTOCOLS)/stable/linux-dmabuf/linux-dmabuf-v1.xml \
 	$(WL_PROTOCOLS)/stable/tablet/tablet-v2.xml \
 	protocols/flame-eyecandy-v1.xml
 UI_PROTO_NAMES := $(basename $(notdir $(UI_PROTOCOLS)))
