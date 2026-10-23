@@ -25,6 +25,9 @@ struct flame_wallpaper {
 	char *path; // NULL for none
 	enum flame_wallpaper_mode mode;
 	float color[4];
+	// the same again on every screen, here (the lock's backdrop): what's
+	// shown now, the color without a picture. NULL for nowhere
+	struct flame_tree *mirror;
 
 	// the worker. jobs and done under lock, it says it finished one down notify
 	pthread_t thread;

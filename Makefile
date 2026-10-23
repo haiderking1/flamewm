@@ -267,6 +267,14 @@ $(E2E)/$(1)-v1-protocol.c: $(STAGING_XML)/$(1)/$(1)-v1.xml
 endef
 $(foreach p,$(CAPTURE_PROTOCOLS),$(eval $(call capture_protocol,$(p))))
 
+# the lock test's locker
+$(eval $(call capture_protocol,ext-session-lock))
+
+$(E2E)/wllock: tests/e2e/wllock.c $(E2E)/ext-session-lock-v1-client-protocol.h \
+		$(E2E)/ext-session-lock-v1-protocol.c
+	$(CC) -std=c17 -O1 -g -D_GNU_SOURCE -I$(E2E) -o $@ tests/e2e/wllock.c \
+		$(E2E)/ext-session-lock-v1-protocol.c $(shell pkg-config --cflags --libs wayland-client)
+
 DMABUF_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/stable/linux-dmabuf/linux-dmabuf-v1.xml
 
 $(E2E)/linux-dmabuf-v1-client-protocol.h: $(DMABUF_XML)
@@ -368,7 +376,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH)
+		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix

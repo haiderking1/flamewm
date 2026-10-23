@@ -53,6 +53,20 @@ static void handle_key(struct wl_listener *listener, void *data) {
 
 	bool handled = false;
 	struct flame_server *server = keyboard->input->server;
+	if (lock_active(&server->lock)) {
+		// locked: the locker has the keys. no binds (one that quits would
+		// unlock it), no X app (it could read the password), a vt switch
+		// still goes
+		bool pressed = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+		const xkb_keysym_t *syms;
+		int count = xkb_state_key_get_syms(keyboard->wlr->xkb_state, event->keycode + 8, &syms);
+		if (pressed && handle_vt_switch(server, syms, count)) {
+			return;
+		}
+		wlr_seat_set_keyboard(seat, keyboard->wlr);
+		wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
+		return;
+	}
 	xserver_activity(&server->xbridge.xserver);
 	// the share picker has the keyboard: tab, arrows, enter, escape. binds go on
 	if (picker_key(&server->picker, event->keycode + 8,
@@ -91,7 +105,9 @@ static void handle_modifiers(struct wl_listener *listener, void *data) {
 
 	wlr_seat_set_keyboard(seat, keyboard->wlr);
 	wlr_seat_keyboard_notify_modifiers(seat, &keyboard->wlr->modifiers);
-	xshell_keyboard(&keyboard->input->server->xshell, keyboard->wlr);
+	if (!lock_active(&keyboard->input->server->lock)) {
+		xshell_keyboard(&keyboard->input->server->xshell, keyboard->wlr);
+	}
 }
 
 static void handle_destroy(struct wl_listener *listener, void *data) {

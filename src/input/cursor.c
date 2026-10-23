@@ -109,6 +109,10 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 	struct flame_server *server = cursor->server;
 	struct wlr_seat *seat = server->input.seat;
 	render_pointer_move(&server->render, cursor->wlr->x, cursor->wlr->y);
+	if (lock_active(&server->lock)) {
+		lock_pointer(&server->lock, cursor->wlr->x, cursor->wlr->y, time_msec, false);
+		return; // nothing under the locker sees it go by
+	}
 
 	if (moved) {
 		xbridge_pointer_input(&server->xbridge, false);
@@ -176,10 +180,15 @@ static void confine(struct flame_cursor *cursor) {
 static void handle_motion(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
 	struct wlr_pointer_motion_event *event = data;
-	xshell_pointer_raw_motion(&cursor->server->xshell, event->delta_x, event->delta_y,
-		event->unaccel_dx, event->unaccel_dy, event->time_msec);
+	bool locked = lock_active(&cursor->server->lock);
+	if (!locked) {
+		xshell_pointer_raw_motion(&cursor->server->xshell, event->delta_x, event->delta_y,
+			event->unaccel_dx, event->unaccel_dy, event->time_msec);
+	}
 	wlr_cursor_move(cursor->wlr, &event->pointer->base, event->delta_x, event->delta_y);
-	confine(cursor);
+	if (!locked) {
+		confine(cursor); // an X app's grab doesn't hold the pointer on the lock
+	}
 	process_motion(cursor, event->time_msec, true);
 }
 
@@ -187,7 +196,9 @@ static void handle_motion_absolute(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
 	wlr_cursor_warp_absolute(cursor->wlr, &event->pointer->base, event->x, event->y);
-	confine(cursor);
+	if (!lock_active(&cursor->server->lock)) {
+		confine(cursor);
+	}
 	process_motion(cursor, event->time_msec, true);
 }
 
@@ -196,6 +207,12 @@ static void button_event(struct flame_cursor *cursor,
 	struct flame_server *server = cursor->server;
 
 	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
+	if (lock_active(&server->lock)) {
+		lock_pointer(&server->lock, cursor->wlr->x, cursor->wlr->y, event->time_msec, pressed);
+		wlr_seat_pointer_notify_button(server->input.seat, event->time_msec, event->button,
+			event->state);
+		return;
+	}
 	if (picker_active(&server->picker)) {
 		picker_pointer_button(&server->picker, cursor->wlr->x, cursor->wlr->y, pressed);
 		return;
@@ -274,7 +291,7 @@ static void axis_event(struct flame_cursor *cursor, struct wlr_pointer_axis_even
 	if (drag_active(&cursor->server->input.drag) || picker_active(&cursor->server->picker)) {
 		return;
 	}
-	if (xshell_pointer_axis(&cursor->server->xshell,
+	if (!lock_active(&cursor->server->lock) && xshell_pointer_axis(&cursor->server->xshell,
 			event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL, event->delta,
 			event->time_msec)) {
 		return;

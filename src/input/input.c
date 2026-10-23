@@ -44,6 +44,10 @@ static void handle_request_set_primary_selection(struct wl_listener *listener, v
 }
 
 void input_keyboard_enter(struct flame_input *input, struct wlr_surface *surface) {
+	// locked: the locker's surfaces only, nothing else ever gets the keys
+	if (!lock_allows(&input->server->lock, surface)) {
+		return;
+	}
 	if (!surface) {
 		wlr_seat_keyboard_notify_clear_focus(input->seat);
 		return;
