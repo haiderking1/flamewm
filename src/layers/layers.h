@@ -24,6 +24,9 @@ struct flame_layer_surface {
 	struct flame_tree *popups;
 	enum zwlr_layer_shell_v1_layer layer; // scene tree it's in right now
 	struct flame_layer_anim *anim; // opening and closing, see anim/layer.c
+	// its unmap being handled: wlroots resets it right after, a configure
+	// sent now it would ack as one it never got
+	bool unmapping;
 
 	struct wl_listener map;
 	struct wl_listener unmap;

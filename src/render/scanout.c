@@ -94,8 +94,12 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 		return NULL;
 	}
 	pixman_box32_t box = {area.x, area.y, area.x + area.width, area.y + area.height};
-	// anything it doesn't cover would have to be painted black by us
+	// anything it doesn't cover would have to be painted black by us, and
+	// what it lets through (see through, a launcher over the background
+	// colour) shows the background: the display would show black there
 	if (pixman_region32_contains_rectangle((pixman_region32_t *)&only->visible, &box)
+			!= PIXMAN_REGION_IN
+			|| pixman_region32_contains_rectangle((pixman_region32_t *)&only->opaque, &box)
 			!= PIXMAN_REGION_IN) {
 		return NULL;
 	}
