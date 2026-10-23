@@ -960,6 +960,14 @@ n = sum(px[(y * w + x) * 3] for y in range(200, 260, 2) for x in range(w - 320, 
 print(n)
 \"; }
 click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.8; }
+# the control center's button: the first thing that's lit right of the
+# bar's middle, the time after it (where depends on how wide the date is)
+button() { grim -t ppm bar.ppm; python3 -I -c \"
+d = open('bar.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+print(next(x for x in range(w // 2, w) if px[(16 * w + x) * 3] > 200) + 7)
+\"; }
 # no session bus: the user's would be found through XDG_RUNTIME_DIR, and
 # its notifications would come here
 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
@@ -968,7 +976,7 @@ $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
 win under
 a=\$(bright a)
-click 1134 16
+click \$(button) 16
 win open
 b=\$(bright b)
 click 500 500
