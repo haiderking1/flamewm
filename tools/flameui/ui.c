@@ -100,6 +100,10 @@ int fui_height(const struct fui *ui) {
 	return ui->height;
 }
 
+double fui_scale(const struct fui *ui) {
+	return ui->scale120 / 120.0;
+}
+
 double fui_time(const struct fui *ui) {
 	return ui->now;
 }
