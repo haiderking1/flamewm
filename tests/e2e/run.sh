@@ -731,7 +731,7 @@ grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
 	"not a jpeg, png or webp it can read" "still True" "none blue"
 # flame's apps keep how they show things in XDG_CONFIG_HOME, the trash in
 # XDG_DATA_HOME, thumbnails in XDG_CACHE_HOME: never the user's
-CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache"
+CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache XDG_STATE_HOME=$WORK/apps/state"
 case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
 mkdir walls
 $CTL set background '#ff0000' > /dev/null; sleep 0.5; grim walls/red.png
@@ -930,6 +930,63 @@ grim -t ppm c.ppm; $CENTER c.ppm song" \
 	"opened flameplay True 640 360 False" "start red" "seeked blue" "full flameplay True 1280 720 True" \
 	"back flameplay True 640 360 False" "quit 0" "song green"
 done
+case_run "flameplay: fullscreen with nothing over it goes straight to the screen, the bar back composes it again" "
+ffmpeg -v error -f lavfi -i testsrc2=size=1280x720:rate=30:duration=20 -c:v libx264 -pix_fmt yuv420p wide.mp4
+scanout() { $CTL state | python3 -I -c \"import json, sys; print('\$1', json.load(sys.stdin)['outputs'][0]['scanout'])\"; }
+$(dirname $CTL)/flameplay \$PWD/wide.mp4 > /dev/null 2>&1 &
+sleep 2
+$CTL pointer move 640 360 > /dev/null
+$CTL key f press > /dev/null; $CTL key f release > /dev/null
+sleep 1
+scanout bar
+sleep 4.5
+scanout watching
+$CTL pointer move 600 300 > /dev/null
+sleep 0.5
+scanout moved" \
+	"bar False" "watching True" "moved False"
+case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
+printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
+printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
+ffmpeg -v error -f lavfi -i color=c=black:size=640x360:rate=10:duration=30 -i own.srt -map 0 -map 1 -c:v libx264 -pix_fmt yuv420p -c:s srt subs.mkv
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; sleep \${2:-0.8}; }
+# bright pixels just over the bar (it's up, paused): the subtitles
+words() { grim -t ppm \$1.ppm; $CTL state | python3 -I -c \"
+import json, sys
+w = json.load(sys.stdin)['window']
+d = open('\$1.ppm', 'rb').read()
+sw, sh = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(sw * sh * 3):]
+n = sum(1 for y in range(w['y'] + 190, w['y'] + 270) for x in range(w['x'], w['x'] + w['width'])
+	if min(px[(y * sw + x) * 3:(y * sw + x) * 3 + 3]) > 200)
+print('\$1', 'words' if n > 150 else 'none')
+\"; }
+$(dirname $CTL)/flameplay \$PWD/subs.mkv > /dev/null 2>&1 &
+sleep 2
+$CTL pointer move 640 300 > /dev/null
+key space
+words file
+key s
+words off
+key s 1.5
+words own" \
+	"file words" "off none" "own words"
+case_run "flameplay: a video goes on from where it was left (as loud), from the start once it's left near it" "
+ffmpeg -v error -f lavfi -i 'color=c=red:size=640x360:rate=5:duration=30[r];color=c=blue:size=640x360:rate=5:duration=60[b];[r][b]concat=n=2:v=1' -c:v libx264 -pix_fmt yuv420p long.mp4
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; sleep \${2:-0.5}; }
+play() { $(dirname $CTL)/flameplay \$PWD/long.mp4 > /dev/null 2>&1 & sleep 2; grim -t ppm \$1.ppm; $CENTER \$1.ppm \$1; }
+play first
+key l; key l; key l 1
+key Down; key Down
+key q 1
+echo loud \$(cat \$XDG_STATE_HOME/flame/flameplay-volume)
+play again
+echo kept \$(wc -l < \$XDG_STATE_HOME/flame/flameplay-positions)
+key Home 1
+key q 1
+echo still \$(cat \$XDG_STATE_HOME/flame/flameplay-volume)
+play over" \
+	"first red" "loud 0.900 1.000" "again blue" "kept 1" "still 0.900 1.000" "over red"
 CASE_ENV=
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
 $CTL set border_width 5 > /dev/null

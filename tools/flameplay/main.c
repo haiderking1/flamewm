@@ -13,6 +13,8 @@
 
 #include "../flameui/flameui.h"
 #include "player.h"
+#include "resume.h"
+#include "subs.h"
 
 static int W = 960, H = 540;
 #define MIN_W 360
@@ -43,6 +45,11 @@ struct app {
 	double scrub_to, scrub_seeked, scrubbed_at;
 	double volume, unmuted;
 	bool ended_seen;
+	bool subs_ticking; // a timer's on to see if the subtitles change
+	double pixels; // pixels to a window unit, as last drawn
+	// a word on what was just picked (a track), at the top for a moment
+	char toast[128];
+	double toast_at;
 };
 
 static void released(struct fui_picture *picture, void *data) {
@@ -87,6 +94,10 @@ static void present(void *data) {
 		fui_layer_show(app->layer, pic->data, app->vx, app->vy, app->vw, app->vh);
 		app->shown_any = true;
 	}
+	// played to its end: the window pauses it there, bar up
+	if (player_playing(app->player) && player_ended(app->player)) {
+		fui_redraw(app->ui);
+	}
 	// a song's (no picture, or one cover) has nothing to tick for once it's
 	// up, a paused video only for the frame a seek's still decoding
 	if (player_has_video(app->player) && (player_playing(app->player) || !app->shown_any
@@ -103,7 +114,19 @@ static void woken(void *data) {
 
 // ---- opening ----
 
+// where it's been left and how loud, for next time
+static void remember(struct app *app) {
+	struct player *p = app->player;
+	resume_put_volume(app->volume, app->unmuted);
+	if (p) {
+		double duration = player_duration(p);
+		resume_put(app->path, player_ended(p) ? duration : player_time(p), duration,
+			player_has_video(p) && !player_has_cover(p));
+	}
+}
+
 static void unload(struct app *app) {
+	remember(app);
 	player_close(app->player); // its threads gone: nothing writes the pictures now
 	app->player = NULL;
 	for (int i = 0; i < app->npics; i++) {
@@ -174,6 +197,11 @@ static void start(struct app *app) {
 		fprintf(stderr, "flameplay: %s: decoded on the %s\n", app->title,
 			player_gpu(app->player) ? "gpu (vulkan)" : "cpu");
 	}
+	// on from where it was left
+	double at = resume_get(app->path);
+	if (at > 0) {
+		player_seek(app->player, at);
+	}
 	player_set_pictures(app->player, app->pictures, app->npics);
 	player_set_volume(app->player, app->volume);
 	player_play(app->player);
@@ -200,7 +228,8 @@ static void fmt_time(double t, char *out, size_t size) {
 }
 
 // a round button with a glyph drawn by kind, true when clicked
-enum glyph { G_PLAY, G_PAUSE, G_BACK, G_FORWARD, G_SOUND, G_MUTED, G_FULL, G_UNFULL };
+enum glyph { G_PLAY, G_PAUSE, G_BACK, G_FORWARD, G_SOUND, G_MUTED, G_FULL, G_UNFULL,
+	G_TRACKS };
 
 static void glyph(struct fui *ui, enum glyph g, double cx, double cy, double s, uint32_t color) {
 	cairo_t *cr = fui_cairo(ui);
@@ -263,6 +292,22 @@ static void glyph(struct fui *ui, enum glyph g, double cx, double cy, double s, 
 			cairo_stroke(cr);
 		}
 		break;
+	case G_TRACKS: {
+		// a speech bubble, two lines of words in it
+		double w = s * 0.9, h = s * 0.66, x = cx - w / 2, y = cy - h / 2 - s * 0.06;
+		fui_rounded(ui, x, y, w, h, s * 0.16);
+		cairo_stroke(cr);
+		cairo_move_to(cr, x + w * 0.24, y + h);
+		cairo_line_to(cr, x + w * 0.2, y + h + s * 0.18);
+		cairo_line_to(cr, x + w * 0.44, y + h);
+		cairo_stroke(cr);
+		cairo_move_to(cr, x + w * 0.24, y + h * 0.4);
+		cairo_line_to(cr, x + w * 0.76, y + h * 0.4);
+		cairo_move_to(cr, x + w * 0.24, y + h * 0.66);
+		cairo_line_to(cr, x + w * 0.58, y + h * 0.66);
+		cairo_stroke(cr);
+		break;
+	}
 	case G_FULL:
 	case G_UNFULL: {
 		// four corners: pointing out to go fullscreen, in to come back
@@ -300,6 +345,7 @@ static bool button(struct fui *ui, uint64_t id, enum glyph g, double cx, double 
 static void toggle(struct app *app) {
 	if (player_playing(app->player)) {
 		player_pause(app->player);
+		remember(app);
 	} else {
 		player_play(app->player);
 		app->ended_seen = false;
@@ -315,6 +361,39 @@ static void seek_by(struct app *app, double by) {
 static void set_volume(struct app *app, double v) {
 	app->volume = fmax(0, fmin(v, 1));
 	player_set_volume(app->player, app->volume);
+}
+
+static void say(struct app *app, const char *what) {
+	snprintf(app->toast, sizeof(app->toast), "%s", what);
+	app->toast_at = fui_time(app->ui);
+	fui_redraw(app->ui);
+}
+
+static bool has_tracks(struct app *app) {
+	struct player_track t[2];
+	return player_tracks(app->player, PLAYER_AUDIO, t, 2) > 1
+		|| player_tracks(app->player, PLAYER_SUBTITLES, t, 1) > 0;
+}
+
+// the next track of kind on (subtitles: after the last, none), said
+static void cycle(struct app *app, enum player_track_kind kind) {
+	struct player_track tracks[32];
+	int n = player_tracks(app->player, kind, tracks, 32), on = -1;
+	for (int i = 0; i < n; i++) {
+		on = tracks[i].on ? i : on;
+	}
+	bool audio = kind == PLAYER_AUDIO;
+	if (n == 0 || (audio && n < 2)) {
+		say(app, audio ? "Only one sound" : "No subtitles");
+		return;
+	}
+	int next = on + 1 < n ? on + 1 : audio ? 0 : -1;
+	player_set_track(app->player, kind, next);
+	char what[160];
+	snprintf(what, sizeof(what), "%s: %s", audio ? "Audio" : "Subtitles",
+		next >= 0 ? tracks[next].name : "Off");
+	say(app, what);
+	tick(app);
 }
 
 // the bar: bx, by, bw x bh, faded to shown
@@ -349,7 +428,11 @@ static void bar(struct app *app, double bx, double by, double bw, double bh) {
 			set_volume(app, v);
 		}
 	}
-	// the right: fullscreen
+	// the right: the sounds and subtitles to pick from, fullscreen
+	if (has_tracks(app)
+			&& button(ui, fui_id("tracks", 0), G_TRACKS, bx + bw - 64, cy, 18)) {
+		fui_menu_open(ui, fui_id("tracks", 1), bx + bw - 64, cy - 14);
+	}
 	bool full = fui_fullscreen(ui);
 	if (button(ui, fui_id("full", 0), full ? G_UNFULL : G_FULL, bx + bw - 26, cy, 16)) {
 		fui_set_fullscreen(ui, !full);
@@ -450,6 +533,12 @@ static void keys(struct app *app) {
 	if (fui_key_pressed(ui, XKB_KEY_f, 0)) {
 		fui_set_fullscreen(ui, !fui_fullscreen(ui));
 	}
+	if (fui_key_pressed(ui, XKB_KEY_s, 0)) {
+		cycle(app, PLAYER_SUBTITLES);
+	}
+	if (fui_key_pressed(ui, XKB_KEY_a, 0)) {
+		cycle(app, PLAYER_AUDIO);
+	}
 	if (fui_key_pressed(ui, XKB_KEY_Escape, 0)) {
 		if (fui_fullscreen(ui)) {
 			fui_set_fullscreen(ui, false);
@@ -479,6 +568,121 @@ static void drops(struct app *app) {
 
 static void redraw_later(struct fui *ui, void *data) {
 	fui_redraw(ui);
+}
+
+// the sounds and subtitles to pick from, when it's open
+static void tracks_menu(struct app *app) {
+	struct fui *ui = app->ui;
+	uint64_t id = fui_id("tracks", 1);
+	if (!fui_menu_is_open(ui, id)) {
+		return;
+	}
+	struct player_track audio[32], subtitles[32];
+	int na = player_tracks(app->player, PLAYER_AUDIO, audio, 32);
+	int ns = player_tracks(app->player, PLAYER_SUBTITLES, subtitles, 32);
+	struct fui_menu_item items[70];
+	int kind[70], which[70], n = 0;
+	bool any_sub = false;
+	if (na > 1) {
+		items[n] = (struct fui_menu_item){.label = "Audio", .heading = true};
+		kind[n] = which[n] = -1;
+		n++;
+		for (int i = 0; i < na; i++, n++) {
+			items[n] = (struct fui_menu_item){.label = audio[i].name, .checked = audio[i].on};
+			kind[n] = PLAYER_AUDIO;
+			which[n] = i;
+		}
+	}
+	if (ns > 0) {
+		if (n) {
+			items[n] = (struct fui_menu_item){0};
+			kind[n] = which[n] = -1;
+			n++;
+		}
+		items[n] = (struct fui_menu_item){.label = "Subtitles", .heading = true};
+		kind[n] = which[n] = -1;
+		n++;
+		int off = n++;
+		for (int i = 0; i < ns; i++, n++) {
+			items[n] = (struct fui_menu_item){.label = subtitles[i].name, .checked = subtitles[i].on};
+			kind[n] = PLAYER_SUBTITLES;
+			which[n] = i;
+			any_sub |= subtitles[i].on;
+		}
+		items[off] = (struct fui_menu_item){.label = "Off", .checked = !any_sub};
+		kind[off] = PLAYER_SUBTITLES;
+		which[off] = -1;
+	}
+	int picked = fui_menu(ui, id, items, n);
+	if (picked >= 0 && kind[picked] >= 0) {
+		player_set_track(app->player, (enum player_track_kind)kind[picked], which[picked]);
+		tick(app);
+	}
+}
+
+static void subs_check(struct fui *ui, void *data);
+
+// the subtitles at t over the video, lifted over the bar while it's up:
+// false when none are on screen
+static bool draw_subtitles(struct app *app, double bar_top, double shown) {
+	struct fui *ui = app->ui;
+	struct subs *subs = player_subs(app->player);
+	if (!subs || !player_has_video(app->player)) {
+		return false;
+	}
+	cairo_t *cr = fui_cairo(ui);
+	double sx = 1, sy = 1;
+	cairo_user_to_device_distance(cr, &sx, &sy);
+	app->pixels = sx;
+	subs_update(subs, player_time(app->player), (int)lround(app->vw * sx),
+		(int)lround(app->vh * sy));
+	// the lowest line's a little over the video's bottom
+	double low = app->vy + app->vh - app->vh * 0.05;
+	double lift = shown * fmax(0, low - bar_top + 6);
+	bool drawn = subs_draw(subs, cr, app->vx, app->vy, lift);
+	// while it plays: looked at again shortly, drawn when they've changed
+	if (player_playing(app->player) && !app->subs_ticking) {
+		app->subs_ticking = true;
+		fui_after(ui, 40, subs_check, app);
+	}
+	return drawn;
+}
+
+static void subs_check(struct fui *ui, void *data) {
+	struct app *app = data;
+	app->subs_ticking = false;
+	struct subs *subs = app->player ? player_subs(app->player) : NULL;
+	if (!subs || !player_playing(app->player)) {
+		return;
+	}
+	if (subs_update(subs, player_time(app->player), (int)lround(app->vw * app->pixels),
+			(int)lround(app->vh * app->pixels))) {
+		fui_redraw(ui);
+	} else {
+		app->subs_ticking = true;
+		fui_after(ui, 40, subs_check, app);
+	}
+}
+
+// what was just picked, in a pill at the top, going after a moment: false
+// when it's gone
+static bool draw_toast(struct app *app) {
+	struct fui *ui = app->ui;
+	double age = fui_time(ui) - app->toast_at;
+	if (!app->toast[0] || age > 1.8) {
+		return false;
+	}
+	double a = age < 1.5 ? 1 : 1 - (age - 1.5) / 0.3;
+	double tw = fui_text_width(ui, app->toast, F_TITLE) + 32, th = 30;
+	double x = (W - tw) / 2, y = 44;
+	cairo_t *cr = fui_cairo(ui);
+	cairo_push_group(cr);
+	fui_fill_rounded(ui, x, y, tw, th, th / 2, 0x1a1a20d0);
+	fui_text(ui, W / 2.0, y + 7, app->toast, F_TITLE, TEXT, FUI_CENTER, 0);
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, a);
+	fui_after(ui, 30, redraw_later, app);
+	return true;
 }
 
 static void frame(struct fui *ui, void *data) {
@@ -533,6 +737,7 @@ static void frame(struct fui *ui, void *data) {
 	if (player_playing(p) && player_ended(p)) {
 		player_pause(p);
 		app->ended_seen = true;
+		remember(app); // watched: next time from the start
 	}
 
 	// the bar shows while the pointer moves, over it, paused
@@ -546,8 +751,10 @@ static void frame(struct fui *ui, void *data) {
 	double bw = fmin(W - 32, 620), bh = 72, bx = (W - bw) / 2, by = H - bh - 16;
 	bool over_bar = fui_hover(ui, bx, by, bw, bh);
 	bool show = !player_playing(p) || over_bar || app->scrubbing
-		|| now - app->moved_at < HIDE_AFTER || !player_has_video(p);
+		|| now - app->moved_at < HIDE_AFTER || !player_has_video(p)
+		|| fui_menu_is_open(ui, fui_id("tracks", 1));
 	double shown = fui_ease(ui, fui_id("bar", 0), show ? 1 : 0, 10);
+	bool words = draw_subtitles(app, by, shown);
 	if (show && player_playing(p)) {
 		// to hide it once the pointer's been still long enough, and to
 		// keep the time going
@@ -580,6 +787,15 @@ static void frame(struct fui *ui, void *data) {
 	} else {
 		fui_set_glass(ui, NULL, 0);
 	}
+	bool toast = draw_toast(app);
+	tracks_menu(app);
+	// watching it fill the screen, nothing over it: the window shows
+	// nothing, the video goes to the screen as it is (no drawing by flame)
+	bool fills = app->vx < 0.5 && app->vy < 0.5 && app->vw > W - 0.5 && app->vh > H - 0.5;
+	if (full && fills && shown <= 0.002 && !words && !toast
+			&& !fui_menu_is_open(ui, fui_id("tracks", 1))) {
+		fui_nothing(ui);
+	}
 	// watching: the pointer goes as the bar starts going, not after
 	if (!show && player_playing(p) && fui_hover(ui, 0, 0, W, H)) {
 		fui_cursor_hide(ui);
@@ -603,6 +819,7 @@ static void frame(struct fui *ui, void *data) {
 
 int main(int argc, char **argv) {
 	struct app app = {.volume = 1, .unmuted = 1};
+	resume_volume(&app.volume, &app.unmuted);
 	const char *path = argc > 1 ? argv[1] : NULL;
 	// opened before the window: its first size is the video's shape, at
 	// most 1280 x 720 (it plays once the window's up)

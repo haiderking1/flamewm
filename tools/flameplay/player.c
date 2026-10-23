@@ -1,5 +1,9 @@
 #include "player.h"
 
+#include <ctype.h>
+#include <dirent.h>
+#include <limits.h>
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
@@ -15,6 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <uchardet/uchardet.h>
+
+#include "subs.h"
 
 // the engine. three threads: a reader splitting the file into the video's
 // and the sound's packets, a decoder for each. frames go into the window's
@@ -44,9 +51,32 @@ struct queue {
 	pthread_cond_t cond;
 };
 
+// a track to pick: a stream of the file's, or (subtitles) a file beside it
+struct track {
+	int stream; // -1: file
+	char *file;
+	char name[96];
+};
+
+#define TRACKS 32
+
 struct player {
 	AVFormatContext *fmt;
 	int vstream, astream;
+	char *path;
+	struct track audio[TRACKS], subtitles[TRACKS];
+	int naudio, nsubtitles;
+	int audio_on, subtitles_on; // which of them (-1: none)
+	// another sound picked: its stream (the reader's from its next seek on,
+	// -1: as it is), its decoder (the sound's from the flush that seek sends)
+	int astream_next;
+	AVCodecContext *actx_next;
+	// the subtitles shown, under sub_lock: decoded by the reader as it reads
+	// them (sstream's packets), or all at once (a file)
+	pthread_mutex_t sub_lock;
+	int sstream;
+	AVCodecContext *sctx;
+	struct subs *subs;
 	bool cover; // the video's a still: a song's cover
 	AVCodecContext *vctx, *actx;
 	struct gpu *gpu; // decoding on the gpu (vulkan), NULL: on the cpu
@@ -197,6 +227,26 @@ double player_time(const struct player *p) {
 	return t;
 }
 
+// ---- subtitles ----
+
+// a subtitle stream's packet, decoded into what's shown (when it's the one
+// on)
+static void subtitle_packet(struct player *p, AVPacket *packet) {
+	pthread_mutex_lock(&p->sub_lock);
+	if (p->sctx && packet->stream_index == p->sstream) {
+		AVSubtitle sub;
+		int got = 0;
+		if (avcodec_decode_subtitle2(p->sctx, &sub, &got, packet) >= 0 && got) {
+			AVRational tb = p->fmt->streams[p->sstream]->time_base;
+			double start = packet->pts != AV_NOPTS_VALUE ? packet->pts * av_q2d(tb) - p->start : 0;
+			subs_add(p->subs, &sub, start, p->sctx->width, p->sctx->height);
+			avsubtitle_free(&sub);
+			wake(p); // shown now, if it's due (paused, say)
+		}
+	}
+	pthread_mutex_unlock(&p->sub_lock);
+}
+
 // ---- the reader ----
 
 static void *reader(void *data) {
@@ -208,6 +258,12 @@ static void *reader(void *data) {
 			double to = p->seek_to;
 			p->seek_wanted = false;
 			p->reader_eof = false;
+			if (p->astream_next >= 0) {
+				// another sound: its packets from here on (the decoder
+				// changes over at the flush)
+				p->astream = p->astream_next;
+				p->astream_next = -1;
+			}
 			pthread_mutex_unlock(&p->lock);
 			// the keyframe at or before it: the decoders go on from there to it
 			int64_t ts = (int64_t)((to + p->start) * AV_TIME_BASE);
@@ -250,6 +306,7 @@ static void *reader(void *data) {
 		} else if (packet->stream_index == p->astream) {
 			queue_put(&p->aq, ITEM_PACKET, serial, packet, false);
 		} else {
+			subtitle_packet(p, packet);
 			av_packet_free(&packet);
 		}
 	}
@@ -344,7 +401,8 @@ static bool picture_put(struct player *p, AVFrame *frame, double pts, int serial
 		pic->state = PIC_FREE;
 	}
 	pthread_mutex_unlock(&p->lock);
-	wake(p);
+	// no wake: the window looks for frames every refresh it plays (paused
+	// after a seek too, player_seeking), its own drawing isn't for them
 	return true;
 }
 
@@ -455,7 +513,8 @@ static void *adecoder(void *data) {
 	struct player *p = data;
 	AVFrame *frame = av_frame_alloc();
 	struct SwrContext *swr = resampler(p);
-	AVRational tb = p->fmt->streams[p->astream]->time_base;
+	int stream = p->astream; // what actx decodes
+	AVRational tb = p->fmt->streams[stream]->time_base;
 	float *out = NULL;
 	int out_cap = 0, serial = 0;
 	double target = 0, next = 0;
@@ -465,6 +524,16 @@ static void *adecoder(void *data) {
 			break;
 		}
 		if (it->kind == ITEM_FLUSH) {
+			pthread_mutex_lock(&p->lock);
+			if (p->actx_next && p->astream != stream) {
+				// another track: its own decoder, its packets from here on
+				avcodec_free_context(&p->actx);
+				p->actx = p->actx_next;
+				p->actx_next = NULL;
+				stream = p->astream;
+				tb = p->fmt->streams[stream]->time_base;
+			}
+			pthread_mutex_unlock(&p->lock);
 			avcodec_flush_buffers(p->actx);
 			swr_free(&swr);
 			swr = resampler(p); // nothing of before the seek left in it
@@ -774,6 +843,374 @@ void player_use_software(struct player *p) {
 	}
 }
 
+// ---- tracks ----
+
+// a language's name from its code (iso 639: "en", "eng", "ger"...), NULL
+// for one it doesn't know
+static const char *language(const char *code) {
+	static const char *const names[][3] = {
+		{"en", "eng", "English"}, {"es", "spa", "Spanish"}, {"fr", "fre", "French"},
+		{"fr", "fra", "French"}, {"de", "ger", "German"}, {"de", "deu", "German"},
+		{"it", "ita", "Italian"}, {"pt", "por", "Portuguese"}, {"ru", "rus", "Russian"},
+		{"ja", "jpn", "Japanese"}, {"zh", "chi", "Chinese"}, {"zh", "zho", "Chinese"},
+		{"ko", "kor", "Korean"}, {"ar", "ara", "Arabic"}, {"hi", "hin", "Hindi"},
+		{"tr", "tur", "Turkish"}, {"nl", "dut", "Dutch"}, {"nl", "nld", "Dutch"},
+		{"sv", "swe", "Swedish"}, {"no", "nor", "Norwegian"}, {"nb", "nob", "Norwegian"},
+		{"da", "dan", "Danish"}, {"fi", "fin", "Finnish"}, {"pl", "pol", "Polish"},
+		{"cs", "cze", "Czech"}, {"cs", "ces", "Czech"}, {"el", "gre", "Greek"},
+		{"el", "ell", "Greek"}, {"he", "heb", "Hebrew"}, {"hu", "hun", "Hungarian"},
+		{"ro", "rum", "Romanian"}, {"ro", "ron", "Romanian"}, {"uk", "ukr", "Ukrainian"},
+		{"th", "tha", "Thai"}, {"vi", "vie", "Vietnamese"}, {"id", "ind", "Indonesian"},
+		{"ms", "may", "Malay"}, {"ms", "msa", "Malay"}, {"fa", "per", "Persian"},
+		{"fa", "fas", "Persian"}, {"ur", "urd", "Urdu"}, {"bn", "ben", "Bengali"},
+		{"ta", "tam", "Tamil"}, {"bg", "bul", "Bulgarian"}, {"hr", "hrv", "Croatian"},
+		{"sr", "srp", "Serbian"}, {"sk", "slo", "Slovak"}, {"sk", "slk", "Slovak"},
+		{"sl", "slv", "Slovenian"}, {"ca", "cat", "Catalan"}, {"eu", "baq", "Basque"},
+		{"gl", "glg", "Galician"}, {"is", "ice", "Icelandic"}, {"et", "est", "Estonian"},
+		{"lv", "lav", "Latvian"}, {"lt", "lit", "Lithuanian"}, {"tl", "tgl", "Tagalog"},
+	};
+	if (!code) {
+		return NULL;
+	}
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		if (!strcasecmp(code, names[i][0]) || !strcasecmp(code, names[i][1])
+				|| !strcasecmp(code, names[i][2])) {
+			return names[i][2];
+		}
+	}
+	return NULL;
+}
+
+// a stream's name to pick it by: its language and its own title (one of
+// them if they say the same), how many channels a sound has
+static void stream_name(AVStream *st, int n, char *out, size_t size) {
+	const AVDictionaryEntry *lang = av_dict_get(st->metadata, "language", NULL, 0);
+	const AVDictionaryEntry *title = av_dict_get(st->metadata, "title", NULL, 0);
+	const char *l = lang ? language(lang->value) : NULL;
+	const char *t = title && title->value[0] ? title->value : NULL;
+	if (l && t && !strcasestr(t, l)) {
+		snprintf(out, size, "%s — %s", l, t);
+	} else if (t || l) {
+		snprintf(out, size, "%s", t ? t : l);
+	} else {
+		snprintf(out, size, "Track %d", n);
+	}
+	if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+		int ch = st->codecpar->ch_layout.nb_channels;
+		const char *layout = ch == 1 ? "Mono" : ch == 2 ? "Stereo" : ch == 6 ? "5.1"
+			: ch == 8 ? "7.1" : NULL;
+		size_t len = strlen(out);
+		if (layout && len < size) {
+			snprintf(out + len, size - len, " · %s", layout);
+		}
+	}
+	if (st->disposition & AV_DISPOSITION_FORCED) {
+		size_t len = strlen(out);
+		if (len < size) {
+			snprintf(out + len, size - len, " (Forced)");
+		}
+	}
+}
+
+// subtitle files beside path, named like it: movie.srt, movie.en.srt
+static void find_subtitle_files(struct player *p, const char *path) {
+	char dir[PATH_MAX];
+	snprintf(dir, sizeof(dir), "%s", path);
+	char *slash = strrchr(dir, '/');
+	const char *file = slash ? slash + 1 : path;
+	if (slash) {
+		*slash = '\0';
+	} else {
+		snprintf(dir, sizeof(dir), ".");
+	}
+	char base[NAME_MAX + 1];
+	snprintf(base, sizeof(base), "%s", file);
+	char *dot = strrchr(base, '.');
+	if (dot && dot != base) {
+		*dot = '\0';
+	}
+	size_t base_len = strlen(base);
+	DIR *d = opendir(slash ? (dir[0] ? dir : "/") : ".");
+	for (struct dirent *e; d && (e = readdir(d)) && p->nsubtitles < TRACKS;) {
+		const char *ext = strrchr(e->d_name, '.');
+		if (!ext || strncmp(e->d_name, base, base_len) || e->d_name[base_len] != '.'
+				|| (strcasecmp(ext, ".srt") && strcasecmp(ext, ".ass") && strcasecmp(ext, ".ssa")
+				&& strcasecmp(ext, ".vtt"))) {
+			continue;
+		}
+		struct track *t = &p->subtitles[p->nsubtitles];
+		size_t len = strlen(dir) + strlen(e->d_name) + 2;
+		t->file = malloc(len);
+		if (!t->file) {
+			break;
+		}
+		snprintf(t->file, len, "%s/%s", slash ? (dir[0] ? dir : "") : ".", e->d_name);
+		t->stream = -1;
+		// its language, between the name and the extension, else its name
+		char middle[64] = "";
+		const char *after = e->d_name + base_len + 1;
+		if (after < ext) {
+			snprintf(middle, sizeof(middle), "%.*s", (int)(ext - after), after);
+		}
+		const char *l = language(middle);
+		snprintf(t->name, sizeof(t->name), "%s", l ? l : e->d_name);
+		p->nsubtitles++;
+	}
+	if (d) {
+		closedir(d);
+	}
+}
+
+static int by_file(const void *a, const void *b) {
+	return strcmp(((const struct track *)a)->file, ((const struct track *)b)->file);
+}
+
+// subtitles named alike (an .ass and an .srt of one language): what kind
+// each is after its name
+static void tell_apart(struct player *p) {
+	for (int i = 0; i < p->nsubtitles; i++) {
+		bool same = false;
+		for (int j = 0; j < p->nsubtitles; j++) {
+			same |= j != i && !strcmp(p->subtitles[i].name, p->subtitles[j].name);
+		}
+		if (!same) {
+			continue;
+		}
+		struct track *t = &p->subtitles[i];
+		char kind[16] = "";
+		if (t->file) {
+			const char *ext = strrchr(t->file, '.');
+			snprintf(kind, sizeof(kind), "%s", ext ? ext + 1 : "");
+		} else {
+			snprintf(kind, sizeof(kind), "%s",
+				avcodec_get_name(p->fmt->streams[t->stream]->codecpar->codec_id));
+		}
+		for (char *c = kind; *c; c++) {
+			*c = (char)toupper((unsigned char)*c);
+		}
+		size_t len = strlen(t->name);
+		if (kind[0] && len < sizeof(t->name)) {
+			snprintf(t->name + len, sizeof(t->name) - len, " · %s", kind);
+		}
+	}
+}
+
+static void find_tracks(struct player *p, const char *path) {
+	for (unsigned i = 0; i < p->fmt->nb_streams; i++) {
+		AVStream *st = p->fmt->streams[i];
+		enum AVMediaType type = st->codecpar->codec_type;
+		// sounds to pick when there's sound at all (pipewire)
+		if (type == AVMEDIA_TYPE_AUDIO && p->astream >= 0 && p->naudio < TRACKS) {
+			struct track *t = &p->audio[p->naudio];
+			t->stream = (int)i;
+			stream_name(st, p->naudio + 1, t->name, sizeof(t->name));
+			p->audio_on = (int)i == p->astream ? p->naudio : p->audio_on;
+			p->naudio++;
+		} else if (type == AVMEDIA_TYPE_SUBTITLE && p->nsubtitles < TRACKS
+				&& avcodec_find_decoder(st->codecpar->codec_id)) {
+			struct track *t = &p->subtitles[p->nsubtitles];
+			t->stream = (int)i;
+			stream_name(st, p->nsubtitles + 1, t->name, sizeof(t->name));
+			p->nsubtitles++;
+		}
+	}
+	int streams = p->nsubtitles;
+	find_subtitle_files(p, path);
+	// the files in name order (the full .ass before the plain .srt)
+	qsort(p->subtitles + streams, (size_t)(p->nsubtitles - streams), sizeof(struct track), by_file);
+	tell_apart(p);
+}
+
+// the encoding of a text file that isn't utf-8 (old .srt files: windows'
+// arabic, cyrillic, western...), found by what its bytes look like
+// (uchardet). false: utf-8, or utf-16 saying so, which ffmpeg reads itself
+static bool text_encoding(const char *file, char *out, size_t size) {
+	FILE *f = fopen(file, "rbe");
+	if (!f) {
+		return false;
+	}
+	static char buf[1 << 20];
+	size_t n = fread(buf, 1, sizeof(buf), f);
+	fclose(f);
+	if (n >= 2 && (((unsigned char)buf[0] == 0xff && (unsigned char)buf[1] == 0xfe)
+			|| ((unsigned char)buf[0] == 0xfe && (unsigned char)buf[1] == 0xff))) {
+		return false;
+	}
+	bool utf8 = true;
+	for (size_t i = 0, follow = 0; utf8 && i < n; i++) {
+		unsigned char c = (unsigned char)buf[i];
+		if (follow) {
+			utf8 = (c & 0xc0) == 0x80;
+			follow--;
+		} else if (c >= 0x80) {
+			follow = c >= 0xf0 && c < 0xf8 ? 3 : c >= 0xe0 && c < 0xf0 ? 2
+				: c >= 0xc2 && c < 0xe0 ? 1 : 0;
+			// cut off at the end of what was read: still utf-8
+			utf8 = follow > 0 && (i + follow < n || n == sizeof(buf));
+		}
+	}
+	if (utf8) {
+		return false;
+	}
+	uchardet_t detect = uchardet_new();
+	const char *found = NULL;
+	if (detect && uchardet_handle_data(detect, buf, n) == 0) {
+		uchardet_data_end(detect);
+		found = uchardet_get_charset(detect);
+	}
+	// nothing it could tell: windows' western, what most are
+	snprintf(out, size, "%s", found && *found && strcasecmp(found, "ASCII") ? found : "CP1252");
+	if (detect) {
+		uchardet_delete(detect);
+	}
+	return true;
+}
+
+// a subtitle file read whole into subs, under sub_lock
+static bool load_subtitle_file(struct player *p, const char *file) {
+	AVFormatContext *f = NULL;
+	if (avformat_open_input(&f, file, NULL, NULL) < 0) {
+		return false;
+	}
+	int si = avformat_find_stream_info(f, NULL) >= 0
+		? av_find_best_stream(f, AVMEDIA_TYPE_SUBTITLE, -1, -1, NULL, 0) : -1;
+	const AVCodec *codec = si >= 0 ? avcodec_find_decoder(f->streams[si]->codecpar->codec_id)
+		: NULL;
+	AVCodecContext *ctx = codec ? avcodec_alloc_context3(codec) : NULL;
+	AVDictionary *options = NULL;
+	char encoding[64];
+	if (text_encoding(file, encoding, sizeof(encoding))) {
+		av_dict_set(&options, "sub_charenc", encoding, 0);
+	}
+	bool ok = ctx && avcodec_parameters_to_context(ctx, f->streams[si]->codecpar) >= 0;
+	if (ok) {
+		ctx->pkt_timebase = f->streams[si]->time_base;
+		ok = avcodec_open2(ctx, codec, &options) >= 0;
+	}
+	av_dict_free(&options);
+	if (ok) {
+		bool styled = codec->id == AV_CODEC_ID_ASS || codec->id == AV_CODEC_ID_SSA;
+		subs_reset(p->subs, styled ? (const char *)ctx->subtitle_header : NULL, p->width,
+			p->height);
+		AVPacket *packet = av_packet_alloc();
+		AVRational tb = f->streams[si]->time_base;
+		while (packet && av_read_frame(f, packet) >= 0) {
+			AVSubtitle sub;
+			int got = 0;
+			if (packet->stream_index == si && avcodec_decode_subtitle2(ctx, &sub, &got, packet) >= 0
+					&& got) {
+				// beside the video: its times are the video's from its start
+				subs_add(p->subs, &sub, packet->pts != AV_NOPTS_VALUE ? packet->pts * av_q2d(tb) : 0,
+					ctx->width, ctx->height);
+				avsubtitle_free(&sub);
+			}
+			av_packet_unref(packet);
+		}
+		av_packet_free(&packet);
+	}
+	avcodec_free_context(&ctx);
+	avformat_close_input(&f);
+	return ok;
+}
+
+// fonts the file brings (a styled track's), for libass
+static void add_fonts(struct player *p) {
+	for (unsigned i = 0; i < p->fmt->nb_streams; i++) {
+		AVStream *st = p->fmt->streams[i];
+		const AVDictionaryEntry *name = av_dict_get(st->metadata, "filename", NULL, 0);
+		const AVDictionaryEntry *mime = av_dict_get(st->metadata, "mimetype", NULL, 0);
+		bool font = st->codecpar->codec_id == AV_CODEC_ID_TTF
+			|| st->codecpar->codec_id == AV_CODEC_ID_OTF || (mime && strstr(mime->value, "font"));
+		if (st->codecpar->codec_type == AVMEDIA_TYPE_ATTACHMENT && font && name
+				&& st->codecpar->extradata_size > 0) {
+			subs_add_font(p->subs, name->value, st->codecpar->extradata,
+				(size_t)st->codecpar->extradata_size);
+		}
+	}
+}
+
+// subtitles track i on (-1: off). refresh: what's read already read again
+// (a stream's subtitles come as the file's read)
+static void subtitles_on(struct player *p, int i, bool refresh) {
+	pthread_mutex_lock(&p->sub_lock);
+	avcodec_free_context(&p->sctx);
+	p->sstream = -1;
+	p->subtitles_on = -1;
+	if (i >= 0 && i < p->nsubtitles && !p->subs && (p->subs = subs_create())) {
+		add_fonts(p);
+	}
+	bool seek = false;
+	if (i >= 0 && i < p->nsubtitles && p->subs) {
+		struct track *t = &p->subtitles[i];
+		if (t->stream >= 0) {
+			AVStream *st = p->fmt->streams[t->stream];
+			AVCodecContext *ctx = decoder_for(st, 0);
+			if (ctx) {
+				bool styled = ctx->codec_id == AV_CODEC_ID_ASS || ctx->codec_id == AV_CODEC_ID_SSA;
+				subs_reset(p->subs, styled ? (const char *)ctx->subtitle_header : NULL, p->width,
+					p->height);
+				p->sctx = ctx;
+				p->sstream = t->stream;
+				p->subtitles_on = i;
+				seek = refresh;
+			}
+		} else if (load_subtitle_file(p, t->file)) {
+			p->subtitles_on = i;
+		}
+	}
+	pthread_mutex_unlock(&p->sub_lock);
+	if (seek) {
+		player_seek(p, player_time(p));
+	}
+}
+
+int player_tracks(struct player *p, enum player_track_kind kind, struct player_track *out,
+		int max) {
+	pthread_mutex_lock(&p->sub_lock);
+	bool audio = kind == PLAYER_AUDIO;
+	int n = audio ? p->naudio : p->nsubtitles, on = audio ? p->audio_on : p->subtitles_on;
+	int i = 0;
+	for (; i < n && i < max; i++) {
+		snprintf(out[i].name, sizeof(out[i].name), "%s",
+			audio ? p->audio[i].name : p->subtitles[i].name);
+		out[i].on = i == on;
+	}
+	pthread_mutex_unlock(&p->sub_lock);
+	return i;
+}
+
+void player_set_track(struct player *p, enum player_track_kind kind, int i) {
+	if (kind == PLAYER_SUBTITLES) {
+		subtitles_on(p, i, true);
+		return;
+	}
+	if (i < 0 || i >= p->naudio || i == p->audio_on || p->astream < 0) {
+		return;
+	}
+	// its decoder made now (a track that can't be decoded isn't taken), the
+	// sound's from a seek to here: the reader and the decoder change over
+	AVCodecContext *ctx = decoder_for(p->fmt->streams[p->audio[i].stream], 1);
+	if (!ctx) {
+		return;
+	}
+	pthread_mutex_lock(&p->lock);
+	avcodec_free_context(&p->actx_next);
+	p->actx_next = ctx;
+	p->astream_next = p->audio[i].stream;
+	pthread_mutex_unlock(&p->lock);
+	pthread_mutex_lock(&p->sub_lock);
+	p->audio_on = i;
+	pthread_mutex_unlock(&p->sub_lock);
+	player_seek(p, player_time(p));
+}
+
+struct subs *player_subs(struct player *p) {
+	pthread_mutex_lock(&p->sub_lock);
+	struct subs *subs = p->subtitles_on >= 0 ? p->subs : NULL;
+	pthread_mutex_unlock(&p->sub_lock);
+	return subs;
+}
+
 struct player *player_open(const char *path, void (*wake_f)(void *data), void *data,
 		char *error, size_t error_size) {
 	struct player *p = calloc(1, sizeof(*p));
@@ -783,7 +1220,8 @@ struct player *player_open(const char *path, void (*wake_f)(void *data), void *d
 	}
 	p->wake = wake_f;
 	p->wake_data = data;
-	p->vstream = p->astream = -1;
+	p->vstream = p->astream = p->sstream = p->astream_next = -1;
+	p->audio_on = p->subtitles_on = -1;
 	p->volume = 1;
 	p->frame_time = 1.0 / 30;
 	queue_init(&p->vq);
@@ -792,6 +1230,7 @@ struct player *player_open(const char *path, void (*wake_f)(void *data), void *d
 	pthread_cond_init(&p->cond, NULL);
 	pthread_mutex_init(&p->ring_lock, NULL);
 	pthread_cond_init(&p->ring_cond, NULL);
+	pthread_mutex_init(&p->sub_lock, NULL);
 	if (avformat_open_input(&p->fmt, path, NULL, NULL) < 0
 			|| avformat_find_stream_info(p->fmt, NULL) < 0) {
 		snprintf(error, error_size, "not something it can play");
@@ -844,6 +1283,23 @@ struct player *player_open(const char *path, void (*wake_f)(void *data), void *d
 		snprintf(error, error_size, "no picture or sound in it it can play");
 		player_close(p);
 		return NULL;
+	}
+	find_tracks(p, path);
+	// subtitles on from the start: a file put beside it, else what the file
+	// says has to be (forced: what's said in another language)
+	int first = -1;
+	for (int i = 0; p->vstream >= 0 && !p->cover && i < p->nsubtitles; i++) {
+		struct track *t = &p->subtitles[i];
+		if (t->stream < 0 || (first < 0
+				&& p->fmt->streams[t->stream]->disposition & AV_DISPOSITION_FORCED)) {
+			first = i;
+			if (t->stream < 0) {
+				break;
+			}
+		}
+	}
+	if (first >= 0) {
+		subtitles_on(p, first, false);
 	}
 	return p;
 }
@@ -900,6 +1356,12 @@ void player_close(struct player *p) {
 	avcodec_free_context(&p->vctx);
 	gpu_destroy(p->gpu); // after the decoder: its frames were the gpu's
 	avcodec_free_context(&p->actx);
+	avcodec_free_context(&p->actx_next);
+	avcodec_free_context(&p->sctx);
+	subs_destroy(p->subs);
+	for (int i = 0; i < p->nsubtitles; i++) {
+		free(p->subtitles[i].file);
+	}
 	avformat_close_input(&p->fmt);
 	queue_finish(&p->vq);
 	queue_finish(&p->aq);
@@ -909,6 +1371,7 @@ void player_close(struct player *p) {
 	pthread_cond_destroy(&p->cond);
 	pthread_mutex_destroy(&p->ring_lock);
 	pthread_cond_destroy(&p->ring_cond);
+	pthread_mutex_destroy(&p->sub_lock);
 	free(p);
 }
 
@@ -929,6 +1392,10 @@ double player_duration(const struct player *p) {
 
 bool player_has_video(const struct player *p) {
 	return p->vstream >= 0;
+}
+
+bool player_has_cover(const struct player *p) {
+	return p->cover;
 }
 
 bool player_has_audio(const struct player *p) {
