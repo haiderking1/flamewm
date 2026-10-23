@@ -63,6 +63,7 @@ struct fui {
 	struct wl_compositor *compositor;
 	struct wl_subcompositor *subcompositor;
 	struct wp_content_type_manager_v1 *content_type;
+	struct zwp_linux_dmabuf_v1 *dmabuf; // gpu pictures (a video decoded there)
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
