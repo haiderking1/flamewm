@@ -191,6 +191,31 @@ static void switches_mark(struct fui *ui, double cx, double cy, uint32_t color) 
 	}
 }
 
+// how wide the time is at most today, whatever minute it is: its digits
+// as the widest digit (they're not all as wide as each other)
+static double clock_room(struct fui *ui, const char *when) {
+	static char widest;
+	if (!widest) {
+		double most = 0;
+		for (char d = '0'; d <= '9'; d++) {
+			double tw = fui_text_width(ui, (char[]){d, '\0'}, F_BAR);
+			if (tw > most) {
+				most = tw;
+				widest = d;
+			}
+		}
+	}
+	char text[64];
+	snprintf(text, sizeof(text), "%s", when);
+	char *colon = strrchr(text, ':');
+	for (char *c = colon ? colon - 2 : text; c && *c && colon; c++) {
+		if (*c >= '0' && *c <= '9') {
+			*c = widest;
+		}
+	}
+	return fui_text_width(ui, text, F_BAR);
+}
+
 static void clock_tick(struct fui *ui, void *data) {
 	fui_redraw(ui);
 }
@@ -279,6 +304,9 @@ static void frame(struct fui *ui, void *data) {
 	strftime(when, sizeof(when), "%a %-d %b  %H:%M", &tm);
 	double tw = fui_text_width(ui, when, F_BAR), tx = w - 18 - tw;
 	bool over_clock = fui_hover(ui, tx - 8, cy - 12, tw + 16, 24);
+	// the button keeps its place as the minutes go: left of the widest
+	// the time is today, not of what it says now
+	double room = clock_room(ui, when);
 	double clock_lit = fui_ease(ui, fui_id("clock", 0),
 		over_clock || app->open == OPEN_LIST ? 1 : 0, 20);
 	if (clock_lit > 0.01) {
@@ -286,7 +314,7 @@ static void frame(struct fui *ui, void *data) {
 			0xffffff00 | (uint32_t)(0x33 * clock_lit));
 	}
 	shadowed_text(ui, w - 18, cy - 8, when, F_BAR, TEXT, FUI_RIGHT, 0);
-	double pw = 38, ph = 24, px = tx - 14 - pw;
+	double pw = 38, ph = 24, px = w - 18 - room - 14 - pw;
 	bool over = fui_hover(ui, px, cy - ph / 2, pw, ph);
 	double lit = fui_ease(ui, fui_id("control", 0),
 		over || app->open == OPEN_CONTROL ? 1 : 0, 20);
