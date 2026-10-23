@@ -10,6 +10,7 @@ FILES    := $(BUILD)/flamefiles
 PLAY     := $(BUILD)/flameplay
 BAR      := $(BUILD)/flamebar
 SEARCH   := $(BUILD)/flamesearch
+LOCK     := $(BUILD)/flamelock
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -51,7 +52,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH)
+all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -151,6 +152,12 @@ $(SEARCH): $(SEARCH_SRCS) $(SEARCH_HDRS) $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(SEARCH_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs gio-unix-2.0)
+
+LOCK_SRCS := tools/flamelock/main.c tools/flamelock/auth.c
+LOCK_HDRS := tools/flamelock/auth.h
+$(LOCK): $(LOCK_SRCS) $(LOCK_HDRS) $(FLAMEUI_DEPS)
+	@mkdir -p $(dir $@)
+	$(UI_CC) -o $@ $(LOCK_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) -lpam
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c
@@ -377,7 +384,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH)
+		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -410,6 +417,8 @@ install: release
 	install -Dm755 build-release/flameplay $(DESTDIR)$(PREFIX)/bin/flameplay
 	install -Dm755 build-release/flamebar $(DESTDIR)$(PREFIX)/bin/flamebar
 	install -Dm755 build-release/flamesearch $(DESTDIR)$(PREFIX)/bin/flamesearch
+	install -Dm755 build-release/flamelock $(DESTDIR)$(PREFIX)/bin/flamelock
+	install -Dm644 data/flamelock.pam $(DESTDIR)/etc/pam.d/flamelock
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop

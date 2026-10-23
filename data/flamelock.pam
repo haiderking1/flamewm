@@ -1,0 +1,3 @@
+#%PAM-1.0
+# flamelock: what checks a password at a console checks it on the lock
+auth include login

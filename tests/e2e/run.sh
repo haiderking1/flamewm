@@ -1077,6 +1077,35 @@ sleep 0.4
 center back" \
 	"before the window" "locked red" "finished" "unlocked the window" "locked" "key 30" "key 48" \
 	"unlocked" "crashed black" "still 1" "back the window"
+case_run "flamelock: super+l locks with the time over the background, killed it stays locked" "
+# the time's white at the top middle: how much of it there is
+clock() { grim -t ppm c.ppm; python3 -I -c \"
+d = open('c.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+top = int(h * 0.09)
+n = sum(1 for y in range(top, top + 140, 2) for x in range(w // 2 - 160, w // 2 + 160, 2) if px[(y * w + x) * 3] > 200)
+c = px[(h // 2 * w + w // 2) * 3:][:3]
+print('\$1', 'clock' if n > 300 else 'no clock', 'black' if tuple(c) == (0, 0, 0) else '')
+\"; }
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
+windows() { $CTL state | python3 -I -c \"import json, sys; print('\$1', sum(w['windows'] for w in json.load(sys.stdin)['workspaces']))\"; }
+$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+sleep 1.5
+clock before
+$CTL key Super_L press > /dev/null; key l; $CTL key Super_L release > /dev/null
+sleep 1.5
+clock locked
+$CTL key Super_L press > /dev/null; key e; $CTL key Super_L release > /dev/null
+sleep 1
+windows still
+for p in \$(pgrep -x flamelock); do grep -qzx \"WAYLAND_DISPLAY=\$WAYLAND_DISPLAY\" /proc/\$p/environ && kill -9 \$p; done
+sleep 0.5
+clock killed
+$BIN/wllock unlock 200 > /dev/null
+sleep 0.4
+clock back" \
+	"before no clock" "locked clock" "still 1" "killed no clock black" "back no clock"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
