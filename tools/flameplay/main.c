@@ -782,7 +782,7 @@ static void frame(struct fui *ui, void *data) {
 		// the glass fades with what's on it, all of it at once: no frosted
 		// patch left a moment, no pop
 		struct fui_pane pane = {(int)bx, (int)by, (int)bw, (int)bh, 18, 26, 0x1a1a20a0, 1.6,
-			0.45, 0};
+			0.45, 0, 0};
 		fui_set_glass(ui, &pane, 1);
 		fui_set_glass_opacity(ui, shown);
 		cairo_push_group(cr);

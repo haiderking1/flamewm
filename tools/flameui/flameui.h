@@ -16,12 +16,14 @@
 struct fui;
 
 // a pane of glass behind the window, window coords, see flame-eyecandy-v1.
-// tint 0xRRGGBBAA, straight alpha
+// tint 0xRRGGBBAA, straight alpha. fade: how far it's faded out on its own
+// with what's over it, 0 (as made) for not at all, 1 for gone
 struct fui_pane {
 	int x, y, width, height;
 	double radius, blur;
 	uint32_t tint;
 	double saturation, edge, refraction;
+	double fade;
 };
 
 // a panel rather than a window (layer-shell): against a screen's edges,
@@ -98,7 +100,8 @@ void fui_destroy(struct fui *ui);
 // just draws over nothing, see fui_has_glass
 void fui_set_glass(struct fui *ui, const struct fui_pane *panes, int len);
 // all the glass faded together, blur and all: 1 for all of it (the start).
-// glass that comes and goes with what's over it fades with it, no pop
+// glass that comes and goes with what's over it fades with it, no pop (a
+// pane on its own: its fade)
 void fui_set_glass_opacity(struct fui *ui, double opacity);
 bool fui_has_glass(const struct fui *ui);
 
