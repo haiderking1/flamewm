@@ -96,10 +96,12 @@ UI_CC = $(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(
 	$(LDFLAGS)
 UI_LIBS = $(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
 
-SETTINGS_SRCS := tools/flamesettings/main.c tools/flamesettings/json.c \
-	tools/flamesettings/browser.c
-$(SETTINGS): $(SETTINGS_SRCS) tools/flamesettings/json.h tools/flamesettings/browser.h \
-		$(FLAMEUI_DEPS)
+# flame's ipc for its apps: the socket, the json it answers in
+IPC_SRCS := tools/flameipc/ipc.c tools/flameipc/json.c
+IPC_DEPS := $(IPC_SRCS) tools/flameipc/ipc.h tools/flameipc/json.h
+
+SETTINGS_SRCS := tools/flamesettings/main.c tools/flamesettings/browser.c $(IPC_SRCS)
+$(SETTINGS): $(SETTINGS_SRCS) $(IPC_DEPS) tools/flamesettings/browser.h $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(SETTINGS_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
 
