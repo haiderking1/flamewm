@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "content-type-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "flame-eyecandy-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
@@ -98,6 +99,11 @@ static struct fui_buffer *buffer_get(struct fui *ui) {
 // ---- drawing a frame ----
 
 static void glass_send(struct fui *ui) {
+	// the glass faded (flame-eyecandy 2): a fade's every step
+	if (ui->glass && ui->eyecandy_version >= 2 && ui->glass_opacity != ui->glass_opacity_sent) {
+		flame_glass_v1_set_opacity(ui->glass, wl_fixed_from_double(ui->glass_opacity));
+		ui->glass_opacity_sent = ui->glass_opacity;
+	}
 	if (!ui->glass || !ui->panes_dirty) {
 		return;
 	}
@@ -144,15 +150,22 @@ static void draw(struct fui *ui) {
 	} else {
 		wl_surface_set_buffer_scale(ui->surface, (int32_t)(ui->scale120 / 120));
 	}
+	// the window is this, whatever its subsurfaces (a video layer still the
+	// size it was) stick out to
+	xdg_surface_set_window_geometry(ui->xdg_surface, 0, 0, ui->width, ui->height);
 	wl_surface_attach(ui->surface, b->buffer, 0, 0);
 	wl_surface_damage_buffer(ui->surface, 0, 0, b->width, b->height);
 	ui->frame_callback = wl_surface_frame(ui->surface);
 	wl_callback_add_listener(ui->frame_callback, &frame_listener, ui);
 	wl_surface_commit(ui->surface);
 	b->busy = true;
-	if (ui->cursor_device && ui->pointer_in && ui->cursor_shape != ui->cursor_shown) {
-		wp_cursor_shape_device_v1_set_shape(ui->cursor_device, ui->pointer_serial,
-			(uint32_t)ui->cursor_shape);
+	if (ui->pointer && ui->pointer_in && ui->cursor_shape != ui->cursor_shown) {
+		if (ui->cursor_shape == FUI_CURSOR_HIDDEN) {
+			wl_pointer_set_cursor(ui->pointer, ui->pointer_serial, NULL, 0, 0);
+		} else if (ui->cursor_device) {
+			wp_cursor_shape_device_v1_set_shape(ui->cursor_device, ui->pointer_serial,
+				(uint32_t)ui->cursor_shape);
+		}
 		ui->cursor_shown = ui->cursor_shape;
 	}
 	// still moving: the next frame's wanted too
@@ -221,6 +234,15 @@ static const struct xdg_surface_listener xdg_surface_listener = {xdg_surface_con
 static void toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width,
 		int32_t height, struct wl_array *states) {
 	struct fui *ui = data;
+	bool fullscreen = false;
+	uint32_t *state;
+	wl_array_for_each(state, states) {
+		fullscreen |= *state == XDG_TOPLEVEL_STATE_FULLSCREEN;
+	}
+	if (fullscreen != ui->fullscreen) {
+		ui->fullscreen = fullscreen;
+		fui_redraw(ui);
+	}
 	// 0: flame leaves it to us. a fixed window keeps its size
 	if (!ui->config.min_width || width <= 0 || height <= 0) {
 		return;
@@ -507,11 +529,18 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wp_cursor_shape_manager_v1_interface.name)) {
 		ui->cursor_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (!strcmp(interface, wp_content_type_manager_v1_interface.name)) {
+		ui->content_type = wl_registry_bind(registry, name, &wp_content_type_manager_v1_interface,
+			1);
+	} else if (!strcmp(interface, wl_subcompositor_interface.name)) {
+		ui->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
 	} else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
 		ui->data_manager = wl_registry_bind(registry, name, &wl_data_device_manager_interface,
 			version < 3 ? version : 3);
 	} else if (!strcmp(interface, flame_eyecandy_manager_v1_interface.name)) {
-		ui->eyecandy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface, 1);
+		ui->eyecandy_version = version < 2 ? version : 2;
+		ui->eyecandy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface,
+			ui->eyecandy_version);
 	}
 }
 
@@ -534,6 +563,7 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
 	ui->repeat_rate = 25;
 	ui->repeat_delay = 600;
+	ui->glass_opacity = ui->glass_opacity_sent = 1;
 	// other threads wake it down this
 	ui->wake[0] = ui->wake[1] = -1;
 	for (int i = 0; i < FUI_WATCHES; i++) {
@@ -751,6 +781,22 @@ unsigned fui_mods(const struct fui *ui) {
 		}
 	}
 	return mods;
+}
+
+void fui_set_glass_opacity(struct fui *ui, double opacity) {
+	ui->glass_opacity = opacity < 0 ? 0 : opacity > 1 ? 1 : opacity;
+}
+
+void fui_set_fullscreen(struct fui *ui, bool fullscreen) {
+	if (fullscreen) {
+		xdg_toplevel_set_fullscreen(ui->toplevel, NULL);
+	} else {
+		xdg_toplevel_unset_fullscreen(ui->toplevel);
+	}
+}
+
+bool fui_fullscreen(const struct fui *ui) {
+	return ui->fullscreen;
 }
 
 void fui_wake(struct fui *ui) {

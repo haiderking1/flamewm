@@ -7,6 +7,7 @@ TARGET  := $(BUILD)/flamewm
 CTL     := $(BUILD)/flamectl
 SETTINGS := $(BUILD)/flamesettings
 FILES    := $(BUILD)/flamefiles
+PLAY     := $(BUILD)/flameplay
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -48,7 +49,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL) $(SETTINGS) $(FILES)
+all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -64,6 +65,7 @@ UI_PROTOCOLS := $(WL_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
 	$(WL_PROTOCOLS)/staging/fractional-scale/fractional-scale-v1.xml \
 	$(WL_PROTOCOLS)/stable/viewporter/viewporter.xml \
 	$(WL_PROTOCOLS)/staging/cursor-shape/cursor-shape-v1.xml \
+	$(WL_PROTOCOLS)/staging/content-type/content-type-v1.xml \
 	$(WL_PROTOCOLS)/stable/tablet/tablet-v2.xml \
 	protocols/flame-eyecandy-v1.xml
 UI_PROTO_NAMES := $(basename $(notdir $(UI_PROTOCOLS)))
@@ -85,7 +87,7 @@ $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 
 # flame's own apps: flameui, the pictures it reads, its protocols
 FLAMEUI_SRCS := tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c \
-	tools/flameui/video.c tools/flameui/thumbcache.c tools/flameui/data.c src/image/image.c
+	tools/flameui/video.c tools/flameui/thumbcache.c tools/flameui/data.c tools/flameui/layer.c src/image/image.c
 FLAMEUI_DEPS := $(FLAMEUI_SRCS) tools/flameui/flameui.h tools/flameui/internal.h \
 	src/image/image.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
 UI_CC = $(CC) -std=c17 $(OPT) $(WARN) -D_DEFAULT_SOURCE -I$(CLIENT_GEN) -Isrc $(SAN) $(CFLAGS) \
@@ -105,6 +107,12 @@ $(FILES): $(FILES_SRCS) tools/flamefiles/folder.h tools/flamefiles/ops.h \
 		tools/flamefiles/icons.h $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(FILES_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
+
+PLAY_SRCS := tools/flameplay/main.c tools/flameplay/player.c
+$(PLAY): $(PLAY_SRCS) tools/flameplay/player.h $(FLAMEUI_DEPS)
+	@mkdir -p $(dir $@)
+	$(UI_CC) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
+		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3)
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c
@@ -323,7 +331,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES)
+		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES) $(PLAY)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -353,9 +361,11 @@ install: release
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
 	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
 	install -Dm755 build-release/flamefiles $(DESTDIR)$(PREFIX)/bin/flamefiles
+	install -Dm755 build-release/flameplay $(DESTDIR)$(PREFIX)/bin/flameplay
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop
+	install -Dm644 data/flameplay.desktop $(DESTDIR)$(PREFIX)/share/applications/flameplay.desktop
 	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
 	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
 

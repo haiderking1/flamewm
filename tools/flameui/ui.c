@@ -246,6 +246,10 @@ void fui_cursor_pointer(struct fui *ui) {
 	ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER;
 }
 
+void fui_cursor_hide(struct fui *ui) {
+	ui->cursor_shape = FUI_CURSOR_HIDDEN;
+}
+
 // ---- drawing ----
 
 void fui_color(struct fui *ui, uint32_t rgba) {

@@ -48,6 +48,9 @@ void fui_destroy(struct fui *ui);
 // the glass, replaced whole. without flame (no flame-eyecandy) the window
 // just draws over nothing, see fui_has_glass
 void fui_set_glass(struct fui *ui, const struct fui_pane *panes, int len);
+// all the glass faded together, blur and all: 1 for all of it (the start).
+// glass that comes and goes with what's over it fades with it, no pop
+void fui_set_glass_opacity(struct fui *ui, double opacity);
 bool fui_has_glass(const struct fui *ui);
 
 // draw another frame soon (data changed outside input), and a timer: f
@@ -56,6 +59,36 @@ void fui_redraw(struct fui *ui);
 void fui_after(struct fui *ui, int ms, void (*f)(struct fui *ui, void *data), void *data);
 // from any thread: draw another frame soon (work done elsewhere is ready)
 void fui_wake(struct fui *ui);
+
+// fullscreen asked of flame, and whether it is
+void fui_set_fullscreen(struct fui *ui, bool fullscreen);
+bool fui_fullscreen(const struct fui *ui);
+
+// ---- a layer: pictures under the window ----
+
+// a surface of its own under the window's, showing pictures the app hands
+// it (a video's frames): flame scales them on the gpu, they change without
+// the window being drawn again, the window's glass over them frosts them
+struct fui_layer;
+struct fui_picture;
+struct fui_layer *fui_layer_create(struct fui *ui);
+void fui_layer_destroy(struct fui_layer *layer);
+// a picture of the layer's, width x height, XRGB (cairo's RGB24): its
+// pixels anyone's to write, from any thread, while it isn't on screen
+struct fui_picture *fui_picture_create(struct fui_layer *layer, int width, int height);
+void fui_picture_destroy(struct fui_picture *picture);
+void *fui_picture_pixels(struct fui_picture *picture, int *stride);
+bool fui_picture_on_screen(const struct fui_picture *picture);
+// the layer shows picture at x, y, w x h (window coords), scaled. on
+// screen it's flame's till released hears it's done with it
+void fui_layer_show(struct fui_layer *layer, struct fui_picture *picture, double x, double y,
+	double w, double h);
+// the same picture somewhere else (the window was resized)
+void fui_layer_place(struct fui_layer *layer, double x, double y, double w, double h);
+void fui_layer_on_release(struct fui_layer *layer,
+	void (*released)(struct fui_picture *picture, void *data), void *data);
+// f once at the layer's next refresh (its frame callback), on the window's thread
+void fui_layer_frame(struct fui_layer *layer, void (*f)(void *data), void *data);
 
 // ---- inside frame ----
 
@@ -74,6 +107,7 @@ bool fui_hover(struct fui *ui, double x, double y, double w, double h);
 bool fui_clicked(struct fui *ui, double x, double y, double w, double h);
 double fui_scrolled(struct fui *ui); // this frame's wheel, layout units down
 void fui_cursor_pointer(struct fui *ui); // a hand over what's clickable
+void fui_cursor_hide(struct fui *ui); // no cursor over the window this frame (a video playing)
 
 // a press's place in a run of them, quick and on the same spot: 1 a single
 // click, 2 a double click. good in the frame fui_clicked says it's there

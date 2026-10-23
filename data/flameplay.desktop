@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Player
+Comment=flame's video and music player
+Exec=flameplay %f
+Icon=multimedia-video-player
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;audio/mpeg;audio/flac;audio/ogg;audio/opus;audio/x-wav;audio/mp4;

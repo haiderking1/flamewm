@@ -495,6 +495,8 @@ static void open_file(struct app *app, size_t shown_index) {
 		if (pickable(app, f)) {
 			picked(app, path);
 		}
+	} else if (f->kind == KIND_VIDEO || f->kind == KIND_AUDIO) {
+		ops_open_with("flameplay", path); // flame's own player
 	} else {
 		ops_open(path);
 	}

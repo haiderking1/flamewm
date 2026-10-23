@@ -20,8 +20,8 @@ Xwayland needed, Steam and Proton games included.
   want lights up under the mouse, a glass panel on it, click to share.
   an app asking twice (browsers do) doesn't make you pick twice. flame
   draws everything itself, blur and glass included
-- **its own apps**, on its glass: settings (`super+,`) and a file manager,
-  flamefiles (`super+e`)
+- **its own apps**, on its glass: settings (`super+,`), a file manager,
+  flamefiles (`super+e`), and a video and music player, flameplay
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run
