@@ -260,6 +260,8 @@ struct fui_menu_item {
 	const char *label; // NULL: a line between groups
 	const char *shortcut; // shown at the right, NULL for none
 	bool disabled;
+	bool checked; // a tick before it (a menu with any has room for them)
+	bool heading; // a group's name over it, not picked
 };
 void fui_menu_open(struct fui *ui, uint64_t id, double x, double y);
 bool fui_menu_is_open(const struct fui *ui, uint64_t id);
