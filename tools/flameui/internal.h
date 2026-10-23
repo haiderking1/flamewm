@@ -16,7 +16,7 @@
 #define FUI_EASES 512
 #define FUI_CURSOR_HIDDEN -2 // cursor_shape: no cursor at all
 #define FUI_KEYS 32
-#define FUI_TIMERS 16
+#define FUI_TIMERS 32
 #define FUI_FONTS 16
 
 struct fui_ease_slot {

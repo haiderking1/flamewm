@@ -207,11 +207,22 @@ bool fui_has_glass(const struct fui *ui) {
 }
 
 void fui_after(struct fui *ui, int ms, void (*f)(struct fui *ui, void *data), void *data) {
+	double at = fui_now() + ms / 1000.0;
+	// the same one asked for again (a redraw later, every frame): one
+	// timer, the sooner time
+	int free_slot = -1;
 	for (int i = 0; i < FUI_TIMERS; i++) {
-		if (!ui->timers[i].at) {
-			ui->timers[i] = (struct fui_timer){fui_now() + ms / 1000.0, f, data};
+		struct fui_timer *t = &ui->timers[i];
+		if (t->at && t->f == f && t->data == data) {
+			t->at = at < t->at ? at : t->at;
 			return;
 		}
+		free_slot = !t->at && free_slot < 0 ? i : free_slot;
+	}
+	if (free_slot >= 0) {
+		ui->timers[free_slot] = (struct fui_timer){at, f, data};
+	} else {
+		fprintf(stderr, "flameui: more than %d different timers, one dropped\n", FUI_TIMERS);
 	}
 }
 
@@ -633,25 +644,32 @@ void fui_quit(struct fui *ui) {
 	ui->running = false;
 }
 
-// timers and key repeat due now, and when the next one is (ms, -1 for none)
-static int run_due(struct fui *ui) {
+// the timers due run, key repeat too
+static void run_due(struct fui *ui) {
 	double now = fui_now();
-	double next = 0;
 	for (int i = 0; i < FUI_TIMERS; i++) {
 		struct fui_timer *t = &ui->timers[i];
 		if (t->at && t->at <= now) {
 			struct fui_timer fired = *t;
 			t->at = 0;
 			fired.f(ui, fired.data);
-		} else if (t->at && (!next || t->at < next)) {
-			next = t->at;
 		}
 	}
+	if (ui->repeat_code && ui->repeat_rate > 0 && ui->repeat_next <= now) {
+		push_key(ui, &ui->repeat_key);
+		ui->repeat_next = now + 1.0 / ui->repeat_rate;
+	}
+}
+
+// ms till the next timer, -1 for none. after they've run: one a timer set
+// (in a slot already gone past) counts
+static int next_timeout(struct fui *ui) {
+	double next = 0;
+	for (int i = 0; i < FUI_TIMERS; i++) {
+		double at = ui->timers[i].at;
+		next = at && (!next || at < next) ? at : next;
+	}
 	if (ui->repeat_code && ui->repeat_rate > 0) {
-		if (ui->repeat_next <= now) {
-			push_key(ui, &ui->repeat_key);
-			ui->repeat_next = now + 1.0 / ui->repeat_rate;
-		}
 		next = !next || ui->repeat_next < next ? ui->repeat_next : next;
 	}
 	if (!next) {
@@ -668,6 +686,12 @@ int fui_run(struct fui *ui) {
 	};
 	struct pollfd *fd = &fds[0];
 	while (ui->running) {
+		// timers first: what they send goes out with this flush (not when
+		// something else happens to wake us), and they're free to roundtrip
+		run_due(ui);
+		if (!ui->running) {
+			break;
+		}
 		for (int i = 0; i < FUI_WATCHES; i++) {
 			fds[2 + i] = (struct pollfd){.fd = ui->watches[i].fd, .events = POLLIN};
 		}
@@ -678,11 +702,7 @@ int fui_run(struct fui *ui) {
 			wl_display_cancel_read(ui->display);
 			return 1;
 		}
-		int timeout = run_due(ui);
-		if (!ui->running) {
-			wl_display_cancel_read(ui->display);
-			break;
-		}
+		int timeout = next_timeout(ui);
 		// a negative fd (no wake pipe, an unused watch) is skipped
 		if (poll(fds, 2 + FUI_WATCHES, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(ui->display);
