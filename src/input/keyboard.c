@@ -53,6 +53,13 @@ static void handle_key(struct wl_listener *listener, void *data) {
 
 	bool handled = false;
 	struct flame_server *server = keyboard->input->server;
+	// volume, brightness, play: to the bar when it takes them (locked too:
+	// only the key's name goes, nothing typed)
+	if (media_key(&keyboard->input->media, event->keycode + 8,
+			xkb_state_key_get_one_sym(keyboard->wlr->xkb_state, event->keycode + 8),
+			event->state == WL_KEYBOARD_KEY_STATE_PRESSED)) {
+		return;
+	}
 	if (lock_active(&server->lock)) {
 		// locked: the locker has the keys. no binds (one that quits would
 		// unlock it), no X app (it could read the password), a vt switch

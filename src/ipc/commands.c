@@ -224,6 +224,12 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 		return;
 	}
 
+	if (!strcmp(name, "media-keys")) {
+		// the media keys come to this one from now on, as events
+		client->media_keys = true;
+		reply_ok(client);
+		return;
+	}
 	if (!strcmp(name, "subscribe") || !strcmp(name, "state")) {
 		if (word) {
 			reply_error(client, "this command takes no argument");
