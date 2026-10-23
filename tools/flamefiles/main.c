@@ -1533,9 +1533,12 @@ static void icon_view(struct app *app, double top) {
 		}
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, dim ? 0.45 : 1);
-		// what's clickable: the icon and the name, not the space round them
-		bool on = fui_hover(ui, ix - 8, iy - 6, ICON + 16, ICON + 10)
-			|| fui_hover(ui, x + 4, ny - 2, cw - 8, 36);
+		// what's clickable: the icon and the name, not the space round them,
+		// and only what shows (one half under the bar below isn't the bar's
+		// buttons)
+		bool on = (fui_hover(ui, ix - 8, iy - 6, ICON + 16, ICON + 10)
+			|| fui_hover(ui, x + 4, ny - 2, cw - 8, 36))
+			&& fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, VIEW_BOTTOM - VIEW_TOP);
 		if (on && !renaming_this && fui_right_clicked(ui, x, y, cw, h)) {
 			if (!sel) {
 				select_only(app, i);
@@ -1653,8 +1656,10 @@ static void list_view(struct app *app, double top) {
 		}
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, dim ? 0.45 : 1);
-		bool under_header = fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, LIST_HEAD);
-		if (!renaming_this && !under_header && fui_right_clicked(ui, x, y, rw, h)) {
+		// only what shows: not under the header, nor the bar below
+		bool shows = fui_hover(ui, VIEW_X, VIEW_TOP + LIST_HEAD, VIEW_W,
+			VIEW_BOTTOM - VIEW_TOP - LIST_HEAD);
+		if (!renaming_this && shows && fui_right_clicked(ui, x, y, rw, h)) {
 			if (!sel) {
 				select_only(app, i);
 			}
@@ -1662,7 +1667,7 @@ static void list_view(struct app *app, double top) {
 			fui_pointer(ui, &px, &py);
 			fui_menu_open(ui, fui_id("items", 0), px, py);
 		}
-		if (!renaming_this && !under_header && fui_clicked(ui, x, y, rw, h)) {
+		if (!renaming_this && shows && fui_clicked(ui, x, y, rw, h)) {
 			click_item(app, i);
 		}
 	}
