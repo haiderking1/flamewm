@@ -1066,6 +1066,28 @@ echo opened \$([ \$b -gt \$((a + a / 20)) ] && echo brighter)
 echo closed \$([ \$c -lt \$((b - b / 40)) ] && echo darker)" \
 	"under flamefiles True 4 36 1272 680" "open flamefiles True 4 36 1272 680" \
 	"closed flamefiles True 4 36 1272 680" "opened brighter" "closed darker"
+case_run "flamebar: the time opens the calendar (not the notifications), today lit, another month, back to today" "
+click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.7; }
+# today's dot: flame's orange somewhere in the calendar's corner
+lit() { grim -t ppm \$1.ppm; python3 -I -c \"
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+n = sum(1 for y in range(160, 390) for x in range(w - 300, w - 10)
+	if px[(y * w + x) * 3] > 230 and 95 < px[(y * w + x) * 3 + 1] < 150 and px[(y * w + x) * 3 + 2] < 80)
+print('\$1', 'today' if n > 200 else 'none')
+\"; }
+FLAMEBAR_NO_DDC=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+sleep 1.5
+lit before
+click 1220 16
+lit open
+click 1241 129
+lit next
+click 1160 129
+lit back
+click 500 500
+lit closed" "before none" "open today" "next none" "back today" "closed none"
 case_run "flamebar: notifications: a card for each, its action back to the app, clicks beside it go to the windows" "
 win() { $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['x'])\"; }
 # the cards' corner of the screen, how bright: a card there or not

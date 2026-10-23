@@ -5,6 +5,7 @@
 // under its button: the bar's surface grows for it, a click anywhere else
 // closes it
 
+#include <locale.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 #include "../flameipc/json.h"
 #include "../flameui/flameui.h"
 #include "bus.h"
+#include "calendar.h"
 #include "control.h"
 #include "notes.h"
 #include "osd.h"
@@ -37,13 +39,15 @@ struct app {
 	char app_name[128];
 	int workspace;
 	bool used[WORKSPACES + 1];
-	// what's open under the bar: the control center or the notifications
-	enum { OPEN_NONE, OPEN_CONTROL, OPEN_LIST, OPEN_BATTERY } open;
+	// what's open under the bar: the control center, the notifications,
+	// the battery's card or the calendar
+	enum { OPEN_NONE, OPEN_CONTROL, OPEN_LIST, OPEN_BATTERY, OPEN_CALENDAR } open;
 	int popped; // how tall the surface was grown for it (open, or closing), 0: not
 	int grown; // how tall it was grown for cards with nothing open, 0: not
 	struct control control;
 	struct notes notes;
 	struct osd osd; // what a media key just changed
+	struct calendar calendar;
 	struct battery *battery; // a laptop's: none on a desktop, nothing shown
 	double battery_x; // where its icon's middle is
 	int warned; // the lowest it's been warned about, 100 for none
@@ -419,8 +423,9 @@ static void frame(struct fui *ui, void *data) {
 		x += dw + 7;
 	}
 
-	// the right: the time (the notifications open under it), the control
-	// center's button, a moon while it's do not disturb
+	// the right: the time (the calendar opens under it), the control
+	// center's button, the notifications' bell (a moon while it's do not
+	// disturb)
 	time_t now = time(NULL);
 	struct tm tm;
 	localtime_r(&now, &tm);
@@ -431,8 +436,9 @@ static void frame(struct fui *ui, void *data) {
 	// the button keeps its place as the minutes go: left of the widest
 	// the time is today, not of what it says now
 	double room = clock_room(ui, when);
-	// lit when it's pointed at (the bell's lit while the list is open)
-	double clock_lit = fui_ease(ui, fui_id("clock", 0), over_clock ? 1 : 0, 20);
+	// lit when it's pointed at, and while the calendar's open
+	double clock_lit = fui_ease(ui, fui_id("clock", 0),
+		over_clock || app->open == OPEN_CALENDAR ? 1 : 0, 20);
 	if (clock_lit > 0.01) {
 		fui_fill_rounded(ui, tx - 8, cy - 12, tw + 16, 24, 12,
 			0xffffff00 | (uint32_t)(0x33 * clock_lit));
@@ -449,7 +455,7 @@ static void frame(struct fui *ui, void *data) {
 	switches_mark(ui, px + pw / 2, cy, TEXT);
 	// the notifications: a bell (the moon while it's do not disturb), a dot
 	// on it when some came since the list was looked at. a click opens the
-	// list, as the time does
+	// list
 	if (app->open == OPEN_LIST) {
 		notify_seen(app->notes.notify); // there in front of you: seen
 	}
@@ -511,8 +517,13 @@ static void frame(struct fui *ui, void *data) {
 	} else if (has_power && fui_clicked(ui, power_left, cy - 12, power_right - power_left, 24)) {
 		app->open = app->open == OPEN_BATTERY ? OPEN_NONE : OPEN_BATTERY;
 		toggled = true;
-	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)
-			|| fui_clicked(ui, nx, cy - ph / 2, nw, ph)) {
+	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)) {
+		app->open = app->open == OPEN_CALENDAR ? OPEN_NONE : OPEN_CALENDAR;
+		toggled = true;
+		if (app->open == OPEN_CALENDAR) {
+			calendar_open(&app->calendar); // today, whatever was looked at last time
+		}
+	} else if (fui_clicked(ui, nx, cy - ph / 2, nw, ph)) {
 		app->open = app->open == OPEN_LIST ? OPEN_NONE : OPEN_LIST;
 		toggled = true;
 		if (app->open == OPEN_LIST) {
@@ -530,12 +541,14 @@ static void frame(struct fui *ui, void *data) {
 	double control = fui_ease(ui, fui_id("control center", 0), app->open == OPEN_CONTROL, 14);
 	double list = fui_ease(ui, fui_id("notifications", 0), app->open == OPEN_LIST, 14);
 	double card = fui_ease(ui, fui_id("battery card", 0), app->open == OPEN_BATTERY, 14);
+	double calendar = fui_ease(ui, fui_id("calendar", 0), app->open == OPEN_CALENDAR, 14);
 	double card_x = fmax(8, fmin(app->battery_x - POWER_CARD_W / 2.0, w - POWER_CARD_W - 8));
 	double list_h = app->open == OPEN_LIST || list > 0.01
 		? notes_list_height(ui, &app->notes, LIST_MAX) : 0;
-	double needs = fmax(fmax(app->open == OPEN_CONTROL || control > 0.01
+	double needs = fmax(fmax(fmax(app->open == OPEN_CONTROL || control > 0.01
 		? control_height(&app->control) : 0, list_h),
-		app->open == OPEN_BATTERY || card > 0.01 ? POWER_CARD_H : 0);
+		app->open == OPEN_BATTERY || card > 0.01 ? POWER_CARD_H : 0),
+		app->open == OPEN_CALENDAR || calendar > 0.01 ? CALENDAR_H : 0);
 	// as tall as it is now (a list of devices opens in it)
 	int tall = (int)(BAR_H + 6 + needs + 16);
 	if ((app->open || app->popped) && app->popped < tall) {
@@ -550,7 +563,8 @@ static void frame(struct fui *ui, void *data) {
 	// the cards, under whatever opens: they go while it's there
 	struct fui_rect rects[1 + 9] = {{0, 0, w, BAR_H}};
 	int n_rects = 1;
-	bool covered = app->open || control > 0.01 || list > 0.01 || card > 0.01;
+	bool covered = app->open || control > 0.01 || list > 0.01 || card > 0.01
+		|| calendar > 0.01;
 	// what a media key changed over the cards, the cards moved down for it
 	double osd = osd_frame(ui, &app->osd, &app->control, right, top, covered, panes, &n, 16,
 		rects, &n_rects, 10);
@@ -589,12 +603,29 @@ static void frame(struct fui *ui, void *data) {
 			cairo_paint_with_alpha(cr, card);
 		}
 	}
+	if (calendar > 0.01 && fui_height(ui) > BAR_H) {
+		// under the time, faded as one
+		bool fading = calendar < 1;
+		if (fading) {
+			cairo_push_group(cr);
+		}
+		int first = n;
+		calendar_card(ui, &app->calendar, right - CALENDAR_W, top, panes, &n, 16,
+			app->open == OPEN_CALENDAR);
+		fade_panes(panes, first, n, calendar);
+		if (fading) {
+			cairo_pop_group_to_source(cr);
+			cairo_paint_with_alpha(cr, calendar);
+		}
+	}
 	notes_done(&app->notes);
 	if (app->open) {
 		// a click outside it (and not on its button) closes it
 		double ch = app->open == OPEN_CONTROL ? control_height(&app->control) : list_h;
 		bool inside = app->open == OPEN_BATTERY
 			? fui_hover(ui, card_x, top, POWER_CARD_W, POWER_CARD_H)
+			: app->open == OPEN_CALENDAR
+			? fui_hover(ui, right - CALENDAR_W, top, CALENDAR_W, CALENDAR_H)
 			: fui_hover(ui, right - CONTROL_W - 12, top, CONTROL_W + 12, ch);
 		if (outside || (!inside && !toggled && fui_clicked(ui, 0, 0, w, fui_height(ui)))) {
 			app->open = OPEN_NONE;
@@ -602,7 +633,8 @@ static void frame(struct fui *ui, void *data) {
 		}
 	}
 	fui_set_glass(ui, n ? panes : NULL, n);
-	if (!app->open && control <= 0.01 && list <= 0.01 && card <= 0.01 && app->popped) {
+	if (!app->open && control <= 0.01 && list <= 0.01 && card <= 0.01 && calendar <= 0.01
+			&& app->popped) {
 		app->popped = 0;
 		app->control.picking = -1;
 		fui_panel_popup(ui, 0);
@@ -624,6 +656,9 @@ static void frame(struct fui *ui, void *data) {
 
 int main(void) {
 	struct app app = {.fd = -1, .control = {.dragging = -1, .picking = -1}};
+	// dates the way they're written where the user is, weeks starting on
+	// the day they start there
+	setlocale(LC_TIME, "");
 	snprintf(app.app_name, sizeof(app.app_name), "Flame");
 	app.ui = fui_create(&(struct fui_config){
 		.app_id = "flamebar",

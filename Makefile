@@ -136,10 +136,11 @@ BAR_SRCS := tools/flamebar/main.c tools/flamebar/control.c tools/flamebar/look.c
 	tools/flamebar/notify.c tools/flamebar/notes.c tools/flamebar/osd.c \
 	tools/flamebar/backlight.c tools/flamebar/battery.c tools/flamebar/power.c tools/flamebar/bus.c \
 	tools/flamebar/sound.c tools/flamebar/media.c tools/flamebar/network.c \
-	tools/flamebar/bluetooth.c $(IPC_SRCS)
+	tools/flamebar/bluetooth.c tools/flamebar/calendar.c $(IPC_SRCS)
 BAR_HDRS := tools/flamebar/control.h tools/flamebar/look.h tools/flamebar/notify.h \
 	tools/flamebar/notes.h tools/flamebar/osd.h tools/flamebar/backlight.h tools/flamebar/battery.h tools/flamebar/power.h tools/flamebar/bus.h tools/flamebar/sound.h \
-	tools/flamebar/media.h tools/flamebar/network.h tools/flamebar/bluetooth.h
+	tools/flamebar/media.h tools/flamebar/network.h tools/flamebar/bluetooth.h \
+	tools/flamebar/calendar.h
 $(BAR): $(BAR_SRCS) $(BAR_HDRS) $(IPC_DEPS) $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(BAR_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
