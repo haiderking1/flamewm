@@ -33,10 +33,10 @@ Xwayland needed, Steam and Proton games included.
   the password. locked, nothing but it shows or hears a key, and a lock
   that crashes stays locked
 - **its own bar**, flamebar: see through over the wallpaper, the app in
-  front and the workspaces in use, the time, and a control center of glass
-  tiles (sound, what's playing, network, bluetooth, do not disturb).
-  notifications too: cards that slide in under it, the list of them under
-  the time. the media keys (volume, mute, brightness, play) show what they
+  front and the workspaces in use, the time (a click: a calendar), and a
+  control center of glass tiles (sound, what's playing, network,
+  bluetooth, do not disturb). notifications too: cards that slide in
+  under it, the list of them under the bell. the media keys (volume, mute, brightness, play) show what they
   changed on glass for a moment. brightness for a laptop's screen or a
   monitor on a cable (ddc/ci), keys or the control center's slider.
   on a laptop, the battery: how full, how long it lasts, warned when
