@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_compositor.h>
+#include <drm_fourcc.h>
 #include <wlr/util/log.h>
 
 #include "eyecandy/eyecandy.h"
@@ -124,6 +125,27 @@ static bool clip_local(struct wlr_box box, int width, int height, struct wlr_box
 	return true;
 }
 
+// a 1x1 buffer whose pixel has no alpha: a surface that's there and shows
+// nothing (a single-pixel buffer of no colour)
+static bool clear_pixel(struct wlr_surface *surface) {
+	struct wlr_buffer *buffer = surface->buffer ? surface->buffer->source : NULL;
+	if (!buffer || buffer->width != 1 || buffer->height != 1) {
+		return false;
+	}
+	void *data;
+	uint32_t format;
+	size_t stride;
+	if (!wlr_buffer_begin_data_ptr_access(buffer, WLR_BUFFER_DATA_PTR_ACCESS_READ, &data,
+			&format, &stride)) {
+		return false;
+	}
+	// alpha's the last byte of either
+	bool clear = (format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_ABGR8888)
+		&& ((const uint8_t *)data)[3] == 0;
+	wlr_buffer_end_data_ptr_access(buffer);
+	return clear;
+}
+
 static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *data) {
 	struct collect *collect = data;
 	struct wlr_texture *texture = wlr_surface_get_texture(surface);
@@ -200,6 +222,7 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	wlr_surface_get_buffer_source_box(surface, &element->src);
 	element->transform = surface->current.transform;
 	element->buffer = surface->buffer ? &surface->buffer->base : NULL;
+	element->clear = clear_pixel(surface);
 	mark(element, collect);
 }
 
@@ -426,9 +449,9 @@ void elements_occlude(struct flame_element_list *list) {
 			clip.width, clip.height);
 		pixman_region32_subtract(&element->visible, &element->visible, &above);
 
-		if (element->effected) {
+		if (element->effected || element->clear) {
 			// faded or scaled: see through, and its opaque region doesn't fit
-			// the box anymore
+			// the box anymore. clear: nothing there to cover anything
 		} else if (element->type == FLAME_ELEMENT_RECT) {
 			if (element->color[3] >= 1.0f) {
 				pixman_region32_union_rect(&element->opaque, &element->opaque, clip.x,

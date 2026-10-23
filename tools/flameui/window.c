@@ -17,6 +17,7 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "internal.h"
 #include "linux-dmabuf-v1-client-protocol.h"
+#include "single-pixel-buffer-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -138,6 +139,7 @@ static void draw(struct fui *ui) {
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	cairo_scale(cr, ui->scale120 / 120.0, ui->scale120 / 120.0);
+	ui->show_nothing = false;
 	fui_frame_begin(ui, cr);
 	ui->config.frame(ui, ui->config.data);
 	fui_frame_end(ui);
@@ -154,12 +156,20 @@ static void draw(struct fui *ui) {
 	// the window is this, whatever its subsurfaces (a video layer still the
 	// size it was) stick out to
 	xdg_surface_set_window_geometry(ui->xdg_surface, 0, 0, ui->width, ui->height);
-	wl_surface_attach(ui->surface, b->buffer, 0, 0);
-	wl_surface_damage_buffer(ui->surface, 0, 0, b->width, b->height);
+	// nothing drawn: a pixel of no colour the window's size (flame shows
+	// what's under it as it is, a video straight from the gpu), sized by the
+	// viewport (a buffer scale can't make one pixel a window)
+	if (ui->show_nothing && ui->viewport && ui->single_pixel && !ui->nothing) {
+		ui->nothing = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(ui->single_pixel,
+			0, 0, 0, 0);
+	}
+	bool nothing = ui->show_nothing && ui->viewport && ui->nothing;
+	wl_surface_attach(ui->surface, nothing ? ui->nothing : b->buffer, 0, 0);
+	wl_surface_damage_buffer(ui->surface, 0, 0, INT32_MAX, INT32_MAX);
 	ui->frame_callback = wl_surface_frame(ui->surface);
 	wl_callback_add_listener(ui->frame_callback, &frame_listener, ui);
 	wl_surface_commit(ui->surface);
-	b->busy = true;
+	b->busy = !nothing;
 	if (ui->pointer && ui->pointer_in && ui->cursor_shape != ui->cursor_shown) {
 		if (ui->cursor_shape == FUI_CURSOR_HIDDEN) {
 			wl_pointer_set_cursor(ui->pointer, ui->pointer_serial, NULL, 0, 0);
@@ -541,6 +551,9 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wp_cursor_shape_manager_v1_interface.name)) {
 		ui->cursor_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (!strcmp(interface, wp_single_pixel_buffer_manager_v1_interface.name)) {
+		ui->single_pixel = wl_registry_bind(registry, name,
+			&wp_single_pixel_buffer_manager_v1_interface, 1);
 	} else if (!strcmp(interface, zwp_linux_dmabuf_v1_interface.name) && version >= 3) {
 		ui->dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 3);
 	} else if (!strcmp(interface, wp_content_type_manager_v1_interface.name)) {
@@ -820,6 +833,10 @@ void fui_set_fullscreen(struct fui *ui, bool fullscreen) {
 
 bool fui_fullscreen(const struct fui *ui) {
 	return ui->fullscreen;
+}
+
+void fui_nothing(struct fui *ui) {
+	ui->show_nothing = true;
 }
 
 void fui_wake(struct fui *ui) {
