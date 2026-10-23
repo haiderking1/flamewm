@@ -1,5 +1,5 @@
-#ifndef FLAMESETTINGS_JSON_H
-#define FLAMESETTINGS_JSON_H
+#ifndef FLAMEIPC_JSON_H
+#define FLAMEIPC_JSON_H
 
 #include <stdbool.h>
 #include <stddef.h>
