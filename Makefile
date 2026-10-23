@@ -8,6 +8,7 @@ CTL     := $(BUILD)/flamectl
 SETTINGS := $(BUILD)/flamesettings
 FILES    := $(BUILD)/flamefiles
 PLAY     := $(BUILD)/flameplay
+BAR      := $(BUILD)/flamebar
 
 # clang only. := so an env CC can't sneak gcc in, `make CC=clang-21` still works
 CC := clang
@@ -49,7 +50,7 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY)
+all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY) $(BAR)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -126,6 +127,16 @@ $(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h tools/flame
 	@mkdir -p $(dir $@)
 	$(UI_CC) -I$(PLAY_GEN) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3 libass uchardet)
+
+BAR_SRCS := tools/flamebar/main.c tools/flamebar/control.c tools/flamebar/bus.c \
+	tools/flamebar/sound.c tools/flamebar/media.c tools/flamebar/network.c \
+	tools/flamebar/bluetooth.c $(IPC_SRCS)
+BAR_HDRS := tools/flamebar/control.h tools/flamebar/bus.h tools/flamebar/sound.h \
+	tools/flamebar/media.h tools/flamebar/network.h tools/flamebar/bluetooth.h
+$(BAR): $(BAR_SRCS) $(BAR_HDRS) $(IPC_DEPS) $(FLAMEUI_DEPS)
+	@mkdir -p $(dir $@)
+	$(UI_CC) -o $@ $(BAR_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
+		$(shell pkg-config --cflags --libs libpulse libsystemd)
 
 # the ipc client, plain libc
 $(CTL): tools/flamectl/flamectl.c
@@ -344,7 +355,7 @@ $(E2E)/%: tests/e2e/%.c
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
 		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
-		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES) $(PLAY)
+		$(E2E)/portalcast $(E2E)/wlglass $(SETTINGS) $(FILES) $(PLAY) $(BAR)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
 # address + ub sanitizers, own build dir so objects never mix
@@ -375,6 +386,7 @@ install: release
 	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
 	install -Dm755 build-release/flamefiles $(DESTDIR)$(PREFIX)/bin/flamefiles
 	install -Dm755 build-release/flameplay $(DESTDIR)$(PREFIX)/bin/flameplay
+	install -Dm755 build-release/flamebar $(DESTDIR)$(PREFIX)/bin/flamebar
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop

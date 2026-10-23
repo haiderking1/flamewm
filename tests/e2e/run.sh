@@ -948,6 +948,34 @@ $CTL pointer move 600 300 > /dev/null
 sleep 0.5
 scanout moved" \
 	"bar False" "watching True" "moved False"
+case_run "flamebar: windows start under it, the control center opens over them without moving them, a click outside closes it" "
+win() { $CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('\$1', w['app_id'], w['y'] >= 32, w['x'], w['y'], w['width'], w['height'])\"; }
+# the tiles' corner of the screen, how bright: the control center there or not
+bright() { grim -t ppm \$1.ppm; python3 -I -c \"
+import sys
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+n = sum(px[(y * w + x) * 3] for y in range(200, 260, 2) for x in range(w - 320, w - 20, 2))
+print(n)
+\"; }
+click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.8; }
+env -u DBUS_SESSION_BUS_ADDRESS $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+sleep 1
+$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+sleep 1.5
+win under
+a=\$(bright a)
+click 1134 16
+win open
+b=\$(bright b)
+click 500 500
+win closed
+c=\$(bright c)
+echo opened \$([ \$b -gt \$((a + a / 20)) ] && echo brighter)
+echo closed \$([ \$c -lt \$((b - b / 40)) ] && echo darker)" \
+	"under flamefiles True 4 36 1272 680" "open flamefiles True 4 36 1272 680" \
+	"closed flamefiles True 4 36 1272 680" "opened brighter" "closed darker"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
