@@ -63,7 +63,9 @@ static void handle_map(struct wl_listener *listener, void *data) {
 static void handle_unmap(struct wl_listener *listener, void *data) {
 	struct flame_layer_surface *surface = wl_container_of(listener, surface, unmap);
 	layer_anim_unmapped(surface);
+	surface->unmapping = true;
 	rearrange(surface);
+	surface->unmapping = false;
 	layers_update_focus(surface->layers);
 }
 

@@ -88,9 +88,10 @@ static void arrange_pass(struct flame_layers *layers, struct flame_output *outpu
 		struct flame_layer_surface *surface;
 		wl_list_for_each(surface, &layers->surfaces, link) {
 			struct wlr_layer_surface_v1 *wlr = surface->wlr;
-			// unmapped ones get re-initialized on their next commit
+			// unmapped ones get re-initialized on their next commit (one
+			// unmapping now still says it's initialized, it isn't)
 			if (surface->output != output || surface->layer != order[i]
-					|| !wlr->initialized
+					|| !wlr->initialized || surface->unmapping
 					|| (wlr->current.exclusive_zone > 0) != exclusive) {
 				continue;
 			}
