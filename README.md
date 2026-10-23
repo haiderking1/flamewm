@@ -21,7 +21,8 @@ Xwayland needed, Steam and Proton games included.
   an app asking twice (browsers do) doesn't make you pick twice. flame
   draws everything itself, blur and glass included
 - **its own apps**, on its glass: settings (`super+,`), a file manager,
-  flamefiles (`super+e`), and a video and music player, flameplay
+  flamefiles (`super+e`), and a video and music player, flameplay, that
+  decodes on the gpu (vulkan)
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run

@@ -1,0 +1,25 @@
+#version 450
+// a decoded frame (yuv, sampled through its ycbcr conversion: the frame's
+// own matrix, range and chroma siting) into the rgb image flame shows
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D frame;
+layout(binding = 1, rgba8) uniform writeonly image2D picture;
+
+// the decoder's image is bigger than the picture (its size rounded up to
+// whole blocks): the picture's the part of it at offset, its texels
+// inverse apart in the image's 0..1
+layout(push_constant) uniform Size {
+	vec2 offset;
+	vec2 inverse; // 1 / the decoder's image's size
+} size;
+
+void main() {
+	ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(at, imageSize(picture)))) {
+		return;
+	}
+	vec2 uv = (vec2(at) + 0.5 + size.offset) * size.inverse;
+	imageStore(picture, at, vec4(texture(frame, uv).rgb, 1.0));
+}

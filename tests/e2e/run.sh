@@ -901,7 +901,10 @@ sleep 0.6
 win squeezed" "found False" "opened 900 600 True" "bigger 1060 640 True" "squeezed 780 480 True"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
-case_run "flameplay: a video floats at its size, pauses, seeks to the exact frame, goes fullscreen and back; a song shows its cover" "
+# decoded on the gpu where it can be (vulkan), and on the cpu
+for hwdec in "" no; do
+case_run "flameplay${hwdec:+ (hwdec=$hwdec)}: a video floats at its size, pauses, seeks to the exact frame, goes fullscreen and back; a song shows its cover" "
+export FLAMEPLAY_HWDEC=$hwdec
 ffmpeg -v error -f lavfi -i 'color=c=red:size=640x360:rate=30:duration=5[r];color=c=blue:size=640x360:rate=30:duration=5[b];[r][b]concat=n=2:v=1' -c:v libx264 -pix_fmt yuv420p redblue.mp4
 ffmpeg -v error -f lavfi -i color=c=green:size=300x300 -frames:v 1 cover.png
 ffmpeg -v error -f lavfi -i sine=duration=3 -i cover.png -map 0:a -map 1:v -c:a libmp3lame -c:v png -disposition:v attached_pic song.mp3
@@ -926,6 +929,7 @@ sleep 2
 grim -t ppm c.ppm; $CENTER c.ppm song" \
 	"opened flameplay True 640 360 False" "start red" "seeked blue" "full flameplay True 1280 720 True" \
 	"back flameplay True 640 360 False" "quit 0" "song green"
+done
 CASE_ENV=
 case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
 $CTL set border_width 5 > /dev/null
