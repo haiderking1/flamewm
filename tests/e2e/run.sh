@@ -513,6 +513,15 @@ sleep 2
 key b; sleep 0.3; key Return; sleep 0.5; key Return
 wait" "SaveFile 0 /box/new.txt" "asked first" "SaveFile 0 /box/a.txt" \
 	"SaveFiles 0 /box/x.png /box/y.png"
+case_run "portal: a file half under the dialog's bottom bar doesn't take a click on cancel" "
+mkdir box; for i in \$(seq -w 1 20); do echo \$i > box/v\$i.mp4; done
+$ASK SaveFile /r/1 'Save a video' current_folder=\$PWD/box current_name=x.mp4 &
+sleep 2
+$CTL pointer move 952 612 > /dev/null; sleep 0.2
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 1
+if jobs | grep -q Running; then $CTL close > /dev/null; else echo cancelled by the click; fi
+wait" "cancelled by the click" "SaveFile 1 "
 case_run "portal: \"show in folder\" (org.freedesktop.FileManager1) is flamefiles at it" "
 mkdir box; echo a > box/a.txt
 busctl --user status org.freedesktop.FileManager1 | grep -o '^Comm=flamewm'
