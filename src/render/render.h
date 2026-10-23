@@ -52,6 +52,8 @@ struct flame_render {
 	struct wlr_linux_dmabuf_v1 *dmabuf; // NULL without dmabuf support
 	// apps saying a frame may tear (wp_tearing_control_v1)
 	struct wlr_tearing_control_manager_v1 *tearing;
+	// what surfaces say they show (a video): flame treats them by it
+	struct wlr_content_type_manager_v1 *content_type;
 
 	struct flame_scene scene;
 	struct flame_scene_surfaces surfaces;

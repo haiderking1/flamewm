@@ -83,8 +83,8 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 		}
 		only = element;
 	}
-	if (!only || only->effected) {
-		return NULL; // a faded or scaled one needs drawing
+	if (!only || only->effected || only->shape_radius > 0) {
+		return NULL; // a faded, scaled or rounded one needs drawing
 	}
 	// a client surface, or a picture whose owner lets KMS show its buffer (a
 	// fullscreen X game)

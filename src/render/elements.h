@@ -47,6 +47,10 @@ struct flame_element {
 	const void *glass_group;
 
 	struct wlr_surface *surface; // surfaces
+	// the rounded window a surface is part of (layout coords, like box):
+	// outside it nothing of it shows. a radius of 0 for none
+	struct wlr_box shape;
+	float shape_radius;
 	struct wlr_texture *texture;
 	struct wlr_fbox src;
 	enum wl_output_transform transform;

@@ -45,11 +45,34 @@ static const char vertex_src[] =
 	"uniform mat3 tex_proj;\n"
 	"attribute vec2 pos;\n"
 	"varying vec2 v_texcoord;\n"
+	"varying vec2 v_pos;\n" // where in the box, 0..1
 	"void main() {\n"
 	"	vec3 pos3 = vec3(pos, 1.0);\n"
 	"	gl_Position = vec4(pos3 * proj, 1.0);\n"
 	"	v_texcoord = (pos3 * tex_proj).xy;\n"
+	"	v_pos = pos;\n"
 	"}\n";
+
+// a texture cut to the rounded window it's part of: how much of the pixel
+// is inside, by the rounded box's distance field (smooth edged). dst: the
+// box drawn into, shape: the window's, buffer pixels. a radius of 0 for
+// all of it
+#define SHAPE \
+	"varying vec2 v_pos;\n" \
+	"uniform vec4 dst;\n" \
+	"uniform vec4 shape;\n" \
+	"uniform float shape_radius;\n" \
+	"float inside() {\n" \
+	"	if (shape_radius <= 0.0) {\n" \
+	"		return 1.0;\n" \
+	"	}\n" \
+	"	vec2 p = dst.xy + v_pos * dst.zw;\n" \
+	"	vec2 half_size = shape.zw * 0.5;\n" \
+	"	float r = min(shape_radius, min(half_size.x, half_size.y));\n" \
+	"	vec2 q = abs(p - shape.xy - half_size) - half_size + r;\n" \
+	"	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;\n" \
+	"	return clamp(0.5 - d, 0.0, 1.0);\n" \
+	"}\n"
 
 #define PRECISION \
 	"#ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
@@ -67,30 +90,33 @@ static const char quad_src[] =
 
 static const char tex_rgba_src[] =
 	PRECISION
+	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha;\n"
+	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha * inside();\n"
 	"}\n";
 
 static const char tex_rgbx_src[] =
 	PRECISION
+	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha;\n"
+	"	gl_FragColor = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha * inside();\n"
 	"}\n";
 
 static const char tex_ext_src[] =
 	"#extension GL_OES_EGL_image_external : require\n"
 	PRECISION
+	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform samplerExternalOES tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha;\n"
+	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha * inside();\n"
 	"}\n";
 
 // dual kawase: each level down is half the size, five taps; back up, eight.
@@ -246,6 +272,9 @@ static bool link_program(struct gl_program *program, const char *fragment_src) {
 	program->tex_proj = fglGetUniformLocation(id, "tex_proj");
 	program->tex = fglGetUniformLocation(id, "tex");
 	program->alpha = fglGetUniformLocation(id, "alpha");
+	program->dst = fglGetUniformLocation(id, "dst");
+	program->shape = fglGetUniformLocation(id, "shape");
+	program->shape_radius = fglGetUniformLocation(id, "shape_radius");
 	program->color = fglGetUniformLocation(id, "color");
 	program->pos = fglGetAttribLocation(id, "pos");
 	program->texel = fglGetUniformLocation(id, "texel");

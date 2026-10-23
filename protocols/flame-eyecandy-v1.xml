@@ -29,7 +29,7 @@
     flame draws them, with whatever is behind the surface right then.
   </description>
 
-  <interface name="flame_eyecandy_manager_v1" version="1">
+  <interface name="flame_eyecandy_manager_v1" version="2">
     <description summary="effects for surfaces">
       Gets effect objects for surfaces.
     </description>
@@ -55,7 +55,7 @@
     </request>
   </interface>
 
-  <interface name="flame_glass_v1" version="1">
+  <interface name="flame_glass_v1" version="2">
     <description summary="panes of glass behind a surface">
       Rounded panes of glass behind the surface's content: what's behind the
       surface is blurred, its colors pushed, tinted, bent at the pane's edge
@@ -114,6 +114,17 @@
       <arg name="saturation" type="fixed"/>
       <arg name="edge" type="fixed"/>
       <arg name="refraction" type="fixed"/>
+    </request>
+
+    <request name="set_opacity" since="2">
+      <description summary="how much of the glass shows">
+        All of the surface's panes faded together, blur, tint and rim
+        alike: 1 (the start) for all of them, 0 for none. For glass that
+        comes and goes with what's drawn over it.
+
+        Double buffered like the panes, made current by wl_surface.commit.
+      </description>
+      <arg name="opacity" type="fixed"/>
     </request>
   </interface>
 </protocol>

@@ -508,6 +508,11 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 	uint64_t wait_point = sync ? sync->acquire_point : element->wait_point;
 	enum wl_output_transform transform = wlr_output_transform_compose(
 		wlr_output_transform_invert(element->transform), target->transform);
+	// a rounded window's surface: cut to its corners
+	struct wlr_box shape = element->shape;
+	if (element->shape_radius > 0) {
+		target_box_to_buffer(target, &shape);
+	}
 	pass_texture(pass, &(struct gl_texture_options){
 		.texture = element->texture,
 		.src = element->src,
@@ -518,6 +523,8 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 		.blend = blend,
 		.wait_timeline = wait_timeline,
 		.wait_point = wait_point,
+		.shape = shape,
+		.shape_radius = element->shape_radius * target->scale,
 	});
 	if (client) {
 		sampled(frame, element->surface);
