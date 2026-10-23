@@ -767,7 +767,7 @@ for i in $(seq 1 40); do
 done
 sleep 30
 EOF
-case_run "glass for apps: flame-eyecandy and ext-background-effect blur what's behind a see-through window" "
+case_run "glass for apps: flame-eyecandy and ext-background-effect blur what's behind a see-through window, a pane faded on its own doesn't" "
 foot sh stripes.sh > /dev/null 2>&1 &
 sleep 1.2
 $BIN/wlglass candy 3 &
@@ -777,8 +777,14 @@ sleep 2.2
 $BIN/wlglass blur 3 &
 sleep 1.2
 grim -t ppm blur.ppm
+sleep 2.2
+$BIN/wlglass faded 3 &
+sleep 1.2
+grim -t ppm faded.ppm
 $ROUGH candy.ppm candy
-$ROUGH blur.ppm blur" "glass up" "candy smooth over sharp" "blur smooth over sharp"
+$ROUGH blur.ppm blur
+$ROUGH faded.ppm faded" "glass up" "candy smooth over sharp" "blur smooth over sharp" \
+	"faded sharp over sharp"
 # the color in the middle of a ppm screenshot, by name
 CENTER="python3 -I -c \"
 import sys
