@@ -59,6 +59,17 @@ struct fui_config {
 void fui_panel_popup(struct fui *ui, int height);
 // a click outside the popup came since the last frame (once)
 bool fui_panel_outside(struct fui *ui);
+// a panel height tall for now, under the windows' popups as before (cards
+// under a bar), 0: back to its own size
+void fui_panel_resize(struct fui *ui, int height);
+
+struct fui_rect {
+	double x, y, width, height;
+};
+// where clicks land on the window, this frame on: len rects, the rest of
+// it lets them through to what's under it (a panel grown taller than what
+// it shows). NULL: all of it, as a window starts
+void fui_set_input(struct fui *ui, const struct fui_rect *rects, int len);
 
 // NULL without a wayland display. runs till the window's closed or fui_quit
 struct fui *fui_create(const struct fui_config *config);
@@ -133,6 +144,16 @@ double fui_ease(struct fui *ui, uint64_t id, double target, double speed);
 // animation's at in its time, for one the app shapes itself (parts of it
 // starting later than others, its own curve). the first call jumps there
 double fui_ramp(struct fui *ui, uint64_t id, double target, double seconds);
+// from rest to rest, t 0 to 1: quickest a third of the way in, a long soft
+// landing (nothing stops with a bump)
+double fui_soft(double t);
+// a value going to target on fui_soft's curve in seconds, from wherever it
+// was when target changed: things moving to new places (a stack of cards).
+// the first call jumps there
+double fui_glide(struct fui *ui, uint64_t id, double target, double seconds);
+// the same, its first call setting off from from (a card coming in from
+// off the screen) instead of being there
+double fui_glide_from(struct fui *ui, uint64_t id, double from, double target, double seconds);
 
 // the pointer: where (window coords), over a box, clicked in it this frame
 bool fui_hover(struct fui *ui, double x, double y, double w, double h);
@@ -195,6 +216,9 @@ double fui_text_width(struct fui *ui, const char *text, const char *font);
 // an ellipsis), aligned in it. returns its height
 double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
 	const char *text, const char *font, uint32_t rgba, enum fui_align align);
+// how tall fui_text_box would make it, nothing drawn
+double fui_text_box_height(struct fui *ui, double width, int lines, const char *text,
+	const char *font);
 // text wrapped to width, returns its height
 double fui_paragraph(struct fui *ui, double x, double y, double width, const char *text,
 	const char *font, uint32_t rgba);
@@ -234,6 +258,14 @@ cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int heig
 cairo_surface_t *fui_thumb_fit(struct fui *ui, const char *path, int size, bool *failed);
 // the ones asked for so far and not started aren't wanted (another folder)
 void fui_thumbs_forget(struct fui *ui);
+// an icon by its name in the desktop's icon theme ("firefox",
+// "dialog-information"), or a picture file's path (file:// too), its
+// longest side size pixels: made like a thumbnail, NULL till it's there or
+// when there's none (failed)
+cairo_surface_t *fui_icon(struct fui *ui, const char *name, int size, bool *failed);
+// the icon name an app's .desktop file gives, by its id ("org.gnome.Nautilus"),
+// false without one
+bool fui_app_icon(const char *app_id, char *name, size_t size);
 
 // ---- drag and drop ----
 

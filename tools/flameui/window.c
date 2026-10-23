@@ -174,6 +174,23 @@ static void draw(struct fui *ui) {
 		ui->nothing = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(ui->single_pixel,
 			0, 0, 0, 0);
 	}
+	if (ui->input_dirty) {
+		struct wl_region *region = NULL;
+		if (ui->input_len >= 0) {
+			region = wl_compositor_create_region(ui->compositor);
+			for (int i = 0; i < ui->input_len; i++) {
+				const struct fui_rect *r = &ui->input[i];
+				int x = (int)floor(r->x), y = (int)floor(r->y);
+				wl_region_add(region, x, y, (int)ceil(r->x + r->width) - x,
+					(int)ceil(r->y + r->height) - y);
+			}
+		}
+		wl_surface_set_input_region(ui->surface, region);
+		if (region) {
+			wl_region_destroy(region);
+		}
+		ui->input_dirty = false;
+	}
 	bool nothing = ui->show_nothing && ui->viewport && ui->nothing;
 	wl_surface_attach(ui->surface, nothing ? ui->nothing : b->buffer, 0, 0);
 	wl_surface_damage_buffer(ui->surface, 0, 0, INT32_MAX, INT32_MAX);
@@ -380,6 +397,28 @@ void fui_panel_popup(struct fui *ui, int height) {
 		| FUI_EDGE_LEFT | FUI_EDGE_RIGHT);
 	zwlr_layer_surface_v1_set_exclusive_zone(ui->catcher_layer, -1); // all of the screen
 	wl_surface_commit(ui->catcher);
+}
+
+void fui_panel_resize(struct fui *ui, int height) {
+	if (!ui->layer_surface) {
+		return;
+	}
+	zwlr_layer_surface_v1_set_size(ui->layer_surface, (uint32_t)ui->config.width,
+		(uint32_t)(height > 0 ? height : ui->config.height));
+	wl_surface_commit(ui->surface);
+}
+
+void fui_set_input(struct fui *ui, const struct fui_rect *rects, int len) {
+	len = !rects ? -1 : len > FUI_INPUTS ? FUI_INPUTS : len;
+	if (len == ui->input_len && (len <= 0
+			|| !memcmp(rects, ui->input, sizeof(*rects) * (size_t)len))) {
+		return;
+	}
+	if (len > 0) {
+		memcpy(ui->input, rects, sizeof(*rects) * (size_t)len);
+	}
+	ui->input_len = len;
+	ui->input_dirty = true;
 }
 
 bool fui_panel_outside(struct fui *ui) {
@@ -763,6 +802,7 @@ struct fui *fui_create(const struct fui_config *config) {
 			flame_glass_v1_set_shape(ui->glass, wl_fixed_from_double(config->corner_radius));
 		}
 	}
+	ui->input_len = -1; // all of it takes clicks, as any surface does
 	ui->width = config->width;
 	ui->height = config->height;
 	if (config->panel) {
@@ -901,6 +941,7 @@ int fui_run(struct fui *ui) {
 void fui_destroy(struct fui *ui) {
 	ui->configured = false; // going: what asks for a redraw on the way out draws nothing
 	fui_thumbs_free(ui); // its threads wake the window: gone before it is
+	fui_icons_free(ui);
 	fui_dnd_finish(ui);
 	for (int i = 0; i < 2; i++) {
 		fui_buffer_free(&ui->buffers[i]);

@@ -104,16 +104,28 @@ double fui_time(const struct fui *ui) {
 	return ui->now;
 }
 
-// the slot kept for id, NULL when they're all taken
+// the slot kept for id (not used yet: a new one). they're all taken: the
+// one asked for longest ago, if not in the last second (a hover over a file
+// long gone from a folder, a notification closed): it starts over. NULL when
+// even that one's still in use
 static struct fui_ease_slot *ease_slot(struct fui *ui, uint64_t id) {
 	size_t at = (size_t)(id % FUI_EASES);
+	struct fui_ease_slot *oldest = NULL;
 	for (size_t i = 0; i < FUI_EASES; i++) {
 		struct fui_ease_slot *s = &ui->eases[(at + i) % FUI_EASES];
 		if (!s->used || s->id == id) {
+			s->seen = ui->now;
 			return s;
 		}
+		if (!oldest || s->seen < oldest->seen) {
+			oldest = s;
+		}
 	}
-	return NULL;
+	if (oldest->seen > ui->now - 1) {
+		return NULL;
+	}
+	*oldest = (struct fui_ease_slot){.seen = ui->now};
+	return oldest;
 }
 
 // how far a slot's moved on since the last frame. one that was resting
@@ -134,7 +146,7 @@ double fui_ease(struct fui *ui, uint64_t id, double target, double speed) {
 	}
 	if (!slot->used) {
 		*slot = (struct fui_ease_slot){.id = id, .value = target, .target = target,
-			.used = true};
+			.seen = ui->now, .used = true};
 		return target;
 	}
 	double dt = ease_dt(ui, slot);
@@ -148,6 +160,45 @@ double fui_ease(struct fui *ui, uint64_t id, double target, double speed) {
 	return slot->value;
 }
 
+double fui_soft(double t) {
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	return 1 - (1 - t) * (1 - t) * (1 - t) * (1 + 3 * t);
+}
+
+double fui_glide(struct fui *ui, uint64_t id, double target, double seconds) {
+	return fui_glide_from(ui, id, target, target, seconds);
+}
+
+double fui_glide_from(struct fui *ui, uint64_t id, double from, double target,
+		double seconds) {
+	struct fui_ease_slot *slot = ease_slot(ui, id);
+	if (!slot) {
+		return target;
+	}
+	if (!slot->used) {
+		*slot = (struct fui_ease_slot){.id = id, .value = from, .target = from, .from = from,
+			.t = 1, .seen = ui->now, .used = true};
+		if (from == target) {
+			return target;
+		}
+	}
+	double dt = ease_dt(ui, slot);
+	if (target != slot->target) {
+		// from wherever it is now, the whole way again
+		slot->from = slot->value;
+		slot->target = target;
+		slot->t = 0;
+	}
+	slot->t = fmin(slot->t + dt / seconds, 1);
+	slot->value = slot->from + (target - slot->from) * fui_soft(slot->t);
+	if (slot->t < 1) {
+		ui->moving = true;
+	} else {
+		slot->value = target;
+	}
+	return slot->value;
+}
+
 double fui_ramp(struct fui *ui, uint64_t id, double target, double seconds) {
 	struct fui_ease_slot *slot = ease_slot(ui, id);
 	if (!slot) {
@@ -155,7 +206,7 @@ double fui_ramp(struct fui *ui, uint64_t id, double target, double seconds) {
 	}
 	if (!slot->used) {
 		*slot = (struct fui_ease_slot){.id = id, .value = target, .target = target,
-			.used = true};
+			.seen = ui->now, .used = true};
 		return target;
 	}
 	double step = ease_dt(ui, slot) / seconds;
@@ -363,8 +414,8 @@ double fui_text(struct fui *ui, double x, double y, const char *text, const char
 	return w;
 }
 
-double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
-		const char *text, const char *font_name, uint32_t rgba, enum fui_align align) {
+static PangoLayout *box_layout(struct fui *ui, double width, int lines, const char *text,
+		const char *font_name, enum fui_align align) {
 	PangoLayout *l = layout(ui, text, font_name);
 	pango_layout_set_width(l, (int)(width * PANGO_SCALE));
 	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
@@ -372,6 +423,21 @@ double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
 	pango_layout_set_height(l, -lines);
 	pango_layout_set_alignment(l, align == FUI_CENTER ? PANGO_ALIGN_CENTER
 		: align == FUI_RIGHT ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
+	return l;
+}
+
+double fui_text_box_height(struct fui *ui, double width, int lines, const char *text,
+		const char *font_name) {
+	PangoLayout *l = box_layout(ui, width, lines, text, font_name, FUI_LEFT);
+	int w, h;
+	pango_layout_get_pixel_size(l, &w, &h);
+	g_object_unref(l);
+	return h;
+}
+
+double fui_text_box(struct fui *ui, double x, double y, double width, int lines,
+		const char *text, const char *font_name, uint32_t rgba, enum fui_align align) {
+	PangoLayout *l = box_layout(ui, width, lines, text, font_name, align);
 	int w, h;
 	pango_layout_get_pixel_size(l, &w, &h);
 	fui_color(ui, rgba);

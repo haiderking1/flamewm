@@ -14,6 +14,7 @@
 // for the app and draws the controls
 
 #define FUI_EASES 512
+#define FUI_INPUTS 16
 #define FUI_CURSOR_HIDDEN -2 // cursor_shape: no cursor at all
 #define FUI_KEYS 32
 #define FUI_TIMERS 32
@@ -22,6 +23,8 @@
 struct fui_ease_slot {
 	uint64_t id;
 	double value, target;
+	double from, t; // a glide's: where it set off from, how far along (0 to 1)
+	double seen; // the frame it was last asked for: long ago, its slot's free
 	bool used;
 };
 
@@ -96,6 +99,11 @@ struct fui {
 	struct zwlr_layer_surface_v1 *catcher_layer;
 	struct wp_viewport *catcher_viewport;
 	bool on_catcher, caught;
+	// where clicks land: input_len rects, -1 for all of it. sent with the
+	// frame that changed it
+	struct fui_rect input[FUI_INPUTS];
+	int input_len;
+	bool input_dirty;
 	struct wp_fractional_scale_v1 *fractional;
 	struct wp_viewport *viewport;
 	struct flame_glass_v1 *glass;
@@ -153,6 +161,7 @@ struct fui {
 	struct fui_timer timers[FUI_TIMERS];
 	struct fui_watch watches[FUI_WATCHES];
 	struct fui_thumbs *thumbs; // thumbs.c, NULL till the first's asked for
+	struct fui_icons *icons; // icons.c, NULL till the first's asked for
 
 	// drag and drop (dnd.c): the drag over the window, a drop being read, a
 	// drop read for the app this frame, a drag of ours
@@ -221,6 +230,7 @@ void fui_frame_begin(struct fui *ui, cairo_t *cr);
 void fui_frame_end(struct fui *ui);
 void fui_fonts_free(struct fui *ui);
 void fui_thumbs_free(struct fui *ui);
+void fui_icons_free(struct fui *ui);
 // window.c's shared memory buffers, the drag icon's too
 bool fui_buffer_make(struct fui *ui, struct fui_buffer *b, int width, int height);
 void fui_buffer_free(struct fui_buffer *b);

@@ -2,7 +2,9 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <librsvg/rsvg.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #include "internal.h"
@@ -85,12 +87,57 @@ static bool shrink(struct image *image, int size) {
 	return true;
 }
 
+static bool svg_name(const char *path) {
+	size_t len = strlen(path);
+	return len > 4 && !strcasecmp(path + len - 4, ".svg");
+}
+
+// a drawing (an svg icon) drawn size pixels across at most, in its shape:
+// as sharp as it's shown, never scaled up from something smaller
+static bool svg(const char *path, int size, struct image *image) {
+	RsvgHandle *handle = rsvg_handle_new_from_file(path, NULL);
+	if (!handle) {
+		return false;
+	}
+	double w = 0, h = 0;
+	if (!rsvg_handle_get_intrinsic_size_in_pixels(handle, &w, &h) || w <= 0 || h <= 0) {
+		w = h = size; // only a viewbox: square
+	}
+	double s = fmin(size / w, size / h);
+	*image = (struct image){.width = (int)fmax(round(w * s), 1),
+		.height = (int)fmax(round(h * s), 1)};
+	image->stride = image->width * 4;
+	image->data = calloc((size_t)image->stride * (size_t)image->height, 1);
+	cairo_surface_t *out = image->data ? surface_of(image) : NULL;
+	bool ok = out && !cairo_surface_status(out);
+	if (ok) {
+		cairo_t *cr = cairo_create(out);
+		RsvgRectangle viewport = {0, 0, image->width, image->height};
+		ok = rsvg_handle_render_document(handle, cr, &viewport, NULL);
+		cairo_destroy(cr);
+		cairo_surface_flush(out);
+	}
+	if (out) {
+		cairo_surface_destroy(out);
+	}
+	g_object_unref(handle);
+	if (!ok) {
+		free(image->data);
+		image->data = NULL;
+	}
+	return ok;
+}
+
 // path's picture (a video's frame, a song's cover) at the cache's size for
-// what's wanted: from the cache, else read and put there
+// what's wanted: from the cache, else read and put there. a drawing's drawn
+// at the size wanted every time, it's quick
 static bool source(const char *path, int want, struct image *image) {
 	struct stat st;
 	if (stat(path, &st) < 0 || !S_ISREG(st.st_mode)) {
 		return false;
+	}
+	if (svg_name(path)) {
+		return svg(path, want, image);
 	}
 	int size = fui_cache_size(want);
 	if (fui_cache_read(path, st.st_mtime, size, image)) {
