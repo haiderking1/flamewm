@@ -1066,6 +1066,59 @@ echo opened \$([ \$b -gt \$((a + a / 20)) ] && echo brighter)
 echo closed \$([ \$c -lt \$((b - b / 40)) ] && echo darker)" \
 	"under flamefiles True 4 36 1272 680" "open flamefiles True 4 36 1272 680" \
 	"closed flamefiles True 4 36 1272 680" "opened brighter" "closed darker"
+case_run "flamebar: what's playing: art on the web fetched at full size, a small picture blown up to fill the tile" "
+click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.7; }
+button() { grim -t ppm bar.ppm; python3 -I -c \"
+d = open('bar.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+print(next(x for x in range(w // 2, w) if px[(16 * w + x) * 3] > 200) + 7)
+\"; }
+# the open tile's art: how much of it is colour (the picture), and whether
+# it's red all the way to its corners
+art() { grim -t ppm \$1.ppm; python3 -I -c \"
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+def at(x, y):
+	return px[(y * w + x) * 3:(y * w + x) * 3 + 3]
+n = sum(max(at(x, y)) - min(at(x, y)) > 30 for y in range(60, 220, 2) for x in range(w - 330, w - 30, 2))
+red = all(at(x, y)[0] > 200 and at(x, y)[1] < 60 for x in (w - 320, w - 44) for y in (70, 210))
+print('\$1', 'art' if n > 6000 else 'none', 'filled red' if red else 'not red')
+\"; }
+mkdir art
+ffmpeg -v error -f lavfi -i testsrc2=size=640x640 -frames:v 1 art/big.png
+ffmpeg -v error -f lavfi -i color=c=red:size=150x83 -frames:v 1 art/small.png
+# a bus of the case's own, a web server on a port of its own
+bus=\$(dbus-daemon --session --fork --print-address=1 --print-pid=1 --nopidfile)
+export DBUS_SESSION_BUS_ADDRESS=\$(echo \"\$bus\" | sed -n 1p) XDG_CACHE_HOME=\$PWD/cache
+buspid=\$(echo \"\$bus\" | sed -n 2p)
+python3 -u -m http.server --bind 127.0.0.1 0 --directory art > web.log 2>&1 &
+web=\$!
+sleep 0.8
+port=\$(grep -o 'port [0-9]*' web.log | head -1 | cut -d' ' -f2)
+python3 -I $TESTS/fakeplayer.py Song http://127.0.0.1:\$port/big.png &
+player=\$!
+sleep 0.8
+FLAMEBAR_NO_DDC=1 $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+bar=\$!
+sleep 1.5
+click \$(button) 16
+click \$((\$(button) + 80)) 100
+sleep 1
+art web
+ls cache/flame/art | wc -l | sed 's/^/cached /'
+kill \$player \$bar
+python3 -I $TESTS/fakeplayer.py Clip file://\$PWD/art/small.png &
+player=\$!
+sleep 0.8
+FLAMEBAR_NO_DDC=1 $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+sleep 1.5
+click \$(button) 16
+click \$((\$(button) + 80)) 100
+sleep 1
+art small
+kill \$player \$web \$buspid" "web art not red" "cached 1" "small art filled red"
 case_run "flamebar: the time opens the calendar (not the notifications), today lit, another month, back to today" "
 click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.7; }
 # today's dot: flame's orange somewhere in the calendar's corner

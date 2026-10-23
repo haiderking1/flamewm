@@ -679,7 +679,7 @@ int main(void) {
 	// what the control center shows, each telling the bar when it changes
 	sd_bus *session = bus_open(app.ui, false), *system = bus_open(app.ui, true);
 	app.control.sound = sound_start(woken, &app);
-	app.control.media = media_start(session, changed, &app);
+	app.control.media = media_start(session, changed, woken, &app);
 	app.control.network = network_start(system, changed, &app);
 	app.control.bluetooth = bluetooth_start(system, changed, &app);
 	app.notes.notify = app.control.notify = notify_start(session, changed, &app);
