@@ -338,6 +338,14 @@ static void battery_warn(struct app *app, const struct battery_now *power) {
 
 #define LIST_MAX 600 // the notifications list's tallest, it scrolls past that
 
+// the panes from first on faded with what's drawn over them (shown: how
+// much of it shows), the cards' and the others' each their own
+static void fade_panes(struct fui_pane *panes, int first, int n, double shown) {
+	for (int i = first; i < n; i++) {
+		panes[i].fade = 1 - shown;
+	}
+}
+
 // what's in a popover: the control center, or the notifications list
 struct popover_draw {
 	struct app *app;
@@ -546,9 +554,9 @@ static void frame(struct fui *ui, void *data) {
 	// what a media key changed over the cards, the cards moved down for it
 	double osd = osd_frame(ui, &app->osd, &app->control, right, top, covered, panes, &n, 16,
 		rects, &n_rects, 10);
+	fade_panes(panes, 0, n, osd / (OSD_H + 10));
 	double want, cards = notes_cards(ui, &app->notes, right, top + osd, covered, panes, &n, 16,
 		rects, &n_rects, 10, &want);
-	double osd_in = osd / (OSD_H + 10), on_cards = cards;
 	if (osd > 0) {
 		want = fmax(want, top + OSD_H);
 		cards = fmax(cards, top + OSD_H);
@@ -556,12 +564,16 @@ static void frame(struct fui *ui, void *data) {
 
 	if (control > 0.01 && fui_height(ui) > BAR_H) {
 		// where it stays: it fades in there, nothing moves
+		int first = n;
 		popover(ui, right, top, control, (struct popover_draw){.app = app, .control = true},
 			panes, &n);
+		fade_panes(panes, first, n, control);
 	}
 	if (list > 0.01 && fui_height(ui) > BAR_H) {
+		int first = n;
 		popover(ui, right, top, list, (struct popover_draw){.app = app, .list_h = list_h},
 			panes, &n);
+		fade_panes(panes, first, n, list);
 	}
 	if (card > 0.01 && has_power && fui_height(ui) > BAR_H) {
 		// the battery's, under its icon, faded as one
@@ -569,7 +581,9 @@ static void frame(struct fui *ui, void *data) {
 		if (fading) {
 			cairo_push_group(cr);
 		}
+		int first = n;
 		power_card(ui, &power, card_x, top, panes, &n, 16);
+		fade_panes(panes, first, n, card);
 		if (fading) {
 			cairo_pop_group_to_source(cr);
 			cairo_paint_with_alpha(cr, card);
@@ -588,10 +602,6 @@ static void frame(struct fui *ui, void *data) {
 		}
 	}
 	fui_set_glass(ui, n ? panes : NULL, n);
-	// the glass faded with what opens, all there for the cards
-	// the glass faded with what opens or with the popup alone, all there
-	// for the cards
-	fui_set_glass_opacity(ui, on_cards > 0 ? 1 : fmax(fmax(fmax(control, list), card), osd_in));
 	if (!app->open && control <= 0.01 && list <= 0.01 && card <= 0.01 && app->popped) {
 		app->popped = 0;
 		app->control.picking = -1;
