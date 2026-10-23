@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "../flameui/flameui.h"
 #include "player.h"
@@ -497,55 +497,73 @@ static void bar(struct app *app, double bx, double by, double bw, double bh) {
 static void keys(struct app *app) {
 	struct fui *ui = app->ui;
 	struct player *p = app->player;
-	if (fui_key_pressed(ui, XKB_KEY_space, 0) || fui_key_pressed(ui, XKB_KEY_k, 0)) {
-		toggle(app);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Left, 0)) {
-		seek_by(app, -5);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Right, 0)) {
-		seek_by(app, 5);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_j, 0)) {
-		seek_by(app, -15);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_l, 0)) {
-		seek_by(app, 15);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Home, 0)) {
-		player_seek(p, 0);
-		tick(app);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Up, 0)) {
-		set_volume(app, app->volume + 0.05);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Down, 0)) {
-		set_volume(app, app->volume - 0.05);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_m, 0)) {
-		if (app->volume > 0) {
-			app->unmuted = app->volume;
-			set_volume(app, 0);
-		} else {
-			set_volume(app, app->unmuted > 0 ? app->unmuted : 1);
+	// one by one as they went down: two downs are two steps, and whatever
+	// came before q is done before it quits
+	uint32_t sym;
+	unsigned mods;
+	const char *text;
+	for (int i = 0; fui_key_at(ui, i, &sym, &mods, &text); i++) {
+		sym = xkb_keysym_to_lower(sym);
+		if (mods == FUI_CTRL && sym == XKB_KEY_w) {
+			fui_quit(ui);
+			return;
 		}
-	}
-	if (fui_key_pressed(ui, XKB_KEY_f, 0)) {
-		fui_set_fullscreen(ui, !fui_fullscreen(ui));
-	}
-	if (fui_key_pressed(ui, XKB_KEY_s, 0)) {
-		cycle(app, PLAYER_SUBTITLES);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_a, 0)) {
-		cycle(app, PLAYER_AUDIO);
-	}
-	if (fui_key_pressed(ui, XKB_KEY_Escape, 0)) {
-		if (fui_fullscreen(ui)) {
-			fui_set_fullscreen(ui, false);
+		if (mods) {
+			continue;
 		}
-	}
-	if (fui_key_pressed(ui, XKB_KEY_q, 0) || fui_key_pressed(ui, XKB_KEY_w, FUI_CTRL)) {
-		fui_quit(ui);
+		switch (sym) {
+		case XKB_KEY_space:
+		case XKB_KEY_k:
+			toggle(app);
+			break;
+		case XKB_KEY_Left:
+			seek_by(app, -5);
+			break;
+		case XKB_KEY_Right:
+			seek_by(app, 5);
+			break;
+		case XKB_KEY_j:
+			seek_by(app, -15);
+			break;
+		case XKB_KEY_l:
+			seek_by(app, 15);
+			break;
+		case XKB_KEY_Home:
+			player_seek(p, 0);
+			tick(app);
+			break;
+		case XKB_KEY_Up:
+			set_volume(app, app->volume + 0.05);
+			break;
+		case XKB_KEY_Down:
+			set_volume(app, app->volume - 0.05);
+			break;
+		case XKB_KEY_m:
+			if (app->volume > 0) {
+				app->unmuted = app->volume;
+				set_volume(app, 0);
+			} else {
+				set_volume(app, app->unmuted > 0 ? app->unmuted : 1);
+			}
+			break;
+		case XKB_KEY_f:
+			fui_set_fullscreen(ui, !fui_fullscreen(ui));
+			break;
+		case XKB_KEY_s:
+			cycle(app, PLAYER_SUBTITLES);
+			break;
+		case XKB_KEY_a:
+			cycle(app, PLAYER_AUDIO);
+			break;
+		case XKB_KEY_Escape:
+			if (fui_fullscreen(ui)) {
+				fui_set_fullscreen(ui, false);
+			}
+			break;
+		case XKB_KEY_q:
+			fui_quit(ui);
+			return;
+		}
 	}
 }
 

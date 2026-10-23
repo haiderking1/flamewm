@@ -37,7 +37,7 @@ wait_below() {
 run_case() {
 	dir=$1
 	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 \
-		FLAME_SETTINGS="$dir/settings.lua" $CASE_ENV "$FLAME" $3 \
+		FLAME_SETTINGS="$dir/settings.lua" $5 "$FLAME" $3 \
 		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
 	ok=1
 	while IFS= read -r want; do
@@ -81,6 +81,12 @@ case_run() {
 	done
 	script=$(printf '%s\n' "$2" | sed "s|$WORK/|$dir/|g")
 	args=$(printf '%s' "$CASE_ARGS" | sed "s|$WORK/|$dir/|g")
+	# the apps' dirs (where they keep things: a video's volume) the case's
+	# own too: cases side by side don't write over each other's
+	env=$(printf '%s' "$CASE_ENV" | sed "s|$WORK/|$dir/|g")
+	if [ -d "$WORK/apps" ]; then
+		cp -r "$WORK/apps" "$dir/apps"
+	fi
 	shift 2
 	: > "$dir/wants"
 	for want in "$@"; do
@@ -98,10 +104,10 @@ EOF
 	: > "$dir/out"
 	if alone "$name"; then
 		wait
-		run_case "$dir" "$name" "$args" "$CASE_WRAP"
+		run_case "$dir" "$name" "$args" "$CASE_WRAP" "$env"
 	else
 		wait_below "$JOBS"
-		run_case "$dir" "$name" "$args" "$CASE_WRAP" &
+		run_case "$dir" "$name" "$args" "$CASE_WRAP" "$env" &
 	fi
 }
 
