@@ -33,12 +33,14 @@ wait_below() {
 }
 
 # the case in dir $1, named $2, flame's args $3, what flame runs inside $4
-# (CASE_WRAP: dbus-run-session for a bus of its own). its result printed in
-# one go, a block the others running don't tear up
+# (CASE_WRAP: dbus-run-session for a bus of its own), the case's env $5. its
+# flame has its own settings and config (never the user's init.lua: what
+# that starts would be in every case). its result printed in one go, a
+# block the others running don't tear up
 run_case() {
 	dir=$1
 	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 \
-		FLAME_SETTINGS="$dir/settings.lua" $5 "$FLAME" $3 \
+		FLAME_SETTINGS="$dir/settings.lua" XDG_CONFIG_HOME="$dir/config" $5 "$FLAME" $3 \
 		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
 	ok=1
 	while IFS= read -r want; do
