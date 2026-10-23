@@ -57,7 +57,7 @@ static void icon_bluetooth(cairo_t *cr, double cx, double cy, double s) {
 	cairo_stroke(cr);
 }
 
-static void icon_speaker(cairo_t *cr, double cx, double cy, double s, int waves) {
+void icon_speaker(cairo_t *cr, double cx, double cy, double s, int waves) {
 	cairo_move_to(cr, cx - s * 0.45, cy - s * 0.14);
 	cairo_line_to(cr, cx - s * 0.25, cy - s * 0.14);
 	cairo_line_to(cr, cx - s * 0.02, cy - s * 0.36);
@@ -198,7 +198,7 @@ static bool round_button(struct fui *ui, uint64_t id, double cx, double cy, doub
 }
 
 // a microphone: its head, the stand under it
-static void icon_mic(cairo_t *cr, double cx, double cy, double s, bool muted) {
+void icon_mic(cairo_t *cr, double cx, double cy, double s, bool muted) {
 	double w = s * 0.32, h = s * 0.52;
 	cairo_new_sub_path(cr);
 	cairo_arc(cr, cx, cy - h / 2 + w / 2, w / 2, M_PI, 2 * M_PI);
