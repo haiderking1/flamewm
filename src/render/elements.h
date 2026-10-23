@@ -67,6 +67,10 @@ struct flame_element {
 	// scaled or faded at all: then it covers nothing and never goes to scanout
 	float alpha;
 	bool effected;
+	// a surface showing nothing (one pixel of no colour, a single-pixel
+	// buffer): never drawn, never in the way of scanout, still a surface
+	// that's on screen (its frames, enter and leave)
+	bool clear;
 
 	// layout coords: what isn't covered by anything opaque above it, and
 	// what of it is opaque itself. filled by elements_occlude

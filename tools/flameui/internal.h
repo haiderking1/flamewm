@@ -64,6 +64,10 @@ struct fui {
 	struct wl_subcompositor *subcompositor;
 	struct wp_content_type_manager_v1 *content_type;
 	struct zwp_linux_dmabuf_v1 *dmabuf; // gpu pictures (a video decoded there)
+	// a frame showing nothing: one pixel of no colour, scaled to the window
+	struct wp_single_pixel_buffer_manager_v1 *single_pixel;
+	struct wl_buffer *nothing;
+	bool show_nothing;
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;

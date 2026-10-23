@@ -471,6 +471,13 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 		return;
 	}
 
+	if (element->clear) {
+		// nothing to draw, but it's shown
+		sampled(frame, element->surface);
+		pixman_region32_fini(&region);
+		return;
+	}
+
 	struct wlr_box dst = element->box;
 	target_box_to_buffer(target, &dst);
 

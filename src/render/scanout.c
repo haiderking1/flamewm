@@ -75,8 +75,8 @@ const struct flame_element *scanout_candidate(const struct flame_element_list *l
 	const struct flame_element *only = NULL;
 	for (size_t i = 0; i < list->len; i++) {
 		const struct flame_element *element = &list->data[i];
-		if (!pixman_region32_not_empty(&element->visible)) {
-			continue;
+		if (!pixman_region32_not_empty(&element->visible) || element->clear) {
+			continue; // not there, or nothing to see
 		}
 		if (only) {
 			return NULL; // two things show, they need composing

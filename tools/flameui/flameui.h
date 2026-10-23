@@ -59,6 +59,9 @@ void fui_redraw(struct fui *ui);
 void fui_after(struct fui *ui, int ms, void (*f)(struct fui *ui, void *data), void *data);
 // from any thread: draw another frame soon (work done elsewhere is ready)
 void fui_wake(struct fui *ui);
+// in frame: this one shows nothing (what's under the window shows, as it
+// is: a video layer filling it goes to the screen without flame drawing it)
+void fui_nothing(struct fui *ui);
 
 // fullscreen asked of flame, and whether it is
 void fui_set_fullscreen(struct fui *ui, bool fullscreen);
