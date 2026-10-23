@@ -1107,7 +1107,7 @@ static void frame(struct fui *ui, void *data) {
 	// the window: one pane of frosted glass, the desktop glowing through it
 	// vivid, and over its right part the content's solid dark: the sidebar
 	// is what's left of the glass
-	struct fui_pane pane = {0, 0, W, H, 18, 40, 0x1e1e2470, 1.9, 0.25, 0};
+	struct fui_pane pane = {0, 0, W, H, 18, 40, 0x1e1e2470, 1.9, 0.25, 0, 0};
 	fui_set_glass(ui, &pane, 1);
 	cairo_t *cr = fui_cairo(ui);
 	if (!fui_has_glass(ui)) {

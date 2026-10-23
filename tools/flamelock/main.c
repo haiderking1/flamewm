@@ -343,11 +343,11 @@ static void frame(struct fui *ui, void *data) {
 	// and the field's, lighter while it's what's typed into
 	struct fui_pane panes[] = {
 		{0, 0, (int)w, (int)h, 0, 40 * blur, 0x00000000 | (uint32_t)(0x1a + 0x30 * blur),
-			1 + 0.25 * blur, 0, 0},
+			1 + 0.25 * blur, 0, 0, 0},
 		{(int)fx, (int)fy, FIELD_W, FIELD_H, FIELD_H / 2.0, 12,
-			0xffffff00 | (uint32_t)(0x14 + 0x10 * fmin(lit, 1.6)), 1.8, 0.22, 18},
+			0xffffff00 | (uint32_t)(0x14 + 0x10 * fmin(lit, 1.6)), 1.8, 0.22, 18, 0},
 		{(int)(w / 2 - AVATAR / 2.0), (int)(ay - AVATAR / 2.0), AVATAR, AVATAR, AVATAR / 2.0,
-			12, 0xffffff26, 1.8, 0.22, 18},
+			12, 0xffffff26, 1.8, 0.22, 18, 0},
 	};
 	fui_set_glass(ui, panes, letter ? 3 : 2);
 	fui_after(ui, (int)(60 - tm.tm_sec) * 1000 + 50, minute, l);

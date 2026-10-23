@@ -497,7 +497,7 @@ static void frame(struct fui *ui, void *data) {
 	double k = 0.96 + 0.04 * shown; // how big, around its top's middle
 	double gx = x + W * (1 - k) / 2, gw = W * k, gh = h * k;
 	fui_set_glass(ui, &(struct fui_pane){(int)gx, (int)y, (int)gw, (int)gh, RADIUS * k, 18,
-		0x00000059, 1.6, 0.15, 22}, 1);
+		0x00000059, 1.6, 0.15, 22, 0}, 1);
 	fui_set_glass_opacity(ui, shown);
 
 	cairo_save(cr);

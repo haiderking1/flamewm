@@ -2074,7 +2074,7 @@ static void frame(struct fui *ui, void *data) {
 	job_check(app);
 	// the window: frosted glass, the desktop glowing through the sidebar,
 	// the files on solid dark
-	struct fui_pane pane = {0, 0, W, H, 14, 40, 0x1e1e2470, 1.9, 0.25, 0};
+	struct fui_pane pane = {0, 0, W, H, 14, 40, 0x1e1e2470, 1.9, 0.25, 0, 0};
 	fui_set_glass(ui, &pane, 1);
 	if (!fui_has_glass(ui)) {
 		fui_fill_rounded(ui, 0, 0, W, H, 14, 0x2a2a30ff);

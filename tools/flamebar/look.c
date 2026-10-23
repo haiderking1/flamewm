@@ -1,7 +1,8 @@
 #include "look.h"
 
 struct fui_pane glass(double x, double y, double w, double h, double r) {
-	return (struct fui_pane){(int)x, (int)y, (int)w, (int)h, r, 8, 0x00000026, 1.6, 0.15, 22};
+	return (struct fui_pane){(int)x, (int)y, (int)w, (int)h, r, 8, 0x00000026, 1.6, 0.15, 22,
+		0};
 }
 
 double shadowed_text(struct fui *ui, double x, double y, const char *text, const char *font,

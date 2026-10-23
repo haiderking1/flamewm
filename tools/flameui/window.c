@@ -111,12 +111,25 @@ static struct fui_buffer *buffer_get(struct fui *ui) {
 // ---- drawing a frame ----
 
 static void glass_send(struct fui *ui) {
-	// the glass faded (flame-eyecandy 2): a fade's every step
-	if (ui->glass && ui->eyecandy_version >= 2 && ui->glass_opacity != ui->glass_opacity_sent) {
-		flame_glass_v1_set_opacity(ui->glass, wl_fixed_from_double(ui->glass_opacity));
-		ui->glass_opacity_sent = ui->glass_opacity;
+	if (!ui->glass) {
+		return;
 	}
-	if (!ui->glass || !ui->panes_dirty) {
+	// the glass faded (flame-eyecandy 2): a fade's every step. a flame that
+	// can't fade panes one by one (before 3): all of them as faded as the
+	// one that shows most
+	double opacity = ui->glass_opacity;
+	if (ui->eyecandy_version < 3 && ui->panes_len) {
+		double most = 0;
+		for (int i = 0; i < ui->panes_len; i++) {
+			most = fmax(most, 1 - ui->panes[i].fade);
+		}
+		opacity *= most;
+	}
+	if (ui->eyecandy_version >= 2 && opacity != ui->glass_opacity_sent) {
+		flame_glass_v1_set_opacity(ui->glass, wl_fixed_from_double(opacity));
+		ui->glass_opacity_sent = opacity;
+	}
+	if (!ui->panes_dirty) {
 		return;
 	}
 	flame_glass_v1_clear(ui->glass);
@@ -126,6 +139,10 @@ static void glass_send(struct fui *ui) {
 			wl_fixed_from_double(p->radius), wl_fixed_from_double(p->blur), p->tint,
 			wl_fixed_from_double(p->saturation), wl_fixed_from_double(p->edge),
 			wl_fixed_from_double(p->refraction));
+		if (ui->eyecandy_version >= 3 && p->fade > 0) {
+			flame_glass_v1_set_pane_opacity(ui->glass,
+				wl_fixed_from_double(fmax(0, 1 - p->fade)));
+		}
 	}
 	ui->panes_dirty = false;
 }
@@ -835,7 +852,7 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wl_output_interface.name) && !ui->output) {
 		ui->output = wl_registry_bind(registry, name, &wl_output_interface, 1);
 	} else if (!strcmp(interface, flame_eyecandy_manager_v1_interface.name)) {
-		ui->eyecandy_version = version < 2 ? version : 2;
+		ui->eyecandy_version = version < 3 ? version : 3;
 		ui->eyecandy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface,
 			ui->eyecandy_version);
 	}
