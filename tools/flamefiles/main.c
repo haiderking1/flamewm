@@ -6,6 +6,8 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fnmatch.h>
+#include <gio/gio.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -119,6 +121,13 @@ struct app {
 
 	// --pick: choosing a file (pictures only), or a folder
 	bool pick, pick_images, pick_folder;
+	bool pick_multiple; // --multiple: several at once, a line each
+	char accept[1024]; // --accept: patterns ("*.png") and types ("image/*") it takes, ; between
+	char ok_label[64]; // --label: what the pick's button says
+	// --save NAME: the name to save as, in the folder it's in
+	bool save;
+	char save_name[NAME_MAX + 1];
+	bool replace_armed; // there's one by that name: asked to save again, it's replaced
 	int status;
 
 	struct place_item places[32];
@@ -470,12 +479,45 @@ static void go_up(struct app *app) {
 
 // ---- doing things ----
 
+// a name matched against --accept: a pattern ("*.png", any case) or a
+// type ("image/png", "image/*"), whatever its name says it is
+static bool accepted(const struct app *app, const char *name) {
+	if (!app->accept[0]) {
+		return true;
+	}
+	char list[sizeof(app->accept)];
+	snprintf(list, sizeof(list), "%s", app->accept);
+	char *type = NULL;
+	bool ok = false;
+	for (char *save, *one = strtok_r(list, ";", &save); one && !ok;
+			one = strtok_r(NULL, ";", &save)) {
+		if (!strchr(one, '/')) {
+			// any case: *.png takes photo.PNG
+			char *pattern = g_ascii_strdown(one, -1), *lower = g_ascii_strdown(name, -1);
+			ok = fnmatch(pattern, lower, 0) == 0;
+			g_free(pattern);
+			g_free(lower);
+			continue;
+		}
+		if (!type) {
+			type = g_content_type_guess(name, NULL, 0, NULL);
+		}
+		char *mime = type ? g_content_type_get_mime_type(type) : NULL;
+		size_t len = strlen(one);
+		ok = mime && (one[len - 1] == '*' ? !strncmp(mime, one, len - 1) : !strcmp(mime, one));
+		g_free(mime);
+	}
+	g_free(type);
+	return ok;
+}
+
 // what --pick takes
 static bool pickable(struct app *app, const struct file *f) {
-	if (app->pick_folder) {
+	if (app->pick_folder || app->save) {
 		return f->kind == KIND_FOLDER;
 	}
-	return f->kind != KIND_FOLDER && (!app->pick_images || f->kind == KIND_IMAGE);
+	return f->kind != KIND_FOLDER && (!app->pick_images || f->kind == KIND_IMAGE)
+		&& accepted(app, f->name);
 }
 
 static void picked(struct app *app, const char *path) {
@@ -485,12 +527,77 @@ static void picked(struct app *app, const char *path) {
 	fui_quit(app->ui);
 }
 
+// --multiple: every one picked that can be, a line each
+static void picked_all(struct app *app) {
+	bool any = false;
+	for (size_t i = 0; i < app->shown_len; i++) {
+		const struct file *f = file_at(app, i);
+		if (app->selected[app->shown[i]] && pickable(app, f)) {
+			char path[PATH_MAX];
+			path_of(app, f->name, path, sizeof(path));
+			printf("%s\n", path);
+			any = true;
+		}
+	}
+	if (any) {
+		fflush(stdout);
+		app->status = 0;
+		fui_quit(app->ui);
+	}
+}
+
+// the chooser's button (or enter on what's selected): what's selected
+// that can be (all of it with --multiple), or with --pick-folder and
+// nothing selected the folder it's in. false: nothing to pick
+static bool pick_selected(struct app *app) {
+	bool can = false;
+	size_t at = 0;
+	for (size_t i = 0; i < app->shown_len; i++) {
+		if (app->selected[app->shown[i]] && pickable(app, file_at(app, i))) {
+			can = true;
+			at = i;
+		}
+	}
+	char path[PATH_MAX];
+	if (can && app->pick_multiple) {
+		picked_all(app);
+	} else if (can) {
+		path_of(app, file_at(app, at)->name, path, sizeof(path));
+		picked(app, path);
+	} else if (app->pick_folder && !selected_count(app)) {
+		snprintf(path, sizeof(path), "%s", app->folder.path);
+		picked(app, path);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+// --save: the name in the folder it's in. one that's there already is only
+// replaced when it's asked for twice
+static void save_here(struct app *app) {
+	if (!app->save_name[0] || strchr(app->save_name, '/')) {
+		return;
+	}
+	char path[PATH_MAX];
+	path_of(app, app->save_name, path, sizeof(path));
+	struct stat st;
+	if (stat(path, &st) == 0 && !app->replace_armed) {
+		app->replace_armed = true;
+		return;
+	}
+	picked(app, path);
+}
+
 static void open_file(struct app *app, size_t shown_index) {
 	const struct file *f = file_at(app, shown_index);
 	char path[PATH_MAX];
 	path_of(app, f->name, path, sizeof(path));
 	if (f->kind == KIND_FOLDER) {
 		go(app, path, true);
+	} else if (app->save) {
+		snprintf(app->save_name, sizeof(app->save_name), "%s", f->name);
+		app->replace_armed = false;
 	} else if (app->pick) {
 		if (pickable(app, f)) {
 			picked(app, path);
@@ -1095,6 +1202,17 @@ static void keys(struct app *app) {
 	}
 	if (fui_key_pressed(ui, XKB_KEY_Return, 0) || fui_key_pressed(ui, XKB_KEY_KP_Enter, 0)
 			|| fui_key_pressed(ui, XKB_KEY_Down, FUI_CTRL)) {
+		// saving: here, unless it's a folder to go into
+		if (app->save && !(app->has_cursor && app->selected[app->shown[app->cursor]]
+				&& file_at(app, app->cursor)->kind == KIND_FOLDER)) {
+			save_here(app);
+			return;
+		}
+		// a chooser with several selected (or all, no cursor): those picked
+		if (app->pick && !app->save && (!app->has_cursor || selected_count(app) > 1)
+				&& pick_selected(app)) {
+			return;
+		}
 		if (app->has_cursor && app->selected[app->shown[app->cursor]]) {
 			open_file(app, app->cursor);
 			return;
@@ -1671,28 +1789,52 @@ static void status_bar(struct app *app) {
 		size_t len = strlen(text);
 		snprintf(text + len, sizeof(text) - len, ", %s available", amount);
 	}
+	if (app->save) {
+		// saving: the name, and saving it here
+		double bx = W - 12;
+		const char *ok = app->replace_armed ? "Replace" : app->ok_label[0] ? app->ok_label
+			: "Save";
+		bx -= fui_text_width(ui, ok, F_MEDIUM) + 28;
+		if (fui_button(ui, fui_id("save ok", 0), bx, y + 1, ok)) {
+			save_here(app);
+		}
+		bx -= fui_text_width(ui, "Cancel", F_MEDIUM) + 28 + 8;
+		if (fui_button(ui, fui_id("pick cancel", 0), bx, y + 1, "Cancel")) {
+			app->status = 1;
+			fui_quit(ui);
+		}
+		char before[sizeof(app->save_name)];
+		snprintf(before, sizeof(before), "%s", app->save_name);
+		fui_text(ui, VIEW_X + 14, y + 8, "Save as", F_SMALL, TEXT_DIM, FUI_LEFT, 0);
+		double fx = VIEW_X + 14 + fui_text_width(ui, "Save as", F_SMALL) + 10;
+		uint64_t field = fui_id("save name", 0);
+		const char *there = "There's one by that name already";
+		// the field leaves room for that
+		double room = bx - fx - 16 - (app->replace_armed
+			? fui_text_width(ui, there, F_SMALL) + 16 : 0);
+		fui_field(ui, field, fx, y + 1, fmin(320, room), app->save_name,
+			(int)sizeof(app->save_name), "Name", true);
+		if (strcmp(before, app->save_name)) {
+			app->replace_armed = false; // another name: asked again if it's there too
+		}
+		if (fui_entered(ui, field)) {
+			save_here(app);
+			if (app->replace_armed) {
+				fui_focus(ui, field, app->save_name); // enter again: replaced
+			}
+		}
+		if (app->replace_armed) {
+			fui_text(ui, bx - 12, y + 8, there, F_SMALL, TEXT_DIM, FUI_RIGHT, 0);
+		}
+		return;
+	}
 	if (app->pick) {
 		// a chooser: what to do with the pick
 		double bx = W - 12;
-		const char *ok = app->pick_folder ? "Choose" : "Open";
-		bool can = false;
-		size_t at = 0;
-		for (size_t i = 0; i < app->shown_len; i++) {
-			if (app->selected[app->shown[i]] && pickable(app, file_at(app, i))) {
-				can = true;
-				at = i;
-			}
-		}
-		can = can || (app->pick_folder && !sel);
+		const char *ok = app->ok_label[0] ? app->ok_label : app->pick_folder ? "Choose" : "Open";
 		bx -= fui_text_width(ui, ok, F_MEDIUM) + 28;
-		if (fui_button(ui, fui_id("pick ok", 0), bx, y + 1, ok) && can) {
-			char path[PATH_MAX];
-			if (sel) {
-				path_of(app, file_at(app, at)->name, path, sizeof(path));
-			} else {
-				snprintf(path, sizeof(path), "%s", app->folder.path);
-			}
-			picked(app, path);
+		if (fui_button(ui, fui_id("pick ok", 0), bx, y + 1, ok)) {
+			pick_selected(app);
 		}
 		bx -= fui_text_width(ui, "Cancel", F_MEDIUM) + 28 + 8;
 		if (fui_button(ui, fui_id("pick cancel", 0), bx, y + 1, "Cancel")) {
@@ -1994,16 +2136,22 @@ static void folder_watch(struct fui *ui, int fd, void *data) {
 }
 
 static void usage(void) {
-	fprintf(stderr, "usage: flamefiles [FOLDER] [--pick [--images] | --pick-folder]\n"
-		"  --pick         choose a file, its path printed (exit 1: cancelled)\n"
-		"  --images       only pictures can be chosen\n"
-		"  --pick-folder  choose a folder\n");
+	fprintf(stderr, "usage: flamefiles [FOLDER|FILE] [--pick [--images] | --pick-folder"
+		" | --save NAME]\n"
+		"  --pick           choose a file, its path printed (exit 1: cancelled)\n"
+		"  --images         only pictures can be chosen\n"
+		"  --accept LIST    only these: patterns (*.png) and types (image/*), ; between\n"
+		"  --multiple       several can be chosen, a line each\n"
+		"  --pick-folder    choose a folder\n"
+		"  --save NAME      where to save, NAME to start with: its path printed\n"
+		"  --title TEXT     the window's title\n"
+		"  --label TEXT     what the button that picks says\n");
 }
 
 int main(int argc, char **argv) {
 	struct app app = {.status = 0, .icon = ICON_DEFAULT, .icon_want = ICON_DEFAULT,
 		.row = ROW_DEFAULT, .row_want = ROW_DEFAULT, .drop_place = -1};
-	const char *start = NULL;
+	const char *start = NULL, *title = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--pick")) {
 			app.pick = true;
@@ -2011,6 +2159,17 @@ int main(int argc, char **argv) {
 			app.pick_images = true;
 		} else if (!strcmp(argv[i], "--pick-folder")) {
 			app.pick = app.pick_folder = true;
+		} else if (!strcmp(argv[i], "--multiple")) {
+			app.pick_multiple = true;
+		} else if (!strcmp(argv[i], "--accept") && i + 1 < argc) {
+			snprintf(app.accept, sizeof(app.accept), "%s", argv[++i]);
+		} else if (!strcmp(argv[i], "--save") && i + 1 < argc) {
+			app.pick = app.save = true;
+			snprintf(app.save_name, sizeof(app.save_name), "%s", argv[++i]);
+		} else if (!strcmp(argv[i], "--title") && i + 1 < argc) {
+			title = argv[++i];
+		} else if (!strcmp(argv[i], "--label") && i + 1 < argc) {
+			snprintf(app.ok_label, sizeof(app.ok_label), "%s", argv[++i]);
 		} else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
 			usage();
 			return 0;
@@ -2030,7 +2189,7 @@ int main(int argc, char **argv) {
 	app.ui = fui_create(&(struct fui_config){
 		// a chooser floats over what asked for it (flame's rule for it)
 		.app_id = app.pick ? "flamefiles-chooser" : "flamefiles",
-		.title = app.pick ? "Choose" : "Files",
+		.title = title ? title : app.save ? "Save" : app.pick ? "Choose" : "Files",
 		.width = app.pick ? 860 : 1000,
 		.height = app.pick ? 560 : 640,
 		.min_width = MIN_W,
@@ -2068,6 +2227,9 @@ int main(int argc, char **argv) {
 	}
 	if (app.folder.inotify >= 0) {
 		fui_watch(app.ui, app.folder.inotify, folder_watch, &app);
+	}
+	if (app.save) {
+		fui_focus(app.ui, fui_id("save name", 0), app.save_name); // ready to type
 	}
 	int status = fui_run(app.ui);
 	prefs_save(&app);
