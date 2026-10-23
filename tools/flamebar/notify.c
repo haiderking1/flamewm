@@ -538,7 +538,17 @@ void notify_card_done(struct notify *n, uint32_t id) {
 void notify_seen(struct notify *n) {
 	for (int i = 0; n && i < n->len; i++) {
 		notify_card_done(n, n->notes[i]->id);
+		n->notes[i]->seen = true;
 	}
+}
+
+bool notify_unseen(const struct notify *n) {
+	for (int i = 0; n && i < n->len; i++) {
+		if (!n->notes[i]->seen && !n->notes[i]->closed) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void notify_dismiss(struct notify *n, uint32_t id) {

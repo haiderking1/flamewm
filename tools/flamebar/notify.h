@@ -38,6 +38,7 @@ struct note {
 	bool card;
 	double until;
 	bool closed; // gone (the app knows), the bar still taking it away
+	bool seen; // the list's been opened since it came (or changed)
 	// the bar's: how tall it is as a card and in the list, 0 till it's
 	// measured (again when it changes)
 	double heights[2];
@@ -56,8 +57,10 @@ struct note *notify_at(struct notify *notify, int i);
 // its card's time ran out: still in the list (one the app timed, or
 // a transient one, closed)
 void notify_card_done(struct notify *notify, uint32_t id);
-// the list's been looked at: no cards for what's in it
+// the list's been looked at: no cards for what's in it, all seen
 void notify_seen(struct notify *notify);
+// some came (or changed) since the list was looked at, and are still there
+bool notify_unseen(const struct notify *notify);
 // the user closed it (one, or all)
 void notify_dismiss(struct notify *notify, uint32_t id);
 void notify_clear(struct notify *notify);
