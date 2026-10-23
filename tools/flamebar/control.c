@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define GAP 12
@@ -256,30 +257,99 @@ static double lerp(double a, double b, double t) {
 	return a + (b - a) * t;
 }
 
-// the art in a rounded w x h, cut to cover it: one picture (the big
-// one's, made once) at every size and shape it goes through, so it never
+// a picture's pixels made crisper where they were blown up: each one
+// pushed away from the average of the ones round it (an unsharp mask)
+static void sharpen(cairo_surface_t *image, double amount) {
+	cairo_surface_flush(image);
+	int w = cairo_image_surface_get_width(image), h = cairo_image_surface_get_height(image);
+	int stride = cairo_image_surface_get_stride(image);
+	unsigned char *data = cairo_image_surface_get_data(image);
+	unsigned char *was = malloc((size_t)stride * (size_t)h);
+	if (!was) {
+		return;
+	}
+	memcpy(was, data, (size_t)stride * (size_t)h);
+	for (int y = 1; y < h - 1; y++) {
+		for (int x = 1; x < w - 1; x++) {
+			for (int c = 0; c < 3; c++) { // the colours, not alpha (it's opaque)
+				int sum = 0;
+				for (int dy = -1; dy <= 1; dy++) {
+					for (int dx = -1; dx <= 1; dx++) {
+						sum += was[(y + dy) * stride + (x + dx) * 4 + c];
+					}
+				}
+				int at = was[y * stride + x * 4 + c];
+				double v = at + amount * (at - sum / 9.0);
+				data[y * stride + x * 4 + c] = (unsigned char)fmax(0, fmin(v, 255));
+			}
+		}
+	}
+	free(was);
+	cairo_surface_mark_dirty(image);
+}
+
+// the art as the open tile shows it, w x h pixels, cut to cover that: made
+// straight from the picture's own pixels in one go, blown up as sharp as
+// it goes when it's small (players hand some over small: a browser's
+// still of a video is 150 across), made once a picture
+static cairo_surface_t *art_at(cairo_surface_t *picture, const char *path, int w, int h) {
+	static cairo_surface_t *made;
+	static char made_of[PATH_MAX];
+	static int made_pw, made_w, made_h;
+	int pw = cairo_image_surface_get_width(picture), ph = cairo_image_surface_get_height(picture);
+	if (made && !strcmp(made_of, path) && made_pw == pw && made_w == w && made_h == h) {
+		return made;
+	}
+	if (made) {
+		cairo_surface_destroy(made);
+	}
+	made = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	double scale = fmax((double)w / pw, (double)h / ph);
+	cairo_t *cr = cairo_create(made);
+	cairo_translate(cr, (w - pw * scale) / 2, (h - ph * scale) / 2);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_surface(cr, picture, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), scale > 1 ? CAIRO_FILTER_BEST
+		: CAIRO_FILTER_GOOD);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	if (scale > 1.2) {
+		sharpen(made, fmin(0.35 * (scale - 1), 0.8));
+	}
+	snprintf(made_of, sizeof(made_of), "%s", path);
+	made_pw = pw;
+	made_w = w;
+	made_h = h;
+	return made;
+}
+
+// the art in a rounded w x h, cut to cover it: one picture (the open
+// tile's, made once) at every size and shape it goes through, so it never
 // changes picture as it opens. an empty one without
 static void art_rect(struct fui *ui, const struct media_now *now, bool have, double x,
 		double y, double w, double h, double radius) {
 	cairo_t *cr = fui_cairo(ui);
+	// as it is (never made bigger here), or as big as the open tile wants
+	double k = fui_scale(ui);
 	cairo_surface_t *picture = have && now->art[0]
-		? fui_thumb(ui, now->art, ART_W * 2, ART_H * 2, NULL) : NULL;
+		? fui_thumb_fit(ui, now->art, (int)ceil(ART_W * 2 * k), NULL) : NULL;
 	fui_rounded(ui, x, y, w, h, radius);
-	if (picture) {
-		double pw = cairo_image_surface_get_width(picture);
-		double ph = cairo_image_surface_get_height(picture);
-		double scale = fmax(w / pw, h / ph);
-		cairo_save(cr);
-		cairo_clip(cr);
-		cairo_translate(cr, x + (w - pw * scale) / 2, y + (h - ph * scale) / 2);
-		cairo_scale(cr, scale, scale);
-		cairo_set_source_surface(cr, picture, 0, 0);
-		cairo_paint(cr);
-		cairo_restore(cr);
-	} else {
+	if (!picture) {
 		fui_color(ui, 0xffffff1f);
 		cairo_fill(cr);
+		return;
 	}
+	cairo_surface_t *art = art_at(picture, now->art, (int)ceil(ART_W * k), (int)ceil(ART_H * k));
+	double pw = cairo_image_surface_get_width(art), ph = cairo_image_surface_get_height(art);
+	double scale = fmax(w / pw, h / ph);
+	cairo_save(cr);
+	cairo_clip(cr);
+	cairo_translate(cr, x + (w - pw * scale) / 2, y + (h - ph * scale) / 2);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_surface(cr, art, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+	cairo_paint(cr);
+	cairo_restore(cr);
 }
 
 // back, play or pause, forward around mid, cy: s their size, gap apart.
