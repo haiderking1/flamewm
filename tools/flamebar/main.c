@@ -19,6 +19,7 @@
 #include "control.h"
 #include "notes.h"
 #include "osd.h"
+#include "power.h"
 
 #define BAR_H 32
 #define F_APP "Inter Semi-Bold 10.5"
@@ -37,12 +38,16 @@ struct app {
 	int workspace;
 	bool used[WORKSPACES + 1];
 	// what's open under the bar: the control center or the notifications
-	enum { OPEN_NONE, OPEN_CONTROL, OPEN_LIST } open;
+	enum { OPEN_NONE, OPEN_CONTROL, OPEN_LIST, OPEN_BATTERY } open;
 	int popped; // how tall the surface was grown for it (open, or closing), 0: not
 	int grown; // how tall it was grown for cards with nothing open, 0: not
 	struct control control;
 	struct notes notes;
 	struct osd osd; // what a media key just changed
+	struct battery *battery; // a laptop's: none on a desktop, nothing shown
+	double battery_x; // where its icon's middle is
+	int warned; // the lowest it's been warned about, 100 for none
+	uint32_t low_note; // the warning's, to take back once it's plugged in
 };
 
 static void woken(void *data) {
@@ -283,7 +288,33 @@ static double clock_room(struct fui *ui, const char *when) {
 }
 
 static void clock_tick(struct fui *ui, void *data) {
+	struct app *app = data;
+	battery_refresh(app->battery); // without upower nothing says it changed
 	fui_redraw(ui);
+}
+
+// running low: warned at a fifth, again at a tenth (that one stays till
+// it's seen to); plugged in, the warning's taken back
+static void battery_warn(struct app *app, const struct battery_now *power) {
+	if (power->plugged) {
+		if (app->warned < 100 && app->low_note) {
+			notify_dismiss(app->notes.notify, app->low_note);
+			app->low_note = 0;
+		}
+		app->warned = 100;
+		return;
+	}
+	char body[64];
+	snprintf(body, sizeof(body), "%.0f%% of the battery left", power->percent);
+	if (power->percent <= 10 && app->warned > 10) {
+		app->warned = 10;
+		notify_post(app->notes.notify, "Battery", "battery-caution", "Battery Critically Low",
+			body, true, &app->low_note);
+	} else if (power->percent <= 20 && app->warned > 20) {
+		app->warned = 20;
+		notify_post(app->notes.notify, "Battery", "battery-low", "Low Battery", body, false,
+			&app->low_note);
+	}
 }
 
 #define LIST_MAX 600 // the notifications list's tallest, it scrolls past that
@@ -398,12 +429,37 @@ static void frame(struct fui *ui, void *data) {
 		fui_color(ui, TEXT);
 		icon_moon(cr, px - 12, cy, 17);
 	}
-	if (over || over_clock) {
+	// a laptop's battery, left of those: a desktop has none, nothing's shown
+	struct battery_now power;
+	bool has_power = battery_get(app->battery, &power);
+	bool over_power = false;
+	double power_left = 0, power_right = px - (notify_quiet(app->notes.notify) ? 26 : 8);
+	if (has_power) {
+		char percent[16];
+		snprintf(percent, sizeof(percent), "%.0f%%", power.percent);
+		power_left = power_right - (fui_text_width(ui, percent, F_BAR) + 32 + 16);
+		over_power = fui_hover(ui, power_left, cy - 12, power_right - power_left, 24);
+		double power_lit = fui_ease(ui, fui_id("battery", 0),
+			over_power || app->open == OPEN_BATTERY ? 1 : 0, 20);
+		if (power_lit > 0.01) {
+			fui_fill_rounded(ui, power_left, cy - 12, power_right - power_left, 24, 12,
+				0xffffff00 | (uint32_t)(0x33 * power_lit));
+		}
+		power_icon(ui, &power, power_right - 8, cy);
+		app->battery_x = (power_left + power_right) / 2;
+		battery_warn(app, &power);
+	} else if (app->open == OPEN_BATTERY) {
+		app->open = OPEN_NONE; // gone (unplugged, upower gone): nothing to show
+	}
+	if (over || over_clock || over_power) {
 		fui_cursor_pointer(ui);
 	}
 	bool toggled = false;
 	if (fui_clicked(ui, px, cy - ph / 2, pw, ph)) {
 		app->open = app->open == OPEN_CONTROL ? OPEN_NONE : OPEN_CONTROL;
+		toggled = true;
+	} else if (has_power && fui_clicked(ui, power_left, cy - 12, power_right - power_left, 24)) {
+		app->open = app->open == OPEN_BATTERY ? OPEN_NONE : OPEN_BATTERY;
 		toggled = true;
 	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)) {
 		app->open = app->open == OPEN_LIST ? OPEN_NONE : OPEN_LIST;
@@ -422,10 +478,13 @@ static void frame(struct fui *ui, void *data) {
 	double right = w - 12, top = BAR_H + 6;
 	double control = fui_ease(ui, fui_id("control center", 0), app->open == OPEN_CONTROL, 14);
 	double list = fui_ease(ui, fui_id("notifications", 0), app->open == OPEN_LIST, 14);
+	double card = fui_ease(ui, fui_id("battery card", 0), app->open == OPEN_BATTERY, 14);
+	double card_x = fmax(8, fmin(app->battery_x - POWER_CARD_W / 2.0, w - POWER_CARD_W - 8));
 	double list_h = app->open == OPEN_LIST || list > 0.01
 		? notes_list_height(ui, &app->notes, LIST_MAX) : 0;
-	double needs = fmax(app->open == OPEN_CONTROL || control > 0.01
-		? control_height(&app->control) : 0, list_h);
+	double needs = fmax(fmax(app->open == OPEN_CONTROL || control > 0.01
+		? control_height(&app->control) : 0, list_h),
+		app->open == OPEN_BATTERY || card > 0.01 ? POWER_CARD_H : 0);
 	// as tall as it is now (a list of devices opens in it)
 	int tall = (int)(BAR_H + 6 + needs + 16);
 	if ((app->open || app->popped) && app->popped < tall) {
@@ -440,7 +499,7 @@ static void frame(struct fui *ui, void *data) {
 	// the cards, under whatever opens: they go while it's there
 	struct fui_rect rects[1 + 9] = {{0, 0, w, BAR_H}};
 	int n_rects = 1;
-	bool covered = app->open || control > 0.01 || list > 0.01;
+	bool covered = app->open || control > 0.01 || list > 0.01 || card > 0.01;
 	// what a media key changed over the cards, the cards moved down for it
 	double osd = osd_frame(ui, &app->osd, &app->control, right, top, covered, panes, &n, 16,
 		rects, &n_rects, 10);
@@ -461,11 +520,25 @@ static void frame(struct fui *ui, void *data) {
 		popover(ui, right, top, list, (struct popover_draw){.app = app, .list_h = list_h},
 			panes, &n);
 	}
+	if (card > 0.01 && has_power && fui_height(ui) > BAR_H) {
+		// the battery's, under its icon, faded as one
+		bool fading = card < 1;
+		if (fading) {
+			cairo_push_group(cr);
+		}
+		power_card(ui, &power, card_x, top, panes, &n, 16);
+		if (fading) {
+			cairo_pop_group_to_source(cr);
+			cairo_paint_with_alpha(cr, card);
+		}
+	}
 	notes_done(&app->notes);
 	if (app->open) {
 		// a click outside it (and not on its button) closes it
 		double ch = app->open == OPEN_CONTROL ? control_height(&app->control) : list_h;
-		bool inside = fui_hover(ui, right - CONTROL_W - 12, top, CONTROL_W + 12, ch);
+		bool inside = app->open == OPEN_BATTERY
+			? fui_hover(ui, card_x, top, POWER_CARD_W, POWER_CARD_H)
+			: fui_hover(ui, right - CONTROL_W - 12, top, CONTROL_W + 12, ch);
 		if (outside || (!inside && !toggled && fui_clicked(ui, 0, 0, w, fui_height(ui)))) {
 			app->open = OPEN_NONE;
 			fui_redraw(ui); // the next frame starts it going
@@ -475,8 +548,8 @@ static void frame(struct fui *ui, void *data) {
 	// the glass faded with what opens, all there for the cards
 	// the glass faded with what opens or with the popup alone, all there
 	// for the cards
-	fui_set_glass_opacity(ui, on_cards > 0 ? 1 : fmax(fmax(control, list), osd_in));
-	if (!app->open && control <= 0.01 && list <= 0.01 && app->popped) {
+	fui_set_glass_opacity(ui, on_cards > 0 ? 1 : fmax(fmax(fmax(control, list), card), osd_in));
+	if (!app->open && control <= 0.01 && list <= 0.01 && card <= 0.01 && app->popped) {
 		app->popped = 0;
 		app->control.picking = -1;
 		fui_panel_popup(ui, 0);
@@ -523,6 +596,8 @@ int main(void) {
 	app.control.bluetooth = bluetooth_start(system, changed, &app);
 	app.notes.notify = app.control.notify = notify_start(session, changed, &app);
 	app.control.backlight = backlight_start(system);
+	app.battery = battery_start(system, changed, &app);
+	app.warned = 100;
 	int status = fui_run(app.ui);
 	// gone before the window: nothing's drawn from them after
 	sound_stop(app.control.sound);
@@ -531,6 +606,7 @@ int main(void) {
 	bluetooth_stop(app.control.bluetooth);
 	notify_stop(app.notes.notify);
 	backlight_stop(app.control.backlight);
+	battery_stop(app.battery);
 	app.control = (struct control){0};
 	app.notes = (struct notes){0};
 	sd_bus_flush_close_unref(session);

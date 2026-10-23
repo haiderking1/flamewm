@@ -37,7 +37,9 @@ Xwayland needed, Steam and Proton games included.
   notifications too: cards that slide in under it, the list of them under
   the time. the media keys (volume, mute, brightness, play) show what they
   changed on glass for a moment. brightness for a laptop's screen or a
-  monitor on a cable (ddc/ci), keys or the control center's slider. `flame.autostart("flamebar")`
+  monitor on a cable (ddc/ci), keys or the control center's slider.
+  on a laptop, the battery: how full, how long it lasts, warned when
+  it's low (a desktop shows none). `flame.autostart("flamebar")`
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run

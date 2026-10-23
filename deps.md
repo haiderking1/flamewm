@@ -61,6 +61,7 @@ not linked, flame works without them, these features don't.
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
 | Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
 | networkmanager, bluez, an mpris player | what flamebar's control center shows: the network and wi-fi, bluetooth, what's playing. without one its tile says so. neither is started by the bar |
+| upower | a laptop's battery in flamebar (its "display device": the system's batteries, never a mouse's). without it the bar reads the kernel's own files. a desktop shows none either way |
 | `i2c-dev` loaded, access to the monitors' i2c (`ddcutil`'s udev rule, or the `i2c` group) | flamebar's brightness for monitors on a cable: asked over the cable (ddc/ci), on the graphics card's lines only. `echo i2c-dev \| sudo tee /etc/modules-load.d/i2c-dev.conf`. `FLAMEBAR_NO_DDC=1` leaves monitors alone |
 | `noto-fonts-emoji` | emoji (in notifications, file names, subtitles) in colour. without it they're boxes |
 | `noto-fonts` | text Inter has no letters for: arabic, hebrew, thai... in flameplay's subtitles and flame's apps, found through fontconfig. without it they come out in whatever font has them, or as boxes |
@@ -80,6 +81,7 @@ not linked, flame works without them, these features don't.
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland clients (drag and drop, window sharing, a fullscreen game asking to tear) |
 | gbm (mesa or the nvidia driver), libdrm | `gbm` `libdrm` | `make e2e`: window sharing into gpu buffers, the way the portal takes frames |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
+| python-gobject | - | `make e2e`: the battery test's fake upower (tests/e2e/fakepower.py) |
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |

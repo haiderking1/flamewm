@@ -316,6 +316,45 @@ static bool make_room(struct notify *n) {
 	return false;
 }
 
+// fresh kept: in the place of the one it replaces (its card up again),
+// else new at the top. NULL out of memory (its picture's let go)
+static struct note *keep(struct notify *n, struct note *fresh, uint32_t replaces) {
+	// a new version of one there is: in its place, its card up again
+	struct note *note = replaces ? find(n, replaces) : NULL;
+	if (note && !note->closed) {
+		fresh->id = note->id;
+		if (note->picture) {
+			cairo_surface_destroy(note->picture);
+		}
+		*note = *fresh;
+	} else {
+		if (n->len == NOTES && !make_room(n)) {
+			// every one a card still: the oldest goes anyway
+			n->notes[n->len - 1]->card = false;
+			make_room(n);
+		}
+		note = malloc(sizeof(*note));
+		if (!note) {
+			if (fresh->picture) {
+				cairo_surface_destroy(fresh->picture);
+			}
+			return NULL;
+		}
+		*note = *fresh;
+		if (replaces && !find(n, replaces)) {
+			note->id = replaces; // the number the app's keeping, as the spec has it
+		} else {
+			do {
+				note->id = n->next_id++;
+			} while (!note->id || find(n, note->id));
+		}
+		memmove(&n->notes[1], &n->notes[0], sizeof(n->notes[0]) * (size_t)n->len);
+		n->notes[0] = note;
+		n->len++;
+	}
+	return note;
+}
+
 static int on_notify(sd_bus_message *m, void *data, sd_bus_error *error) {
 	struct notify *n = data;
 	const char *app, *icon, *summary, *body;
@@ -374,38 +413,9 @@ static int on_notify(sd_bus_message *m, void *data, sd_bus_error *error) {
 	fresh.until = fresh.critical || timeout == 0 ? 0
 		: now_seconds() + (timeout > 0 ? fmax(timeout / 1000.0, 2) : CARD_SECONDS);
 
-	// a new version of one there is: in its place, its card up again
-	struct note *note = replaces ? find(n, replaces) : NULL;
-	if (note && !note->closed) {
-		fresh.id = note->id;
-		if (note->picture) {
-			cairo_surface_destroy(note->picture);
-		}
-		*note = fresh;
-	} else {
-		if (n->len == NOTES && !make_room(n)) {
-			// every one a card still: the oldest goes anyway
-			n->notes[n->len - 1]->card = false;
-			make_room(n);
-		}
-		note = malloc(sizeof(*note));
-		if (!note) {
-			if (fresh.picture) {
-				cairo_surface_destroy(fresh.picture);
-			}
-			return -ENOMEM;
-		}
-		*note = fresh;
-		if (replaces && !find(n, replaces)) {
-			note->id = replaces; // the number the app's keeping, as the spec has it
-		} else {
-			do {
-				note->id = n->next_id++;
-			} while (!note->id || find(n, note->id));
-		}
-		memmove(&n->notes[1], &n->notes[0], sizeof(n->notes[0]) * (size_t)n->len);
-		n->notes[0] = note;
-		n->len++;
+	struct note *note = keep(n, &fresh, replaces);
+	if (!note) {
+		return -ENOMEM;
 	}
 	n->changed(n->data);
 	return sd_bus_reply_method_return(m, "u", note->id);
@@ -563,6 +573,27 @@ void notify_forget(struct notify *n, uint32_t id) {
 			n->len--;
 			return;
 		}
+	}
+}
+
+void notify_post(struct notify *n, const char *app, const char *icon, const char *summary,
+		const char *body, bool critical, uint32_t *id) {
+	if (!n) {
+		return;
+	}
+	struct note fresh = {0};
+	copy_text(fresh.app, sizeof(fresh.app), app);
+	copy_text(fresh.icon, sizeof(fresh.icon), icon);
+	copy_text(fresh.summary, sizeof(fresh.summary), summary);
+	copy_text(fresh.body, sizeof(fresh.body), body);
+	fresh.critical = critical;
+	fresh.when = time(NULL);
+	fresh.card = !n->quiet || critical;
+	fresh.until = critical ? 0 : now_seconds() + CARD_SECONDS;
+	struct note *note = keep(n, &fresh, *id);
+	if (note) {
+		*id = note->id;
+		n->changed(n->data);
 	}
 }
 
