@@ -31,9 +31,13 @@ struct fui_panel {
 	// the edges it's against: both of a pair stretches it along them (its
 	// width or height 0 in the config)
 	uint32_t edges;
-	int room; // kept clear of windows at its edge, 0 for none
+	// kept clear of windows at its edge, 0 for none. -1: over the other
+	// panels' room too, all of the screen it's stretched over
+	int room;
 	bool over_fullscreen;
 	bool keyboard; // keys once it's clicked
+	bool grab_keys; // all the keys while it's up, nothing else gets them (a launcher)
+	bool hidden; // not up till fui_panel_show
 };
 
 struct fui_config {
@@ -59,6 +63,10 @@ struct fui_config {
 void fui_panel_popup(struct fui *ui, int height);
 // a click outside the popup came since the last frame (once)
 bool fui_panel_outside(struct fui *ui);
+// a panel off the screen (nothing of it, none of the keys) or up again.
+// hidden it keeps running: timers, what it watches
+void fui_panel_show(struct fui *ui, bool shown);
+bool fui_panel_shown(const struct fui *ui);
 // a panel height tall for now, under the windows' popups as before (cards
 // under a bar), 0: back to its own size
 void fui_panel_resize(struct fui *ui, int height);
@@ -183,6 +191,11 @@ unsigned fui_mods(const struct fui *ui); // held now
 // sym went down this frame (or repeated) with exactly mods held. letters
 // any case: ctrl+shift+n is 'n' with FUI_CTRL | FUI_SHIFT
 bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods);
+// this frame's keys one by one, in the order they went down (repeats too):
+// false past the last. what each typed ("" for none: ctrl, alt or super
+// held, or a key that types nothing), the mods held. none while a field
+// has the keys
+bool fui_key_at(const struct fui *ui, int i, uint32_t *sym, unsigned *mods, const char **text);
 bool fui_typing(const struct fui *ui); // a field has the keys
 // what was typed this frame (no ctrl, alt or super), "" while a field types
 const char *fui_typed(struct fui *ui);
