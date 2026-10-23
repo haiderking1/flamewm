@@ -24,6 +24,9 @@ Xwayland needed, Steam and Proton games included.
   flamefiles (`super+e`), and a video and music player, flameplay:
   decoded on the gpu (vulkan), subtitles, audio tracks, it remembers where
   you stopped
+- **its own bar**, flamebar: see through over the wallpaper, the app in
+  front and the workspaces in use, the time, and a control center of glass
+  tiles (sound, what's playing, network, bluetooth). `flame.autostart("flamebar")`
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run
