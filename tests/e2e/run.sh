@@ -960,7 +960,9 @@ n = sum(px[(y * w + x) * 3] for y in range(200, 260, 2) for x in range(w - 320, 
 print(n)
 \"; }
 click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.8; }
-env -u DBUS_SESSION_BUS_ADDRESS $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+# no session bus: the user's would be found through XDG_RUNTIME_DIR, and
+# its notifications would come here
+DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
 sleep 1
 $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
@@ -976,6 +978,45 @@ echo opened \$([ \$b -gt \$((a + a / 20)) ] && echo brighter)
 echo closed \$([ \$c -lt \$((b - b / 40)) ] && echo darker)" \
 	"under flamefiles True 4 36 1272 680" "open flamefiles True 4 36 1272 680" \
 	"closed flamefiles True 4 36 1272 680" "opened brighter" "closed darker"
+case_run "flamebar: notifications: a card for each, its action back to the app, clicks beside it go to the windows" "
+win() { $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['x'])\"; }
+# the cards' corner of the screen, how bright: a card there or not
+bright() { grim -t ppm \$1.ppm; python3 -I -c \"
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+print(sum(px[(y * w + x) * 3] for y in range(46, 96, 2) for x in range(w - 320, w - 20, 2)))
+\"; }
+click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.6; }
+# a session bus of the case's own: never the user's
+bus=\$(dbus-daemon --session --fork --print-address=1 --print-pid=1 --nopidfile)
+export DBUS_SESSION_BUS_ADDRESS=\$(echo \"\$bus\" | sed -n 1p)
+buspid=\$(echo \"\$bus\" | sed -n 2p)
+$(dirname $CTL)/flamebar > /dev/null 2>&1 &
+sleep 1
+gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.GetServerInformation
+$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+sleep 1.2
+$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+sleep 1.5
+click 1000 400
+echo focused \$([ \$(win) -gt 100 ] && echo right)
+a=\$(bright a)
+notify-send -a Test 'hello' 'from the tests'
+sleep 1
+b=\$(bright b)
+echo card \$([ \$b -gt \$((a + a / 20)) ] && echo shown)
+# the bar's taller for the card, all across: the left window under it still
+# takes the click
+click 300 80
+echo beside \$(win)
+(notify-send -a Test 'click me' 'please' --action=default=Open > act.txt &)
+sleep 1.2
+click 1100 70
+sleep 0.5
+echo action \$(cat act.txt)
+kill \$buspid" \
+	"('flame', 'flame', '0.1', '1.2')" "focused right" "card shown" "beside 4" "action default"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt

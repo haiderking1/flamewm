@@ -17,10 +17,9 @@
 #include "../flameui/flameui.h"
 #include "bus.h"
 #include "control.h"
+#include "notes.h"
 
 #define BAR_H 32
-#define TEXT 0xffffffff
-#define TEXT_DIM 0xffffffb3
 #define F_APP "Inter Semi-Bold 10.5"
 #define F_BAR "Inter Medium 10.5"
 
@@ -36,9 +35,12 @@ struct app {
 	char app_name[128];
 	int workspace;
 	bool used[WORKSPACES + 1];
-	bool control_open;
+	// what's open under the bar: the control center or the notifications
+	enum { OPEN_NONE, OPEN_CONTROL, OPEN_LIST } open;
 	int popped; // how tall the surface was grown for it (open, or closing), 0: not
+	int grown; // how tall it was grown for cards with nothing open, 0: not
 	struct control control;
+	struct notes notes;
 };
 
 static void woken(void *data) {
@@ -193,6 +195,42 @@ static void clock_tick(struct fui *ui, void *data) {
 	fui_redraw(ui);
 }
 
+#define LIST_MAX 600 // the notifications list's tallest, it scrolls past that
+
+// what's in a popover: the control center, or the notifications list
+struct popover_draw {
+	struct app *app;
+	bool control;
+	double list_h;
+};
+
+// a popover under the bar at right, top, faded in by shown: as one, a
+// group the size of it (not of the screen), straight in once it's all there
+static void popover(struct fui *ui, double right, double top, double shown,
+		struct popover_draw what, struct fui_pane *panes, int *n) {
+	cairo_t *cr = fui_cairo(ui);
+	bool fading = shown < 1;
+	cairo_save(cr);
+	cairo_rectangle(cr, right - CONTROL_W - 14, top - 2, CONTROL_W + 16,
+		fui_height(ui) - top + 2);
+	cairo_clip(cr);
+	if (fading) {
+		cairo_push_group(cr);
+	}
+	if (what.control) {
+		struct control *c = &what.app->control;
+		c->room = fui_height(ui) - top - 16;
+		*n += control_frame(ui, c, right, top, panes + *n, 16 - *n);
+	} else {
+		notes_list(ui, &what.app->notes, right, top, what.list_h, panes, n, 16);
+	}
+	if (fading) {
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, shown);
+	}
+	cairo_restore(cr);
+}
+
 static void frame(struct fui *ui, void *data) {
 	struct app *app = data;
 	int w = fui_width(ui);
@@ -232,80 +270,122 @@ static void frame(struct fui *ui, void *data) {
 		x += dw + 7;
 	}
 
-	// the right: the time, the control center's button
+	// the right: the time (the notifications open under it), the control
+	// center's button, a moon while it's do not disturb
 	time_t now = time(NULL);
 	struct tm tm;
 	localtime_r(&now, &tm);
 	char when[64];
 	strftime(when, sizeof(when), "%a %-d %b  %H:%M", &tm);
-	double rx = w - 18;
-	rx -= shadowed_text(ui, rx, cy - 8, when, F_BAR, TEXT, FUI_RIGHT, 0) + 14;
-	double pw = 38, ph = 24, px = rx - pw;
+	double tw = fui_text_width(ui, when, F_BAR), tx = w - 18 - tw;
+	bool over_clock = fui_hover(ui, tx - 8, cy - 12, tw + 16, 24);
+	double clock_lit = fui_ease(ui, fui_id("clock", 0),
+		over_clock || app->open == OPEN_LIST ? 1 : 0, 20);
+	if (clock_lit > 0.01) {
+		fui_fill_rounded(ui, tx - 8, cy - 12, tw + 16, 24, 12,
+			0xffffff00 | (uint32_t)(0x33 * clock_lit));
+	}
+	shadowed_text(ui, w - 18, cy - 8, when, F_BAR, TEXT, FUI_RIGHT, 0);
+	double pw = 38, ph = 24, px = tx - 14 - pw;
 	bool over = fui_hover(ui, px, cy - ph / 2, pw, ph);
-	double lit = fui_ease(ui, fui_id("control", 0), over || app->control_open ? 1 : 0, 20);
+	double lit = fui_ease(ui, fui_id("control", 0),
+		over || app->open == OPEN_CONTROL ? 1 : 0, 20);
 	if (lit > 0.01) {
 		fui_fill_rounded(ui, px, cy - ph / 2, pw, ph, ph / 2,
 			0xffffff00 | (uint32_t)(0x33 * lit));
 	}
 	switches_mark(ui, px + pw / 2, cy, TEXT);
-	if (over) {
+	if (notify_quiet(app->notes.notify)) {
+		cairo_save(cr);
+		cairo_translate(cr, 0, 0.6);
+		fui_color(ui, 0x00000059);
+		icon_moon(cr, px - 12, cy, 17);
+		cairo_restore(cr);
+		fui_color(ui, TEXT);
+		icon_moon(cr, px - 12, cy, 17);
+	}
+	if (over || over_clock) {
 		fui_cursor_pointer(ui);
 	}
-	bool toggled = fui_clicked(ui, px, cy - ph / 2, pw, ph);
+	bool toggled = false;
+	if (fui_clicked(ui, px, cy - ph / 2, pw, ph)) {
+		app->open = app->open == OPEN_CONTROL ? OPEN_NONE : OPEN_CONTROL;
+		toggled = true;
+	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)) {
+		app->open = app->open == OPEN_LIST ? OPEN_NONE : OPEN_LIST;
+		toggled = true;
+		if (app->open == OPEN_LIST) {
+			notify_seen(app->notes.notify); // there they are: no cards after
+		}
+	}
 	if (toggled) {
 		// the surface asked to grow for it in this frame, not the next
-		app->control_open = !app->control_open;
 		fui_redraw(ui);
 	}
 
-	// the control center: in while open, out after; the surface grown for
-	// it till it's gone
-	double shown = fui_ease(ui, fui_id("control center", 0), app->control_open ? 1 : 0, 14);
+	// what opens under it: in while open, out after (one goes as the other
+	// comes); the surface grown for it till it's gone
+	double right = w - 12, top = BAR_H + 6;
+	double control = fui_ease(ui, fui_id("control center", 0), app->open == OPEN_CONTROL, 14);
+	double list = fui_ease(ui, fui_id("notifications", 0), app->open == OPEN_LIST, 14);
+	double list_h = app->open == OPEN_LIST || list > 0.01
+		? notes_list_height(ui, &app->notes, LIST_MAX) : 0;
+	double needs = fmax(app->open == OPEN_CONTROL || control > 0.01
+		? control_height(&app->control) : 0, list_h);
 	// as tall as it is now (a list of devices opens in it)
-	int tall = (int)(BAR_H + 6 + control_height(&app->control) + 16);
-	if ((app->control_open || app->popped) && app->popped < tall) {
+	int tall = (int)(BAR_H + 6 + needs + 16);
+	if ((app->open || app->popped) && app->popped < tall) {
 		app->popped = tall;
+		app->grown = 0;
 		fui_panel_popup(ui, tall);
 	}
 	bool outside = fui_panel_outside(ui);
-	struct fui_pane panes[8];
+	struct fui_pane panes[16];
 	int n = 0;
-	if (shown > 0.01 && fui_height(ui) > BAR_H) {
+
+	// the cards, under whatever opens: they go while it's there
+	struct fui_rect rects[1 + 8] = {{0, 0, w, BAR_H}};
+	int n_rects = 1;
+	double want, cards = notes_cards(ui, &app->notes, right, top,
+		app->open || control > 0.01 || list > 0.01, panes, &n, 16, rects, &n_rects, 9, &want);
+
+	if (control > 0.01 && fui_height(ui) > BAR_H) {
 		// where it stays: it fades in there, nothing moves
-		double right = w - 12, top = BAR_H + 6;
-		// faded as one: a group the size of it, not of the screen. all
-		// there, it's drawn straight in
-		bool fading = shown < 1;
-		cairo_save(cr);
-		cairo_rectangle(cr, right - CONTROL_W - 2, top - 2, CONTROL_W + 4,
-			fui_height(ui) - top + 2);
-		cairo_clip(cr);
-		if (fading) {
-			cairo_push_group(cr);
-		}
-		app->control.room = fui_height(ui) - top - 16;
-		n = control_frame(ui, &app->control, right, top, panes, 8);
-		if (fading) {
-			cairo_pop_group_to_source(cr);
-			cairo_paint_with_alpha(cr, shown);
-		}
-		cairo_restore(cr);
+		popover(ui, right, top, control, (struct popover_draw){.app = app, .control = true},
+			panes, &n);
+	}
+	if (list > 0.01 && fui_height(ui) > BAR_H) {
+		popover(ui, right, top, list, (struct popover_draw){.app = app, .list_h = list_h},
+			panes, &n);
+	}
+	notes_done(&app->notes);
+	if (app->open) {
 		// a click outside it (and not on its button) closes it
-		double ch = control_height(&app->control);
-		bool inside = fui_hover(ui, right - CONTROL_W, top, CONTROL_W, ch);
-		if (app->control_open && (outside || (!inside && !toggled
-				&& fui_clicked(ui, 0, 0, w, fui_height(ui))))) {
-			app->control_open = false;
+		double ch = app->open == OPEN_CONTROL ? control_height(&app->control) : list_h;
+		bool inside = fui_hover(ui, right - CONTROL_W - 12, top, CONTROL_W + 12, ch);
+		if (outside || (!inside && !toggled && fui_clicked(ui, 0, 0, w, fui_height(ui)))) {
+			app->open = OPEN_NONE;
 			fui_redraw(ui); // the next frame starts it going
 		}
 	}
 	fui_set_glass(ui, n ? panes : NULL, n);
-	fui_set_glass_opacity(ui, shown);
-	if (!app->control_open && shown <= 0.01 && app->popped) {
+	// the glass faded with what opens, all there for the cards
+	fui_set_glass_opacity(ui, cards > 0 ? 1 : fmax(control, list));
+	if (!app->open && control <= 0.01 && list <= 0.01 && app->popped) {
 		app->popped = 0;
 		app->control.picking = -1;
 		fui_panel_popup(ui, 0);
 	}
+	// nothing open: the surface as tall as the cards (grown at once, back
+	// when they're all gone), clicks to them and the bar, the rest through
+	if (!app->popped) {
+		int need = want > 0 ? (int)ceil(want) + 16 : cards > 0 ? app->grown : 0;
+		if (need > app->grown || (!need && app->grown)) {
+			app->grown = need;
+			fui_panel_resize(ui, need);
+		}
+	}
+	fui_set_input(ui, app->grown && !app->popped ? rects : NULL, n_rects);
 
 	// the time's next minute
 	fui_after(ui, (int)(60 - tm.tm_sec) * 1000 + 50, clock_tick, app);
@@ -336,13 +416,16 @@ int main(void) {
 	app.control.media = media_start(session, changed, &app);
 	app.control.network = network_start(system, changed, &app);
 	app.control.bluetooth = bluetooth_start(system, changed, &app);
+	app.notes.notify = app.control.notify = notify_start(session, changed, &app);
 	int status = fui_run(app.ui);
 	// gone before the window: nothing's drawn from them after
 	sound_stop(app.control.sound);
 	media_stop(app.control.media);
 	network_stop(app.control.network);
 	bluetooth_stop(app.control.bluetooth);
+	notify_stop(app.notes.notify);
 	app.control = (struct control){0};
+	app.notes = (struct notes){0};
 	sd_bus_flush_close_unref(session);
 	sd_bus_flush_close_unref(system);
 	if (app.fd >= 0) {

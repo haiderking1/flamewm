@@ -3,8 +3,10 @@
 
 #include "../flameui/flameui.h"
 #include "bluetooth.h"
+#include "look.h"
 #include "media.h"
 #include "network.h"
+#include "notify.h"
 #include "sound.h"
 
 // the control center: tiles of glass under the bar's button, what each
@@ -15,6 +17,7 @@ struct control {
 	struct media *media;
 	struct network *network;
 	struct bluetooth *bluetooth;
+	struct notify *notify; // do not disturb's
 	int dragging; // the slider held: an enum sound_side, -1 for none
 	int picking; // whose devices are listed: an enum sound_side, -1 for none
 	bool media_open; // now playing big
@@ -25,10 +28,8 @@ struct control {
 
 #define CONTROL_W 340
 
-// text that reads over glass or the wallpaper: a soft dark edge under it.
-// how wide it is
-double shadowed_text(struct fui *ui, double x, double y, const char *text, const char *font,
-	uint32_t color, int align, double max_width);
+// a crescent at cx, cy in a s box: do not disturb
+void icon_moon(cairo_t *cr, double cx, double cy, double s);
 
 // how tall it is now (tiles come and go with what there is)
 double control_height(struct control *control);
