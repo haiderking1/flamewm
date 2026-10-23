@@ -1,5 +1,6 @@
 #include "util/spawn.h"
 
+#include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -93,6 +94,40 @@ void spawn(const char *const argv[]) {
 		_exit(child < 0 ? 1 : 0);
 	}
 	waitpid(pid, NULL, 0);
+}
+
+pid_t spawn_reading(const char *const argv[], int *out) {
+	int pipe_fds[2];
+	if (pipe(pipe_fds) < 0) {
+		return -1;
+	}
+	// flame's other fds aren't the child's business, nor is this one's copy
+	fcntl(pipe_fds[0], F_SETFD, FD_CLOEXEC);
+	fcntl(pipe_fds[1], F_SETFD, FD_CLOEXEC);
+	pid_t pid = fork();
+	if (pid < 0) {
+		wlr_log_errno(WLR_ERROR, "fork failed for %s", argv[0]);
+		close(pipe_fds[0]);
+		close(pipe_fds[1]);
+		return -1;
+	}
+	if (pid == 0) {
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, NULL);
+		signal(SIGPIPE, SIG_DFL);
+		setpriority(PRIO_PROCESS, 0, 0);
+		setsid();
+		dup2(pipe_fds[1], STDOUT_FILENO); // dup2 clears close-on-exec on the copy
+		path_near_flame();
+		exec_near_flame(argv);
+		execvp(argv[0], (char *const *)argv);
+		_exit(127);
+	}
+	close(pipe_fds[1]);
+	fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK);
+	*out = pipe_fds[0];
+	return pid;
 }
 
 void spawn_shell(const char *command) {

@@ -123,6 +123,10 @@ static void pump(struct flame_portal *portal) {
 	}
 }
 
+void portal_pump(struct flame_portal *portal) {
+	pump(portal);
+}
+
 static int handle_bus(int fd, uint32_t mask, void *data) {
 	pump(data);
 	return 0;
@@ -834,6 +838,7 @@ bool portal_init(struct flame_portal *portal, struct flame_server *server) {
 		drop_bus(portal);
 		return true;
 	}
+	portal_files_init(portal); // flame works on without them
 	portal->source = wl_event_loop_add_fd(server->loop, sd_bus_get_fd(portal->bus),
 		WL_EVENT_READABLE, handle_bus, portal);
 	portal->timer = wl_event_loop_add_timer(server->loop, handle_timer, portal);
@@ -847,6 +852,7 @@ bool portal_init(struct flame_portal *portal, struct flame_server *server) {
 }
 
 void portal_finish(struct flame_portal *portal) {
+	portal_files_finish(portal);
 	struct portal_session *session, *tmp;
 	wl_list_for_each_safe(session, tmp, &portal->sessions, link) {
 		session_destroy(session);

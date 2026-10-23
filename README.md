@@ -21,7 +21,8 @@ Xwayland needed, Steam and Proton games included.
   an app asking twice (browsers do) doesn't make you pick twice. flame
   draws everything itself, blur and glass included
 - **its own apps**, on its glass: settings (`super+,`), a file manager,
-  flamefiles (`super+e`), and a video and music player, flameplay:
+  flamefiles (`super+e`), that's also every app's open and save dialog
+  and its "show in folder", and a video and music player, flameplay:
   decoded on the gpu (vulkan), subtitles, audio tracks, it remembers where
   you stopped
 - **search** (`super+space`): one field over everything, apps and files in
@@ -52,7 +53,7 @@ make run        # nested inside your current compositor
 make release    # build-release/flamewm
 make test       # unit tests
 make e2e        # end to end tests on headless flames
-sudo make install  # flamewm, flamectl, its apps, the portal files screen sharing needs
+sudo make install  # flamewm, flamectl, its apps, the portal files sharing and dialogs need
 ```
 
 `flamewm -c config -s command -d`: a config file, a command to run once
