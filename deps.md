@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg vulkan-headers shaderc make pkgconf foot
 ```
 
 ## build
@@ -17,6 +17,8 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | pkgconf | - | finds libs and cflags |
 | wayland-protocols | `wayland-protocols` | wlroots headers include its `*-enum.h` files (xdg-shell, cursor-shape, ext-workspace...) |
 | wayland-scanner (comes with `wayland`) | `wayland-scanner` | generates headers from `protocols/*.xml`, layer-shell needs it |
+| vulkan-headers | - | flameplay's gpu decoding: `vulkan/vulkan.h` (ffmpeg's vulkan frames are vulkan objects). nothing's linked, the functions come through ffmpeg's vulkan device |
+| glslc (`shaderc`) | - | flameplay's gpu pass (`tools/flameplay/convert.comp`) built to spir-v, baked into flameplay |
 
 ## link
 
@@ -52,6 +54,8 @@ not linked, flame works without them, these features don't.
 | xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
 | xdg-desktop-portal-gtk | the rest of the portal: file pickers and such |
 | Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
+| a vulkan driver that decodes video (nvidia's, mesa's radv or anv) | flameplay decodes on the gpu (h264, h265, vp9, av1) and hands flame its frames as they are. without one, or for what it can't decode, it decodes on the cpu. `FLAMEPLAY_HWDEC=no` makes it always the cpu |
+| (vulkan-validation-layers, debugging only) | `VK_LOADER_LAYERS_ENABLE='*validation'` checks flameplay's gpu pass |
 | (xdg-desktop-portal-wlr, if you'd rather) | flame's ext-image-copy-capture still serves it, `flamectl share-pick --dmenu` as its dmenu chooser gets you flame's picker |
 
 ## tests

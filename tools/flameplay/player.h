@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "gpu.h"
+
 // flameplay's engine: a file read and decoded on threads of its own (ffmpeg),
 // its sound played through pipewire, its frames turned into pictures the
 // window shows when they're due. the sound is the clock the picture
@@ -38,6 +40,13 @@ bool player_has_video(const struct player *player);
 bool player_has_audio(const struct player *player);
 const char *player_title(const struct player *player);
 
+// decoded on the gpu: its pictures are images there, made by
+// player_gpu_images (dmabufs the window hands flame, their pixels not the
+// cpu's). flame can't take them: player_use_software, it decodes on the cpu
+bool player_gpu(const struct player *player);
+bool player_gpu_images(struct player *player, int count, struct gpu_image *out);
+void player_use_software(struct player *player);
+
 // the pictures frames go into, width x height each (player_size), before
 // it plays
 void player_set_pictures(struct player *player, struct player_picture *pictures, int count);
@@ -49,6 +58,9 @@ bool player_playing(const struct player *player);
 bool player_ended(const struct player *player);
 // to t seconds, exactly that frame
 void player_seek(struct player *player, double t);
+// the frame a seek went to not shown yet, still on its way (decoded from the
+// keyframe before it)
+bool player_seeking(const struct player *player);
 // where it is now, seconds
 double player_time(const struct player *player);
 void player_set_volume(struct player *player, double volume);

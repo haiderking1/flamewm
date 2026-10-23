@@ -3,6 +3,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/pixdesc.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 #include <math.h>
@@ -48,6 +49,7 @@ struct player {
 	int vstream, astream;
 	bool cover; // the video's a still: a song's cover
 	AVCodecContext *vctx, *actx;
+	struct gpu *gpu; // decoding on the gpu (vulkan), NULL: on the cpu
 	double start; // the file's first timestamp: what's 0 here
 	double duration, frame_time;
 	int width, height;
@@ -314,20 +316,27 @@ static bool picture_put(struct player *p, AVFrame *frame, double pts, int serial
 	pic->state = PIC_FILLING;
 	pthread_mutex_unlock(&p->lock);
 
-	bool full = false;
-	enum AVPixelFormat format = plain_format(frame->format, &full);
-	*sws = sws_getCachedContext(*sws, frame->width, frame->height, format, p->width,
-		p->height, AV_PIX_FMT_BGR0, SWS_BICUBIC, NULL, NULL, NULL);
-	if (*sws) {
-		colours(*sws, frame);
-		uint8_t *dst[4] = {pic->pixels};
-		int dst_stride[4] = {pic->stride};
-		sws_scale(*sws, (const uint8_t *const *)frame->data, frame->linesize, 0, frame->height,
-			dst, dst_stride);
+	bool made = false;
+	if (p->gpu) {
+		// on the gpu: our pass into the picture's image
+		made = gpu_convert(p->gpu, frame, (int)(pic - p->pictures));
+	} else if (pic->pixels) {
+		bool full = false;
+		enum AVPixelFormat format = plain_format(frame->format, &full);
+		*sws = sws_getCachedContext(*sws, frame->width, frame->height, format, p->width,
+			p->height, AV_PIX_FMT_BGR0, SWS_BICUBIC, NULL, NULL, NULL);
+		if (*sws) {
+			colours(*sws, frame);
+			uint8_t *dst[4] = {pic->pixels};
+			int dst_stride[4] = {pic->stride};
+			sws_scale(*sws, (const uint8_t *const *)frame->data, frame->linesize, 0,
+				frame->height, dst, dst_stride);
+			made = true;
+		}
 	}
 
 	pthread_mutex_lock(&p->lock);
-	if (serial == p->serial && *sws) {
+	if (serial == p->serial && made) {
 		pic->pts = pts;
 		pic->serial = serial;
 		pic->state = PIC_READY;
@@ -641,6 +650,130 @@ static AVCodecContext *decoder_for(AVStream *stream, int threads) {
 	return ctx;
 }
 
+// the decoder's frames on the gpu when it can (vulkan), else whatever it
+// decodes to on the cpu
+static enum AVPixelFormat pick_format(AVCodecContext *ctx, const enum AVPixelFormat *formats) {
+	for (const enum AVPixelFormat *f = formats; *f != AV_PIX_FMT_NONE; f++) {
+		if (*f == AV_PIX_FMT_VULKAN && ctx->hw_device_ctx) {
+			return *f;
+		}
+	}
+	for (const enum AVPixelFormat *f = formats; *f != AV_PIX_FMT_NONE; f++) {
+		const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(*f);
+		if (desc && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+			return *f;
+		}
+	}
+	return formats[0];
+}
+
+// back to the start of the file, nothing of what was read kept
+static void rewind_file(struct player *p) {
+	int64_t start = p->fmt->start_time != AV_NOPTS_VALUE ? p->fmt->start_time : 0;
+	avformat_seek_file(p->fmt, -1, INT64_MIN, start, start, 0);
+	if (p->vctx) {
+		avcodec_flush_buffers(p->vctx);
+	}
+}
+
+// the video decoded on the gpu: a vulkan decoder, and its first frame
+// really coming out as one (a codec or profile the gpu can't do comes out
+// on the cpu, and then it's decoded there all along)
+// a decoder for the codec that decodes on vulkan: not always the one ffmpeg
+// likes best (av1's is dav1d, cpu only)
+static const AVCodec *vulkan_decoder(enum AVCodecID id) {
+	void *it = NULL;
+	for (const AVCodec *codec; (codec = av_codec_iterate(&it));) {
+		if (codec->id != id || !av_codec_is_decoder(codec)) {
+			continue;
+		}
+		for (int i = 0;; i++) {
+			const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+			if (!config) {
+				break;
+			}
+			if (config->device_type == AV_HWDEVICE_TYPE_VULKAN
+					&& config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) {
+				return codec;
+			}
+		}
+	}
+	return NULL;
+}
+
+static bool open_gpu(struct player *p, AVStream *vs) {
+	AVBufferRef *device = NULL;
+	const AVCodec *codec = vulkan_decoder(vs->codecpar->codec_id);
+	if (!codec) {
+		return false;
+	}
+	struct gpu *gpu = gpu_create(&device);
+	AVCodecContext *ctx = gpu ? avcodec_alloc_context3(codec) : NULL;
+	if (!ctx || avcodec_parameters_to_context(ctx, vs->codecpar) < 0) {
+		avcodec_free_context(&ctx);
+		av_buffer_unref(&device);
+		gpu_destroy(gpu);
+		return false;
+	}
+	ctx->hw_device_ctx = device;
+	ctx->get_format = pick_format;
+	ctx->pkt_timebase = vs->time_base;
+	// the gpu not taking it (a profile it can't, 10-bit h264...) is no
+	// error: it's decoded on the cpu, ffmpeg's complaints kept to debug
+	ctx->log_level_offset = AV_LOG_DEBUG - AV_LOG_ERROR;
+	bool on_gpu = false;
+	AVPacket *packet = av_packet_alloc();
+	AVFrame *frame = av_frame_alloc();
+	if (packet && frame && avcodec_open2(ctx, codec, NULL) >= 0) {
+		bool got = false;
+		for (int n = 0; !got && n < 500 && av_read_frame(p->fmt, packet) >= 0; n++) {
+			if (packet->stream_index == vs->index && avcodec_send_packet(ctx, packet) >= 0) {
+				got = avcodec_receive_frame(ctx, frame) >= 0;
+			}
+			av_packet_unref(packet);
+		}
+		if (!got && avcodec_send_packet(ctx, NULL) >= 0) {
+			got = avcodec_receive_frame(ctx, frame) >= 0;
+		}
+		on_gpu = got && frame->format == AV_PIX_FMT_VULKAN;
+	}
+	av_frame_free(&frame);
+	av_packet_free(&packet);
+	if (!on_gpu) {
+		avcodec_free_context(&ctx);
+		gpu_destroy(gpu);
+		rewind_file(p);
+		return false;
+	}
+	ctx->log_level_offset = 0;
+	p->vctx = ctx;
+	p->gpu = gpu;
+	rewind_file(p);
+	return true;
+}
+
+bool player_gpu(const struct player *p) {
+	return p->gpu != NULL;
+}
+
+bool player_gpu_images(struct player *p, int count, struct gpu_image *out) {
+	return p->gpu && gpu_images(p->gpu, p->width, p->height, count, out);
+}
+
+void player_use_software(struct player *p) {
+	if (!p->gpu) {
+		return;
+	}
+	avcodec_free_context(&p->vctx);
+	gpu_destroy(p->gpu);
+	p->gpu = NULL;
+	p->vctx = decoder_for(p->fmt->streams[p->vstream], 0);
+	rewind_file(p);
+	if (!p->vctx) {
+		p->vstream = -1;
+	}
+}
+
 struct player *player_open(const char *path, void (*wake_f)(void *data), void *data,
 		char *error, size_t error_size) {
 	struct player *p = calloc(1, sizeof(*p));
@@ -676,7 +809,13 @@ struct player *player_open(const char *path, void (*wake_f)(void *data), void *d
 	if (p->vstream >= 0) {
 		AVStream *vs = p->fmt->streams[p->vstream];
 		p->cover = vs->disposition & AV_DISPOSITION_ATTACHED_PIC;
-		p->vctx = decoder_for(vs, 0); // 0: as many threads as it likes
+		// on the gpu if it can be (FLAMEPLAY_HWDEC=no: never), else on the cpu
+		// with as many threads as it likes
+		const char *hwdec = getenv("FLAMEPLAY_HWDEC");
+		bool gpu = !p->cover && !(hwdec && !strcmp(hwdec, "no")) && open_gpu(p, vs);
+		if (!gpu) {
+			p->vctx = decoder_for(vs, 0);
+		}
 		if (p->vctx) {
 			p->width = p->vctx->width;
 			p->height = p->vctx->height;
@@ -759,6 +898,7 @@ void player_close(struct player *p) {
 	}
 	sound_stop(p);
 	avcodec_free_context(&p->vctx);
+	gpu_destroy(p->gpu); // after the decoder: its frames were the gpu's
 	avcodec_free_context(&p->actx);
 	avformat_close_input(&p->fmt);
 	queue_finish(&p->vq);
@@ -829,6 +969,14 @@ bool player_playing(const struct player *p) {
 	bool playing = p->playing;
 	pthread_mutex_unlock((pthread_mutex_t *)&p->lock);
 	return playing;
+}
+
+bool player_seeking(const struct player *p) {
+	struct player *q = (struct player *)p;
+	pthread_mutex_lock(&q->lock);
+	bool seeking = !q->shown_since_seek && !q->vdone;
+	pthread_mutex_unlock(&q->lock);
+	return seeking;
 }
 
 bool player_ended(const struct player *p) {

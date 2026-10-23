@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
 #include "../flameui/flameui.h"
@@ -36,9 +37,10 @@ struct app {
 	double vx, vy, vw, vh; // where the video is in the window
 	// the pointer: where it was, when it last moved (the bar shows)
 	double px, py, moved_at;
-	// the scrubber held: where it's dragged to, when it last seeked
-	bool scrubbing;
-	double scrub_to, scrubbed_at;
+	// the scrubber held: where it's dragged to, where and when it last
+	// seeked, whether it plays on when let go (it's paused while held)
+	bool scrubbing, scrub_resume;
+	double scrub_to, scrub_seeked, scrubbed_at;
 	double volume, unmuted;
 	bool ended_seen;
 };
@@ -85,8 +87,10 @@ static void present(void *data) {
 		fui_layer_show(app->layer, pic->data, app->vx, app->vy, app->vw, app->vh);
 		app->shown_any = true;
 	}
-	// a song's (no picture, or one cover) has nothing to tick for once it's up
-	if (player_has_video(app->player) && (player_playing(app->player) || !app->shown_any)) {
+	// a song's (no picture, or one cover) has nothing to tick for once it's
+	// up, a paused video only for the frame a seek's still decoding
+	if (player_has_video(app->player) && (player_playing(app->player) || !app->shown_any
+			|| player_seeking(app->player))) {
 		tick(app);
 	}
 }
@@ -110,7 +114,9 @@ static void unload(struct app *app) {
 	app->ended_seen = false;
 }
 
-static bool load(struct app *app, const char *path) {
+// path opened (what it is, its title), not playing yet: app->error when it
+// can't be
+static bool open_file(struct app *app, const char *path) {
 	unload(app);
 	snprintf(app->path, sizeof(app->path), "%s", path);
 	app->error[0] = '\0';
@@ -118,14 +124,42 @@ static bool load(struct app *app, const char *path) {
 	const char *slash = strrchr(path, '/');
 	const char *title = app->player ? player_title(app->player) : NULL;
 	snprintf(app->title, sizeof(app->title), "%s", title ? title : slash ? slash + 1 : path);
-	if (!app->player) {
-		return false;
-	}
+	return app->player != NULL;
+}
+
+// the opened file's pictures made, played
+static void start(struct app *app) {
 	int w, h;
 	player_size(app->player, &w, &h);
-	if (player_has_video(app->player)) {
-		// big frames: fewer of them ahead
-		int count = (long)w * h > 1920L * 1088 ? 4 : PICTURES;
+	// big frames: fewer of them ahead
+	int count = (long)w * h > 1920L * 1088 ? 4 : PICTURES;
+	if (player_has_video(app->player) && player_gpu(app->player) && app->layer) {
+		// decoded on the gpu: its images handed to flame as they are
+		struct gpu_image images[PICTURES];
+		bool made = player_gpu_images(app->player, count, images), ok = made;
+		for (int i = 0; ok && i < count; i++) {
+			app->fpics[i] = fui_picture_create_dmabuf(app->layer, images[i].width,
+				images[i].height, images[i].fourcc, images[i].modifier, images[i].fd,
+				images[i].offset, images[i].stride);
+			ok = app->fpics[i] != NULL;
+			if (ok) {
+				app->pictures[i] = (struct player_picture){.data = app->fpics[i]};
+				app->npics++;
+			}
+		}
+		for (int i = 0; made && i < count; i++) {
+			close(images[i].fd); // flame has its own now, or doesn't want it
+		}
+		if (!ok) {
+			// flame can't show those: decoded on the cpu after all
+			for (int i = 0; i < app->npics; i++) {
+				fui_picture_destroy(app->fpics[i]);
+			}
+			app->npics = 0;
+			player_use_software(app->player);
+		}
+	}
+	if (player_has_video(app->player) && !player_gpu(app->player)) {
 		for (int i = 0; i < count; i++) {
 			app->fpics[i] = app->layer ? fui_picture_create(app->layer, w, h) : NULL;
 			if (!app->fpics[i]) {
@@ -136,10 +170,21 @@ static bool load(struct app *app, const char *path) {
 			app->npics++;
 		}
 	}
+	if (player_has_video(app->player)) {
+		fprintf(stderr, "flameplay: %s: decoded on the %s\n", app->title,
+			player_gpu(app->player) ? "gpu (vulkan)" : "cpu");
+	}
 	player_set_pictures(app->player, app->pictures, app->npics);
 	player_set_volume(app->player, app->volume);
 	player_play(app->player);
 	tick(app);
+}
+
+static bool load(struct app *app, const char *path) {
+	if (!open_file(app, path)) {
+		return false;
+	}
+	start(app);
 	return true;
 }
 
@@ -337,20 +382,29 @@ static void bar(struct app *app, double bx, double by, double bw, double bh) {
 	double px, py;
 	fui_pointer(ui, &px, &py);
 	if (duration > 0 && fui_clicked(ui, sx - 6, ty - 8, sw + 12, 16)) {
+		// silent while it's held: only frames, no bits of sound each seek
 		app->scrubbing = true;
+		app->scrub_resume = player_playing(p);
+		app->scrub_seeked = -1;
+		player_pause(p);
 	}
 	if (app->scrubbing) {
 		app->scrub_to = fmax(0, fmin((px - sx) / sw, 1)) * duration;
 		double now = fui_time(ui);
-		if (!fui_button_held(ui)) {
-			app->scrubbing = false;
-			player_seek(p, app->scrub_to);
-			tick(app);
-		} else if (now - app->scrubbed_at > 0.08) {
-			// frames as it's dragged
+		bool held = fui_button_held(ui);
+		// frames as it's dragged, and where it's let go (not again if it's
+		// there already)
+		if (app->scrub_to != app->scrub_seeked && (!held || now - app->scrubbed_at > 0.08)) {
 			app->scrubbed_at = now;
+			app->scrub_seeked = app->scrub_to;
 			player_seek(p, app->scrub_to);
 			tick(app);
+		}
+		if (!held) {
+			app->scrubbing = false;
+			if (app->scrub_resume) {
+				toggle(app);
+			}
 		}
 	}
 }
@@ -550,26 +604,22 @@ static void frame(struct fui *ui, void *data) {
 int main(int argc, char **argv) {
 	struct app app = {.volume = 1, .unmuted = 1};
 	const char *path = argc > 1 ? argv[1] : NULL;
-	// the window's first size: the video's shape, at most 1280 x 720
-	if (path) {
-		char error[256];
-		struct player *probe = player_open(path, NULL, NULL, error, sizeof(error));
-		if (probe) {
-			double aspect = player_aspect(probe);
-			if (player_has_video(probe)) {
-				int w, h;
-				player_size(probe, &w, &h);
-				W = (int)fmin(fmax(w, 640), 1280);
-				H = (int)(W / aspect);
-				if (H > 720) {
-					H = 720;
-					W = (int)(H * aspect);
-				}
-			} else {
-				W = 480;
-				H = 270;
+	// opened before the window: its first size is the video's shape, at
+	// most 1280 x 720 (it plays once the window's up)
+	if (path && open_file(&app, path)) {
+		if (player_has_video(app.player)) {
+			double aspect = player_aspect(app.player);
+			int w, h;
+			player_size(app.player, &w, &h);
+			W = (int)fmin(fmax(w, 640), 1280);
+			H = (int)(W / aspect);
+			if (H > 720) {
+				H = 720;
+				W = (int)(H * aspect);
 			}
-			player_close(probe);
+		} else {
+			W = 480;
+			H = 270;
 		}
 	}
 	app.ui = fui_create(&(struct fui_config){
@@ -593,7 +643,9 @@ int main(int argc, char **argv) {
 	} else {
 		fui_layer_on_release(app.layer, released, &app);
 	}
-	if (path && !load(&app, path)) {
+	if (app.player) {
+		start(&app);
+	} else if (path) {
 		fprintf(stderr, "flameplay: %s: %s\n", path, app.error);
 	}
 	int status = fui_run(app.ui);

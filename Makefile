@@ -109,10 +109,17 @@ $(FILES): $(FILES_SRCS) tools/flamefiles/folder.h tools/flamefiles/ops.h \
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(FILES_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
 
-PLAY_SRCS := tools/flameplay/main.c tools/flameplay/player.c
-$(PLAY): $(PLAY_SRCS) tools/flameplay/player.h $(FLAMEUI_DEPS)
+# flameplay's gpu pass: glsl to spir-v, as a c array gpu.c includes
+PLAY_GEN := $(BUILD)/gen-play
+$(PLAY_GEN)/convert.spv.inc: tools/flameplay/convert.comp
 	@mkdir -p $(dir $@)
-	$(UI_CC) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
+	glslc --target-env=vulkan1.3 -O -mfmt=c -o $@ $<
+
+PLAY_SRCS := tools/flameplay/main.c tools/flameplay/player.c tools/flameplay/gpu.c
+$(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h \
+		$(PLAY_GEN)/convert.spv.inc $(FLAMEUI_DEPS)
+	@mkdir -p $(dir $@)
+	$(UI_CC) -I$(PLAY_GEN) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3)
 
 # the ipc client, plain libc
