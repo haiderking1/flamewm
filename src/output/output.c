@@ -122,12 +122,13 @@ static bool output_enable(struct wlr_output *wlr_output, const struct flame_conf
 			wlr_output_state_set_mode(&state, preferred);
 		}
 	}
-	// tests: a headless screen the size of a real one, FLAME_HEADLESS_SIZE=WxH
+	// tests: a headless screen the size and speed of a real one,
+	// FLAME_HEADLESS_SIZE=WxH or WxH@HZ
 	const char *size = getenv("FLAME_HEADLESS_SIZE");
-	int width, height;
+	int width, height, hz = 0;
 	if (size && wlr_output_is_headless(wlr_output)
-			&& sscanf(size, "%dx%d", &width, &height) == 2 && width > 0 && height > 0) {
-		wlr_output_state_set_custom_mode(&state, width, height, 0);
+			&& sscanf(size, "%dx%d@%d", &width, &height, &hz) >= 2 && width > 0 && height > 0) {
+		wlr_output_state_set_custom_mode(&state, width, height, hz > 0 ? hz * 1000 : 0);
 	}
 
 	// frames with alpha, 32 bits either way: nvidia reads an XRGB buffer
