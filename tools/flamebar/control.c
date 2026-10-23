@@ -108,6 +108,21 @@ static void icon_skip(cairo_t *cr, double cx, double cy, double s, int dir) {
 	cairo_fill(cr);
 }
 
+// a sun: a disc and its rays
+void icon_sun(cairo_t *cr, double cx, double cy, double s) {
+	cairo_new_path(cr);
+	cairo_arc(cr, cx, cy, s * 0.2, 0, 2 * M_PI);
+	cairo_fill(cr);
+	for (int i = 0; i < 8; i++) {
+		double a = i * M_PI / 4;
+		cairo_move_to(cr, cx + cos(a) * s * 0.3, cy + sin(a) * s * 0.3);
+		cairo_line_to(cr, cx + cos(a) * s * 0.42, cy + sin(a) * s * 0.42);
+	}
+	cairo_set_line_width(cr, s * 0.08);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_stroke(cr);
+}
+
 // a crescent: a circle with a bite out of it
 void icon_moon(cairo_t *cr, double cx, double cy, double s) {
 	double r = s * 0.36;
@@ -542,9 +557,44 @@ static void level_tile(struct fui *ui, struct control *c, enum sound_side side, 
 	}
 }
 
+// the screen's brightness, over the sound: a laptop's panel, or a monitor
+// that's asked over its cable. only when there's one
+static void display_tile(struct fui *ui, struct control *c, double x, double y) {
+	cairo_t *cr = fui_cairo(ui);
+	shadowed_text(ui, x + 20, y + 14, "Display", F_TITLE, TEXT, FUI_LEFT, 0);
+	double sy = y + 56, sx = x + 48, sw = CONTROL_W - 48 - 26, th = 8;
+	fui_color(ui, TEXT);
+	icon_sun(cr, x + 26, sy, 18);
+	double level = backlight_get(c->backlight);
+	fui_fill_rounded(ui, sx, sy - th / 2, sw, th, th / 2, 0xffffff40);
+	fui_fill_rounded(ui, sx, sy - th / 2, fmax(sw * level, th), th, th / 2, TEXT);
+	if (fui_hover(ui, sx - 8, sy - 14, sw + 16, 28)) {
+		fui_cursor_pointer(ui);
+	}
+	if (fui_clicked(ui, sx - 8, sy - 14, sw + 16, 28)) {
+		c->dragging = DRAGGING_DISPLAY;
+	}
+	if (c->dragging == DRAGGING_DISPLAY) {
+		double px, py;
+		fui_pointer(ui, &px, &py);
+		double v = fmax(0, fmin((px - sx) / sw, 1));
+		if (fabs(v - level) > 0.004) {
+			backlight_set(c->backlight, v);
+		}
+		c->dragging = fui_button_held(ui) ? DRAGGING_DISPLAY : -1;
+		fui_redraw(ui);
+	}
+}
+
+// how tall the display's tile and the gap under it are: 0 with no screen
+// to make brighter
+static double display_room(struct control *c) {
+	return backlight_there(c->backlight) ? SOUND_H + GAP : 0;
+}
+
 double control_height(struct control *c) {
 	double h = (c->media_open ? MEDIA_H + GAP + TILE_H : 2 * TILE_H + GAP) + GAP + TILE_H
-		+ 2 * (GAP + SOUND_H);
+		+ display_room(c) + 2 * (GAP + SOUND_H);
 	return c->picking >= 0 ? h + list_height(c, (enum sound_side)c->picking) : h;
 }
 
@@ -592,7 +642,8 @@ int control_frame(struct fui *ui, struct control *c, double right, double top,
 		h[side] = SOUND_H + open[side] * list_height(c, (enum sound_side)side);
 	}
 	double quiet_y = fmax(net_y, bt_y) + TILE_H + GAP;
-	double out_y = quiet_y + TILE_H + GAP;
+	double display_y = quiet_y + TILE_H + GAP;
+	double out_y = display_y + display_room(c);
 	double in_y = out_y + h[SOUND_OUTPUT] + GAP;
 	int n = 0;
 	struct fui_pane tiles[] = {
@@ -610,6 +661,12 @@ int control_frame(struct fui *ui, struct control *c, double right, double top,
 	}
 	quiet_tile(ui, c, x, quiet_y);
 	media_tile(ui, c, mx, y, mw, mh, grow);
+	if (display_room(c) > 0) {
+		if (n < max) {
+			panes[n++] = glass(x, display_y, CONTROL_W, SOUND_H, 28);
+		}
+		display_tile(ui, c, x, display_y);
+	}
 	level_tile(ui, c, SOUND_OUTPUT, x, out_y, h[SOUND_OUTPUT], open[SOUND_OUTPUT]);
 	level_tile(ui, c, SOUND_INPUT, x, in_y, h[SOUND_INPUT], open[SOUND_INPUT]);
 	return n;

@@ -3,13 +3,18 @@
 
 #include <systemd/sd-bus.h>
 
-// the screen's backlight (a laptop's): how bright it is, set through
-// logind (no root, no udev rule). a monitor on a cable has none
+#include <stdbool.h>
+
+// how bright the screen is: a laptop's panel (its backlight, through
+// logind), else the monitors on cables (asked over the cable, ddc/ci, on a
+// thread of its own: it's slow). see backlight.c
 
 struct backlight;
 
-struct backlight *backlight_start(sd_bus *system); // NULL when there's none
+struct backlight *backlight_start(sd_bus *system);
 void backlight_stop(struct backlight *backlight);
+// there's something to make brighter (monitors: once they've been looked for)
+bool backlight_there(struct backlight *backlight);
 double backlight_get(struct backlight *backlight); // 0 to 1
 void backlight_set(struct backlight *backlight, double level);
 
