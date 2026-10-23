@@ -35,7 +35,8 @@ Xwayland needed, Steam and Proton games included.
   front and the workspaces in use, the time, and a control center of glass
   tiles (sound, what's playing, network, bluetooth, do not disturb).
   notifications too: cards that slide in under it, the list of them under
-  the time. `flame.autostart("flamebar")`
+  the time. the media keys (volume, mute, brightness, play) show what they
+  changed on glass for a moment. `flame.autostart("flamebar")`
 - an **ipc socket** for bars and scripts, and ext-workspace for waybar
 
 ## build + run

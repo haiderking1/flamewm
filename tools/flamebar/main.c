@@ -18,6 +18,7 @@
 #include "bus.h"
 #include "control.h"
 #include "notes.h"
+#include "osd.h"
 
 #define BAR_H 32
 #define F_APP "Inter Semi-Bold 10.5"
@@ -41,6 +42,7 @@ struct app {
 	int grown; // how tall it was grown for cards with nothing open, 0: not
 	struct control control;
 	struct notes notes;
+	struct osd osd; // what a media key just changed
 };
 
 static void woken(void *data) {
@@ -76,8 +78,70 @@ static void pretty_name(const char *app_id, char *out, size_t size) {
 	}
 }
 
+static double now_seconds(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
+// a sixteenth up or down, on the sixteenths: the steps a key takes
+static double step(double level, int by) {
+	return fmax(0, fmin(round(level * 16 + by) / 16, 1));
+}
+
+// a media key flame sent: changed, and shown for a moment (not while the
+// control center's open: its sliders show it)
+static void media_key(struct app *app, const char *key) {
+	struct control *c = &app->control;
+	double volume, now = now_seconds();
+	bool muted;
+	char name[128];
+	bool up = !strcmp(key, "volume-up");
+	if (up || !strcmp(key, "volume-down")) {
+		if (!sound_get(c->sound, SOUND_OUTPUT, &volume, &muted, name, sizeof(name))) {
+			return;
+		}
+		volume = step(volume, up ? 1 : -1);
+		sound_set_volume(c->sound, SOUND_OUTPUT, volume);
+		if (up && muted) {
+			sound_set_muted(c->sound, SOUND_OUTPUT, false); // up's heard
+			muted = false;
+		}
+		osd_show(&app->osd, OSD_VOLUME, volume, muted, now);
+	} else if (!strcmp(key, "mute")) {
+		if (sound_get(c->sound, SOUND_OUTPUT, &volume, &muted, name, sizeof(name))) {
+			sound_set_muted(c->sound, SOUND_OUTPUT, !muted);
+			osd_show(&app->osd, OSD_VOLUME, volume, !muted, now);
+		}
+	} else if (!strcmp(key, "mic-mute")) {
+		if (sound_get(c->sound, SOUND_INPUT, &volume, &muted, name, sizeof(name))) {
+			sound_set_muted(c->sound, SOUND_INPUT, !muted);
+			osd_show(&app->osd, OSD_MIC, volume, !muted, now);
+		}
+	} else if (!strncmp(key, "brightness-", 11)) {
+		if (c->backlight) {
+			double level = step(backlight_get(c->backlight), !strcmp(key, "brightness-up")
+				? 1 : -1);
+			backlight_set(c->backlight, level);
+			osd_show(&app->osd, OSD_BRIGHTNESS, level, false, now);
+		}
+	} else if (!strcmp(key, "play-pause")) {
+		media_control(c->media, "PlayPause");
+	} else if (!strcmp(key, "next")) {
+		media_control(c->media, "Next");
+	} else if (!strcmp(key, "previous")) {
+		media_control(c->media, "Previous");
+	}
+	fui_redraw(app->ui);
+}
+
 static void took_state(struct app *app, const char *text) {
 	struct json *state = json_parse(text);
+	if (state && !strcmp(json_str(json_get(state, "event"), ""), "key")) {
+		media_key(app, json_str(json_get(state, "key"), ""));
+		json_free(state);
+		return;
+	}
 	if (!state || strcmp(json_str(json_get(state, "event"), ""), "state")) {
 		json_free(state);
 		return;
@@ -134,8 +198,10 @@ static void readable(struct fui *ui, int fd, void *data) {
 static void connect_later(struct fui *ui, void *data) {
 	struct app *app = data;
 	app->fd = ipc_connect();
-	if (app->fd < 0 || write(app->fd, "subscribe\n", 10) != 10 || !fui_watch(ui, app->fd,
-			readable, app)) {
+	// what's where as it changes, and the media keys
+	static const char ask[] = "subscribe\nmedia-keys\n";
+	if (app->fd < 0 || write(app->fd, ask, sizeof(ask) - 1) != (ssize_t)sizeof(ask) - 1
+			|| !fui_watch(ui, app->fd, readable, app)) {
 		if (app->fd >= 0) {
 			close(app->fd);
 			app->fd = -1;
@@ -372,10 +438,19 @@ static void frame(struct fui *ui, void *data) {
 	int n = 0;
 
 	// the cards, under whatever opens: they go while it's there
-	struct fui_rect rects[1 + 8] = {{0, 0, w, BAR_H}};
+	struct fui_rect rects[1 + 9] = {{0, 0, w, BAR_H}};
 	int n_rects = 1;
-	double want, cards = notes_cards(ui, &app->notes, right, top,
-		app->open || control > 0.01 || list > 0.01, panes, &n, 16, rects, &n_rects, 9, &want);
+	bool covered = app->open || control > 0.01 || list > 0.01;
+	// what a media key changed over the cards, the cards moved down for it
+	double osd = osd_frame(ui, &app->osd, &app->control, right, top, covered, panes, &n, 16,
+		rects, &n_rects, 10);
+	double want, cards = notes_cards(ui, &app->notes, right, top + osd, covered, panes, &n, 16,
+		rects, &n_rects, 10, &want);
+	double osd_in = osd / (OSD_H + 10), on_cards = cards;
+	if (osd > 0) {
+		want = fmax(want, top + OSD_H);
+		cards = fmax(cards, top + OSD_H);
+	}
 
 	if (control > 0.01 && fui_height(ui) > BAR_H) {
 		// where it stays: it fades in there, nothing moves
@@ -398,7 +473,9 @@ static void frame(struct fui *ui, void *data) {
 	}
 	fui_set_glass(ui, n ? panes : NULL, n);
 	// the glass faded with what opens, all there for the cards
-	fui_set_glass_opacity(ui, cards > 0 ? 1 : fmax(control, list));
+	// the glass faded with what opens or with the popup alone, all there
+	// for the cards
+	fui_set_glass_opacity(ui, on_cards > 0 ? 1 : fmax(fmax(control, list), osd_in));
 	if (!app->open && control <= 0.01 && list <= 0.01 && app->popped) {
 		app->popped = 0;
 		app->control.picking = -1;
@@ -445,6 +522,7 @@ int main(void) {
 	app.control.network = network_start(system, changed, &app);
 	app.control.bluetooth = bluetooth_start(system, changed, &app);
 	app.notes.notify = app.control.notify = notify_start(session, changed, &app);
+	app.control.backlight = backlight_start(system);
 	int status = fui_run(app.ui);
 	// gone before the window: nothing's drawn from them after
 	sound_stop(app.control.sound);
@@ -452,6 +530,7 @@ int main(void) {
 	network_stop(app.control.network);
 	bluetooth_stop(app.control.bluetooth);
 	notify_stop(app.notes.notify);
+	backlight_stop(app.control.backlight);
 	app.control = (struct control){0};
 	app.notes = (struct notes){0};
 	sd_bus_flush_close_unref(session);
