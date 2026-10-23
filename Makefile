@@ -129,10 +129,12 @@ $(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h tools/flame
 	$(UI_CC) -I$(PLAY_GEN) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3 libass uchardet)
 
-BAR_SRCS := tools/flamebar/main.c tools/flamebar/control.c tools/flamebar/bus.c \
+BAR_SRCS := tools/flamebar/main.c tools/flamebar/control.c tools/flamebar/look.c \
+	tools/flamebar/notify.c tools/flamebar/notes.c tools/flamebar/bus.c \
 	tools/flamebar/sound.c tools/flamebar/media.c tools/flamebar/network.c \
 	tools/flamebar/bluetooth.c $(IPC_SRCS)
-BAR_HDRS := tools/flamebar/control.h tools/flamebar/bus.h tools/flamebar/sound.h \
+BAR_HDRS := tools/flamebar/control.h tools/flamebar/look.h tools/flamebar/notify.h \
+	tools/flamebar/notes.h tools/flamebar/bus.h tools/flamebar/sound.h \
 	tools/flamebar/media.h tools/flamebar/network.h tools/flamebar/bluetooth.h
 $(BAR): $(BAR_SRCS) $(BAR_HDRS) $(IPC_DEPS) $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)

@@ -12,32 +12,6 @@
 #define ART_H 176
 #define MEDIA_H (14 + ART_H + 12 + 56 + 30 + 52) // now playing opened
 
-#define TEXT 0xffffffff
-#define TEXT_DIM 0xffffffc7
-#define ON 0x0a84ffff // a switch that's on
-#define F_TITLE "Inter Semi-Bold 10.5"
-#define F_BIG_TITLE "Inter Semi-Bold 12"
-#define F_SUB "Inter Medium 9.5"
-#define F_LIST_TITLE "Inter Semi-Bold 8.5"
-
-// glass like real glass: clear (what's behind it softened, not fogged, a
-// touch dimmed so white reads on a bright wallpaper),
-// its rim a lens bending what's under it, barely lit, one piece
-static struct fui_pane glass(double x, double y, double w, double h, double r) {
-	return (struct fui_pane){(int)x, (int)y, (int)w, (int)h, r, 8, 0x00000026, 1.6, 0.15, 22};
-}
-
-double shadowed_text(struct fui *ui, double x, double y, const char *text, const char *font,
-		uint32_t color, int align, double max_width) {
-	cairo_t *cr = fui_cairo(ui);
-	cairo_push_group(cr);
-	fui_text(ui, x, y + 0.6, text, font, 0x00000059, align, max_width);
-	cairo_pop_group_to_source(cr);
-	cairo_paint(cr);
-	fui_text(ui, x, y, text, font, color, align, max_width);
-	return fui_text_width(ui, text, font);
-}
-
 // ---- icons, drawn at cx, cy in a s box ----
 
 static void icon_wifi(cairo_t *cr, double cx, double cy, double s) {
@@ -134,19 +108,32 @@ static void icon_skip(cairo_t *cr, double cx, double cy, double s, int dir) {
 	cairo_fill(cr);
 }
 
+// a crescent: a circle with a bite out of it
+void icon_moon(cairo_t *cr, double cx, double cy, double s) {
+	double r = s * 0.36;
+	cairo_push_group(cr);
+	cairo_arc(cr, cx, cy, r, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_arc(cr, cx + r * 0.62, cy - r * 0.5, r * 0.82, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_pop_group_to_source(cr);
+	cairo_paint(cr);
+}
+
 // ---- tiles ----
 
 // a switch tile: its icon in a circle (lit when on), its name, how it is.
 // true when clicked
-static bool switch_tile(struct fui *ui, uint64_t id, double x, double y, bool on, bool enabled,
-		void (*icon)(cairo_t *cr, double cx, double cy, double s), const char *name,
-		const char *sub) {
+static bool switch_tile(struct fui *ui, uint64_t id, double x, double y, double w, bool on,
+		bool enabled, void (*icon)(cairo_t *cr, double cx, double cy, double s),
+		const char *name, const char *sub) {
 	cairo_t *cr = fui_cairo(ui);
 	double r = 22, cx = x + 10 + r, cy = y + TILE_H / 2.0;
-	bool hover = enabled && fui_hover(ui, x, y, HALF, TILE_H);
+	bool hover = enabled && fui_hover(ui, x, y, w, TILE_H);
 	double lit = fui_ease(ui, id, hover ? 1 : 0, 20);
 	if (lit > 0.01) {
-		fui_fill_rounded(ui, x, y, HALF, TILE_H, TILE_H / 2.0,
+		fui_fill_rounded(ui, x, y, w, TILE_H, TILE_H / 2.0,
 			0xffffff00 | (uint32_t)(0x14 * lit));
 	}
 	cairo_arc(cr, cx, cy, r, 0, 2 * M_PI);
@@ -154,13 +141,13 @@ static bool switch_tile(struct fui *ui, uint64_t id, double x, double y, bool on
 	cairo_fill(cr);
 	fui_color(ui, enabled ? TEXT : TEXT_DIM);
 	icon(cr, cx, cy, 24);
-	double tx = cx + r + 10, tw = x + HALF - tx - 12;
+	double tx = cx + r + 10, tw = x + w - tx - 12;
 	shadowed_text(ui, tx, cy - 17, name, F_TITLE, TEXT, FUI_LEFT, tw);
 	shadowed_text(ui, tx, cy + 1, sub, F_SUB, TEXT_DIM, FUI_LEFT, tw);
 	if (hover) {
 		fui_cursor_pointer(ui);
 	}
-	return enabled && fui_clicked(ui, x, y, HALF, TILE_H);
+	return enabled && fui_clicked(ui, x, y, w, TILE_H);
 }
 
 static void network_tile(struct fui *ui, struct control *c, double x, double y) {
@@ -169,7 +156,8 @@ static void network_tile(struct fui *ui, struct control *c, double x, double y) 
 	bool wifi = have && (net.wifi || net.wireless);
 	const char *sub = !have ? "Unavailable" : wifi && !net.wifi_on ? "Off"
 		: net.connected ? net.name : "Not Connected";
-	if (switch_tile(ui, fui_id("network", 0), x, y, have && (wifi ? net.wifi_on : net.connected),
+	if (switch_tile(ui, fui_id("network", 0), x, y, HALF, have && (wifi ? net.wifi_on
+			: net.connected),
 			wifi, wifi ? icon_wifi : icon_wired, wifi ? "Wi-Fi" : "Network", sub)) {
 		network_set_wifi(c->network, !net.wifi_on);
 	}
@@ -179,9 +167,18 @@ static void bluetooth_tile(struct fui *ui, struct control *c, double x, double y
 	struct bluetooth_now bt;
 	bool have = bluetooth_get(c->bluetooth, &bt);
 	const char *sub = !have ? "Unavailable" : !bt.on ? "Off" : bt.device[0] ? bt.device : "On";
-	if (switch_tile(ui, fui_id("bluetooth", 0), x, y, have && bt.on, have, icon_bluetooth,
+	if (switch_tile(ui, fui_id("bluetooth", 0), x, y, HALF, have && bt.on, have, icon_bluetooth,
 			"Bluetooth", sub)) {
 		bluetooth_set_on(c->bluetooth, !bt.on);
+	}
+}
+
+// do not disturb: notifications to the list without a card
+static void quiet_tile(struct fui *ui, struct control *c, double x, double y) {
+	bool have = c->notify != NULL, quiet = notify_quiet(c->notify);
+	if (switch_tile(ui, fui_id("quiet", 0), x, y, CONTROL_W, quiet, have, icon_moon,
+			"Do Not Disturb", !have ? "Unavailable" : quiet ? "On" : "Off")) {
+		notify_set_quiet(c->notify, !quiet);
 	}
 }
 
@@ -546,21 +543,15 @@ static void level_tile(struct fui *ui, struct control *c, enum sound_side side, 
 }
 
 double control_height(struct control *c) {
-	double h = (c->media_open ? MEDIA_H + GAP + TILE_H : 2 * TILE_H + GAP) + 2 * (GAP + SOUND_H);
+	double h = (c->media_open ? MEDIA_H + GAP + TILE_H : 2 * TILE_H + GAP) + GAP + TILE_H
+		+ 2 * (GAP + SOUND_H);
 	return c->picking >= 0 ? h + list_height(c, (enum sound_side)c->picking) : h;
-}
-
-// from rest to rest: quickest a third of the way in, a long soft landing
-// (no speed and no push left at the end, nothing stops with a bump)
-static double soft(double t) {
-	t = fmin(fmax(t, 0), 1);
-	return 1 - (1 - t) * (1 - t) * (1 - t) * (1 + 3 * t);
 }
 
 // 0 till a, 1 from b, softly between: a part of an animation that starts
 // later or ends sooner than the rest
 static double phase(double a, double b, double t) {
-	return soft((t - a) / (b - a));
+	return fui_soft((t - a) / (b - a));
 }
 
 // a switch tile, its glass and its insides at x, y
@@ -596,11 +587,12 @@ int control_frame(struct fui *ui, struct control *c, double right, double top,
 	// they follow right under the switches
 	double open[2], h[2];
 	for (int side = 0; side < 2; side++) {
-		open[side] = soft(fui_ramp(ui, fui_id("open", (uint64_t)side), c->picking == side
+		open[side] = fui_soft(fui_ramp(ui, fui_id("open", (uint64_t)side), c->picking == side
 			&& room ? 1 : 0, 0.35));
 		h[side] = SOUND_H + open[side] * list_height(c, (enum sound_side)side);
 	}
-	double out_y = fmax(net_y, bt_y) + TILE_H + GAP;
+	double quiet_y = fmax(net_y, bt_y) + TILE_H + GAP;
+	double out_y = quiet_y + TILE_H + GAP;
 	double in_y = out_y + h[SOUND_OUTPUT] + GAP;
 	int n = 0;
 	struct fui_pane tiles[] = {
@@ -613,6 +605,10 @@ int control_frame(struct fui *ui, struct control *c, double right, double top,
 	}
 	switch_at(ui, c, x, net_y, panes, &n, max, network_tile);
 	switch_at(ui, c, bt_x, bt_y, panes, &n, max, bluetooth_tile);
+	if (n < max) {
+		panes[n++] = glass(x, quiet_y, CONTROL_W, TILE_H, TILE_H / 2.0);
+	}
+	quiet_tile(ui, c, x, quiet_y);
 	media_tile(ui, c, mx, y, mw, mh, grow);
 	level_tile(ui, c, SOUND_OUTPUT, x, out_y, h[SOUND_OUTPUT], open[SOUND_OUTPUT]);
 	level_tile(ui, c, SOUND_INPUT, x, in_y, h[SOUND_INPUT], open[SOUND_INPUT]);
