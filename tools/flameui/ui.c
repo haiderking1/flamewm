@@ -303,6 +303,16 @@ bool fui_key_pressed(const struct fui *ui, uint32_t sym, unsigned mods) {
 	return false;
 }
 
+bool fui_key_at(const struct fui *ui, int i, uint32_t *sym, unsigned *mods, const char **text) {
+	if (ui->focus || i < 0 || i >= ui->keys_len) {
+		return false;
+	}
+	*sym = ui->keys[i].sym;
+	*mods = ui->keys[i].mods;
+	*text = ui->keys[i].text;
+	return true;
+}
+
 bool fui_typing(const struct fui *ui) {
 	return ui->focus != 0;
 }

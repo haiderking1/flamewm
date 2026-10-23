@@ -99,6 +99,7 @@ struct fui {
 	struct zwlr_layer_surface_v1 *catcher_layer;
 	struct wp_viewport *catcher_viewport;
 	bool on_catcher, caught;
+	bool panel_hidden; // unmapped, fui_panel_show brings it back
 	// where clicks land: input_len rects, -1 for all of it. sent with the
 	// frame that changed it
 	struct fui_rect input[FUI_INPUTS];

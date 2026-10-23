@@ -155,6 +155,9 @@ static void draw(struct fui *ui) {
 	cairo_destroy(cr);
 	cairo_surface_flush(target);
 	cairo_surface_destroy(target);
+	if (!ui->configured) {
+		return; // the frame hid it (fui_panel_show): nothing goes on it now
+	}
 
 	glass_send(ui);
 	if (ui->viewport) {
@@ -315,6 +318,9 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 static void panel_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial,
 		uint32_t width, uint32_t height) {
 	struct fui *ui = data;
+	if (ui->panel_hidden) {
+		return; // one for before it was hidden: it's configured again once shown
+	}
 	zwlr_layer_surface_v1_ack_configure(surface, serial);
 	ui->width = width > 0 ? (int)width : ui->width;
 	ui->height = height > 0 ? (int)height : ui->height;
@@ -397,6 +403,41 @@ void fui_panel_popup(struct fui *ui, int height) {
 		| FUI_EDGE_LEFT | FUI_EDGE_RIGHT);
 	zwlr_layer_surface_v1_set_exclusive_zone(ui->catcher_layer, -1); // all of the screen
 	wl_surface_commit(ui->catcher);
+}
+
+// the keys a panel takes, as it's set up (none while it's hidden)
+static void panel_keys(struct fui *ui) {
+	zwlr_layer_surface_v1_set_keyboard_interactivity(ui->layer_surface, ui->panel_hidden
+		? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE
+		: ui->panel.grab_keys ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
+		: ui->panel.keyboard ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+		: ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+}
+
+void fui_panel_show(struct fui *ui, bool shown) {
+	if (!ui->layer_surface || shown == !ui->panel_hidden) {
+		return;
+	}
+	ui->panel_hidden = !shown;
+	panel_keys(ui);
+	if (shown) {
+		// committed with nothing on it: flame configures it again, the
+		// frame after maps it
+		wl_surface_commit(ui->surface);
+		return;
+	}
+	// a frame it was waiting for won't come for a surface that's gone
+	if (ui->frame_callback) {
+		wl_callback_destroy(ui->frame_callback);
+		ui->frame_callback = NULL;
+	}
+	wl_surface_attach(ui->surface, NULL, 0, 0);
+	wl_surface_commit(ui->surface);
+	ui->configured = false;
+}
+
+bool fui_panel_shown(const struct fui *ui) {
+	return ui->layer_surface && !ui->panel_hidden;
 }
 
 void fui_panel_resize(struct fui *ui, int height) {
@@ -817,10 +858,12 @@ struct fui *fui_create(const struct fui_config *config) {
 		zwlr_layer_surface_v1_set_size(ui->layer_surface, (uint32_t)config->width,
 			(uint32_t)config->height);
 		zwlr_layer_surface_v1_set_exclusive_zone(ui->layer_surface, ui->panel.room);
-		zwlr_layer_surface_v1_set_keyboard_interactivity(ui->layer_surface, ui->panel.keyboard
-			? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
-			: ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
-		wl_surface_commit(ui->surface);
+		panel_keys(ui);
+		// hidden: not committed, so never mapped till it's shown
+		ui->panel_hidden = ui->panel.hidden;
+		if (!ui->panel_hidden) {
+			wl_surface_commit(ui->surface);
+		}
 		ui->running = true;
 		return ui;
 	}
