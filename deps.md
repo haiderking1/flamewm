@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp ffmpeg libass uchardet vulkan-headers shaderc make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp librsvg ffmpeg libass uchardet vulkan-headers shaderc make pkgconf foot
 ```
 
 ## build
@@ -39,6 +39,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | ffmpeg's libraries | `libavformat` `libavcodec` `libswscale` `libavutil` | flame's apps (flameui) only: videos' previews (a frame a tenth of the way in, not a black one) and songs' covers in flamefiles. md5 for the thumbnail cache's names |
 | libswresample, pipewire | `libswresample` `libpipewire-0.3` | flameplay: its sound resampled to 48 kHz and played through pipewire, the clock its picture follows |
 | libpulse, sd-bus (systemd) | `libpulse` `libsystemd` | flamebar's control center: the default output's level and mute (pipewire-pulse answers), what's playing (mpris), the network (networkmanager) and bluetooth (bluez) over d-bus |
+| librsvg, gio | `librsvg-2.0` `gio-2.0` | flame's apps (flameui): icons from the desktop's icon theme (gsettings' theme, else gtk's settings.ini, then hicolor), drawn sharp at their size when they're svg. an app's icon on its notifications |
 | uchardet | `uchardet` | flameplay: what encoding a subtitle file that isn't utf-8 is in (old .srt files: windows' arabic, cyrillic, western...), read as that |
 | libass | `libass` | flameplay's subtitles: every text kind (srt, ass, webvtt, a video's own) drawn by it, a styled one the way it was made, a plain one in flame's look. fonts through fontconfig and the ones a file brings |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
