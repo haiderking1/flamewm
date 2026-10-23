@@ -27,6 +27,10 @@ Xwayland needed, Steam and Proton games included.
 - **search** (`super+space`): one field over everything, apps and files in
   your home as you type, a sum's answer, the web. what you open most comes
   up first
+- **a lock screen** (`super+l`, and before the computer sleeps): your
+  wallpaper with the time big over it, your picture and a glass field for
+  the password. locked, nothing but it shows or hears a key, and a lock
+  that crashes stays locked
 - **its own bar**, flamebar: see through over the wallpaper, the app in
   front and the workspaces in use, the time, and a control center of glass
   tiles (sound, what's playing, network, bluetooth, do not disturb).
@@ -80,6 +84,7 @@ mod is super.
 | `super+,` | settings |
 | `super+e` | files |
 | `super+space` | search: apps, files, sums |
+| `super+l` | lock |
 | `super+j` / `super+k` | focus next / prev |
 | `super+f` | fullscreen |
 | `super+1..0` | go to workspace |
