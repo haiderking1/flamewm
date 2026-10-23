@@ -287,6 +287,25 @@ static double clock_room(struct fui *ui, const char *when) {
 	return fui_text_width(ui, text, F_BAR);
 }
 
+// a bell: notifications
+static void bell_mark(cairo_t *cr, double cx, double cy, double s) {
+	cairo_new_path(cr);
+	cairo_move_to(cr, cx - s * 0.3, cy + s * 0.18);
+	cairo_line_to(cr, cx - s * 0.3, cy - s * 0.06);
+	cairo_arc(cr, cx, cy - s * 0.06, s * 0.3, M_PI, 2 * M_PI);
+	cairo_line_to(cr, cx + s * 0.3, cy + s * 0.18);
+	cairo_line_to(cr, cx + s * 0.4, cy + s * 0.27);
+	cairo_line_to(cr, cx - s * 0.4, cy + s * 0.27);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+	// its clapper under it, its ring on top
+	cairo_new_path(cr);
+	cairo_arc(cr, cx, cy + s * 0.36, s * 0.1, 0, 2 * M_PI);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy - s * 0.38, s * 0.06, 0, 2 * M_PI);
+	cairo_fill(cr);
+}
+
 static void clock_tick(struct fui *ui, void *data) {
 	struct app *app = data;
 	battery_refresh(app->battery); // without upower nothing says it changed
@@ -404,8 +423,8 @@ static void frame(struct fui *ui, void *data) {
 	// the button keeps its place as the minutes go: left of the widest
 	// the time is today, not of what it says now
 	double room = clock_room(ui, when);
-	double clock_lit = fui_ease(ui, fui_id("clock", 0),
-		over_clock || app->open == OPEN_LIST ? 1 : 0, 20);
+	// lit when it's pointed at (the bell's lit while the list is open)
+	double clock_lit = fui_ease(ui, fui_id("clock", 0), over_clock ? 1 : 0, 20);
 	if (clock_lit > 0.01) {
 		fui_fill_rounded(ui, tx - 8, cy - 12, tw + 16, 24, 12,
 			0xffffff00 | (uint32_t)(0x33 * clock_lit));
@@ -420,20 +439,43 @@ static void frame(struct fui *ui, void *data) {
 			0xffffff00 | (uint32_t)(0x33 * lit));
 	}
 	switches_mark(ui, px + pw / 2, cy, TEXT);
-	if (notify_quiet(app->notes.notify)) {
+	// the notifications: a bell (the moon while it's do not disturb), a dot
+	// on it when some came since the list was looked at. a click opens the
+	// list, as the time does
+	if (app->open == OPEN_LIST) {
+		notify_seen(app->notes.notify); // there in front of you: seen
+	}
+	double nw = 30, nx = px - 6 - nw;
+	bool over_notes = fui_hover(ui, nx, cy - ph / 2, nw, ph);
+	double notes_lit = fui_ease(ui, fui_id("bell", 0),
+		over_notes || app->open == OPEN_LIST ? 1 : 0, 20);
+	if (notes_lit > 0.01) {
+		fui_fill_rounded(ui, nx, cy - ph / 2, nw, ph, ph / 2,
+			0xffffff00 | (uint32_t)(0x33 * notes_lit));
+	}
+	bool quiet = notify_quiet(app->notes.notify), news = notify_unseen(app->notes.notify);
+	for (int shadow = 1; shadow >= 0; shadow--) {
 		cairo_save(cr);
-		cairo_translate(cr, 0, 0.6);
-		fui_color(ui, 0x00000059);
-		icon_moon(cr, px - 12, cy, 17);
+		cairo_translate(cr, 0, shadow * 0.6);
+		fui_color(ui, shadow ? 0x00000059 : news || quiet ? TEXT : 0xffffffb3);
+		if (quiet) {
+			icon_moon(cr, nx + nw / 2, cy, 17);
+		} else {
+			bell_mark(cr, nx + nw / 2, cy, 16);
+		}
 		cairo_restore(cr);
-		fui_color(ui, TEXT);
-		icon_moon(cr, px - 12, cy, 17);
+	}
+	if (news) {
+		cairo_new_path(cr);
+		cairo_arc(cr, nx + nw / 2 + 5.5, cy - 5.5, 3.3, 0, 2 * M_PI);
+		fui_color(ui, 0x0a84ffff);
+		cairo_fill(cr);
 	}
 	// a laptop's battery, left of those: a desktop has none, nothing's shown
 	struct battery_now power;
 	bool has_power = battery_get(app->battery, &power);
 	bool over_power = false;
-	double power_left = 0, power_right = px - (notify_quiet(app->notes.notify) ? 26 : 8);
+	double power_left = 0, power_right = nx - 4;
 	if (has_power) {
 		char percent[16];
 		snprintf(percent, sizeof(percent), "%.0f%%", power.percent);
@@ -451,7 +493,7 @@ static void frame(struct fui *ui, void *data) {
 	} else if (app->open == OPEN_BATTERY) {
 		app->open = OPEN_NONE; // gone (unplugged, upower gone): nothing to show
 	}
-	if (over || over_clock || over_power) {
+	if (over || over_clock || over_power || over_notes) {
 		fui_cursor_pointer(ui);
 	}
 	bool toggled = false;
@@ -461,7 +503,8 @@ static void frame(struct fui *ui, void *data) {
 	} else if (has_power && fui_clicked(ui, power_left, cy - 12, power_right - power_left, 24)) {
 		app->open = app->open == OPEN_BATTERY ? OPEN_NONE : OPEN_BATTERY;
 		toggled = true;
-	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)) {
+	} else if (fui_clicked(ui, tx - 8, cy - 12, tw + 16, 24)
+			|| fui_clicked(ui, nx, cy - ph / 2, nw, ph)) {
 		app->open = app->open == OPEN_LIST ? OPEN_NONE : OPEN_LIST;
 		toggled = true;
 		if (app->open == OPEN_LIST) {
