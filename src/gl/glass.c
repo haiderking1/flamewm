@@ -22,11 +22,14 @@ static int blur_passes(float blur, float *offset) {
 		*offset = 0;
 		return 0;
 	}
+	// the radius from levels down, not from samples far apart: past about a
+	// texel and a half they skip what's between them, and it comes out in
+	// blocks and bands. another level halves it again
 	int passes = 1;
-	while (passes < GL_BLUR_LEVELS - 1 && (float)(2 << passes) * 1.5f <= blur) {
+	while (passes < GL_BLUR_LEVELS - 1 && blur / (float)(1 << passes) > 1.5f) {
 		passes++;
 	}
-	*offset = fminf(fmaxf(blur / (float)(1 << passes), 1), 4);
+	*offset = fminf(fmaxf(blur / (float)(1 << passes), 0.75f), 1.5f);
 	return passes;
 }
 
@@ -37,13 +40,24 @@ static void texture_params(void) {
 	fglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
+// a texture's side grown to fit needed, with room to spare: glass that
+// grows a little every frame (opening, animated) isn't a new texture every
+// frame
+static int roomy(int needed, int have) {
+	if (needed <= have) {
+		return have;
+	}
+	needed += needed / 4;
+	return (needed + 127) & ~127;
+}
+
 // the copy at least width x height, grown only
 static void copy_ready(struct gl_blur *blur, int width, int height) {
 	if (blur->copy && blur->copy_width >= width && blur->copy_height >= height) {
 		return;
 	}
-	blur->copy_width = width > blur->copy_width ? width : blur->copy_width;
-	blur->copy_height = height > blur->copy_height ? height : blur->copy_height;
+	blur->copy_width = roomy(width, blur->copy_width);
+	blur->copy_height = roomy(height, blur->copy_height);
 	if (!blur->copy) {
 		fglGenTextures(1, &blur->copy);
 	}
@@ -60,8 +74,8 @@ static bool level_ready(struct gl_blur *blur, int i, int width, int height) {
 	if (blur->texture[i] && blur->width[i] >= width && blur->height[i] >= height) {
 		return true;
 	}
-	int w = width > blur->width[i] ? width : blur->width[i];
-	int h = height > blur->height[i] ? height : blur->height[i];
+	int w = roomy(width, blur->width[i]);
+	int h = roomy(height, blur->height[i]);
 	if (!blur->texture[i]) {
 		fglGenTextures(1, &blur->texture[i]);
 		fglGenFramebuffers(1, &blur->fbo[i]);

@@ -74,22 +74,13 @@ static const char vertex_src[] =
 	"	return clamp(0.5 - d, 0.0, 1.0);\n" \
 	"}\n"
 
-#define PRECISION \
-	"#ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
-	"precision highp float;\n" \
-	"#else\n" \
-	"precision mediump float;\n" \
-	"#endif\n"
-
 static const char quad_src[] =
-	PRECISION
 	"uniform vec4 color;\n"
 	"void main() {\n"
 	"	gl_FragColor = color;\n"
 	"}\n";
 
 static const char tex_rgba_src[] =
-	PRECISION
 	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
@@ -99,7 +90,6 @@ static const char tex_rgba_src[] =
 	"}\n";
 
 static const char tex_rgbx_src[] =
-	PRECISION
 	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
@@ -110,7 +100,6 @@ static const char tex_rgbx_src[] =
 
 static const char tex_ext_src[] =
 	"#extension GL_OES_EGL_image_external : require\n"
-	PRECISION
 	SHAPE
 	"varying vec2 v_texcoord;\n"
 	"uniform samplerExternalOES tex;\n"
@@ -124,7 +113,6 @@ static const char tex_ext_src[] =
 // texel in), nothing past it gets read
 
 static const char blur_down_src[] =
-	PRECISION
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform vec2 texel;\n"
@@ -145,7 +133,6 @@ static const char blur_down_src[] =
 	"}\n";
 
 static const char blur_up_src[] =
-	PRECISION
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform vec2 texel;\n"
@@ -176,7 +163,6 @@ static const char blur_up_src[] =
 // (top left) and where the light comes out again (bottom right), and the
 // lip a little brighter all around
 static const char glass_src[] =
-	PRECISION
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform vec4 reach;\n" // where tex starts in the buffer, its allocated size
@@ -226,20 +212,34 @@ static const char glass_src[] =
 	"	gl_FragColor = col * clamp(0.5 - d, 0.0, 1.0) * alpha;\n"
 	"}\n";
 
-static GLuint compile(GLenum type, const char *src) {
+static GLuint compile_as(GLenum type, const char *precision, const char *src, bool quiet) {
 	GLuint shader = fglCreateShader(type);
-	fglShaderSource(shader, 1, &src, NULL);
+	const char *srcs[] = {precision, src};
+	fglShaderSource(shader, 2, srcs, NULL);
 	fglCompileShader(shader);
 	GLint ok = GL_FALSE;
 	fglGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
 	if (ok == GL_FALSE) {
 		char log[1024] = "";
 		fglGetShaderInfoLog(shader, sizeof(log), NULL, log);
-		wlr_log(WLR_ERROR, "gl: a shader doesn't compile: %s", log);
+		if (!quiet) {
+			wlr_log(WLR_ERROR, "gl: a shader doesn't compile: %s", log);
+		}
 		fglDeleteShader(shader);
 		return 0;
 	}
 	return shader;
+}
+
+// a fragment shader in high precision, else medium (a gpu without high).
+// GL_FRAGMENT_PRECISION_HIGH can't be asked (nvidia doesn't say it), and
+// medium is whole pixels past 1024: edges there would come out in steps
+static GLuint compile(GLenum type, const char *src) {
+	if (type != GL_FRAGMENT_SHADER) {
+		return compile_as(type, "", src, false);
+	}
+	GLuint shader = compile_as(type, "precision highp float;\n", src, true);
+	return shader ? shader : compile_as(type, "precision mediump float;\n", src, false);
 }
 
 static bool link_program(struct gl_program *program, const char *fragment_src) {
