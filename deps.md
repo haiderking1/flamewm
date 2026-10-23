@@ -39,6 +39,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | ffmpeg's libraries | `libavformat` `libavcodec` `libswscale` `libavutil` | flame's apps (flameui) only: videos' previews (a frame a tenth of the way in, not a black one) and songs' covers in flamefiles. md5 for the thumbnail cache's names |
 | libswresample, pipewire | `libswresample` `libpipewire-0.3` | flameplay: its sound resampled to 48 kHz and played through pipewire, the clock its picture follows |
 | libpulse, sd-bus (systemd) | `libpulse` `libsystemd` | flamebar's control center: the default output's level and mute (pipewire-pulse answers), what's playing (mpris), the network (networkmanager) and bluetooth (bluez) over d-bus. its notifications: it's the session's notification daemon (org.freedesktop.Notifications) over sd-bus too. the brightness keys and the display slider: a laptop's backlight set through logind (SetBrightness, no root) |
+| libcurl | `libcurl` | flamebar's control center: a player's art on the web (an https cover, at its full size) fetched once into `~/.cache/flame/art` |
 | librsvg, gio | `librsvg-2.0` `gio-2.0` | flame's apps (flameui): icons from the desktop's icon theme (gsettings' theme, else gtk's settings.ini, then hicolor), drawn sharp at their size when they're svg. an app's icon on its notifications |
 | gio-unix | `gio-unix-2.0` | flamesearch: the apps there are (their .desktop files, as they're installed or removed), opened the way they ask (a terminal for a terminal app), a file in the app that opens its kind |
 | pam | `-lpam` (`pam`) | flamelock: the password checked the way a console login checks it (`/etc/pam.d/flamelock`, which `make install` puts there: login's rules). systemd's logind (sd-bus): flame locks before the computer sleeps |
@@ -81,7 +82,7 @@ not linked, flame works without them, these features don't.
 | wayland (client side) | `wayland-client` | `make e2e`: the wayland clients (drag and drop, window sharing, a fullscreen game asking to tear) |
 | gbm (mesa or the nvidia driver), libdrm | `gbm` `libdrm` | `make e2e`: window sharing into gpu buffers, the way the portal takes frames |
 | wl-clipboard | - | `make e2e`: wl-copy and wl-paste, the wayland end of the clipboard tests |
-| python-gobject | - | `make e2e`: the battery test's fake upower (tests/e2e/fakepower.py), an app asking for file dialogs (tests/e2e/askfile.py) |
+| python-gobject | - | `make e2e`: the battery test's fake upower (tests/e2e/fakepower.py), an app asking for file dialogs (tests/e2e/askfile.py), a music player (tests/e2e/fakeplayer.py) |
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |

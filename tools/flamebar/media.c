@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+
+#include "artfetch.h"
 
 // every org.mpris.MediaPlayer2.* on the session bus (but playerctld, it
 // only mirrors the others): its status and what it plays, kept up to date
@@ -21,6 +24,7 @@ struct player {
 	char owner[64]; // its unique one, "" till known
 	bool playing;
 	char title[256], artist[256], art[PATH_MAX];
+	char art_url[PATH_MAX]; // its art on the web, fetched into the cache, "" for none
 	double changed_at;
 	// how long, where it was at position_at (it moves on while it plays),
 	// the track's id (what moving in it names)
@@ -32,7 +36,11 @@ struct player {
 struct media {
 	sd_bus *bus;
 	void (*changed)(void *data);
+	void (*wake)(void *data); // from another thread
 	void *data;
+	// art being fetched (one at a time), the last that couldn't be
+	struct art_fetch *fetch;
+	char fetching[PATH_MAX], failed[PATH_MAX];
 	sd_bus_slot *owners, *properties, *seeked;
 	struct player players[PLAYERS];
 };
@@ -61,8 +69,8 @@ static struct player *by_owner(struct media *m, const char *owner) {
 	return NULL;
 }
 
-// a file:// url's path, %xx undone. "" for anything else (art online isn't
-// fetched)
+// a file:// url's path, %xx undone. "" for anything else (art on the web
+// is fetched, see art_url)
 static void url_path(const char *url, char *out, size_t size) {
 	out[0] = '\0';
 	if (strncmp(url, "file://", 7)) {
@@ -153,7 +161,7 @@ static void set_position(struct player *p, double t) {
 
 // Metadata (a{sv} in a variant): replaced whole
 static void read_metadata(sd_bus_message *msg, struct player *p) {
-	p->title[0] = p->artist[0] = p->art[0] = p->track[0] = '\0';
+	p->title[0] = p->artist[0] = p->art[0] = p->art_url[0] = p->track[0] = '\0';
 	p->length = 0;
 	if (sd_bus_message_enter_container(msg, 'v', "a{sv}") < 0) {
 		sd_bus_message_skip(msg, "v");
@@ -172,7 +180,11 @@ static void read_metadata(sd_bus_message *msg, struct player *p) {
 			} else if (!strcmp(key, "mpris:artUrl")) {
 				char url[PATH_MAX + 16] = "";
 				read_text(msg, url, sizeof(url));
-				url_path(url, p->art, sizeof(p->art));
+				if (art_is_web(url)) {
+					snprintf(p->art_url, sizeof(p->art_url), "%s", url);
+				} else {
+					url_path(url, p->art, sizeof(p->art));
+				}
 			} else if (!strcmp(key, "mpris:length")) {
 				p->length = read_number(msg) / 1e6;
 			} else if (!strcmp(key, "mpris:trackid")) {
@@ -354,7 +366,8 @@ static int listed(sd_bus_message *reply, void *data, sd_bus_error *error) {
 	return 0;
 }
 
-struct media *media_start(sd_bus *bus, void (*changed)(void *data), void *data) {
+struct media *media_start(sd_bus *bus, void (*changed)(void *data), void (*wake)(void *data),
+		void *data) {
 	if (!bus) {
 		return NULL;
 	}
@@ -364,6 +377,7 @@ struct media *media_start(sd_bus *bus, void (*changed)(void *data), void *data) 
 	}
 	m->bus = bus;
 	m->changed = changed;
+	m->wake = wake;
 	m->data = data;
 	sd_bus_add_match_async(bus, &m->owners, "type='signal',sender='org.freedesktop.DBus',"
 		"member='NameOwnerChanged',arg0namespace='org.mpris.MediaPlayer2'", owner_changed, NULL,
@@ -384,6 +398,7 @@ void media_stop(struct media *m) {
 	sd_bus_slot_unref(m->owners);
 	sd_bus_slot_unref(m->properties);
 	sd_bus_slot_unref(m->seeked);
+	art_fetch_free(m->fetch);
 	free(m);
 }
 
@@ -403,11 +418,38 @@ static struct player *shown(struct media *m) {
 	return best;
 }
 
+// p's art on the web: from the cache once it's there, fetched if it isn't
+// (not again if it couldn't be)
+static void web_art(struct media *m, struct player *p) {
+	if (m->fetch) {
+		bool ok;
+		if (!art_fetch_done(m->fetch, &ok)) {
+			return; // one at a time
+		}
+		if (!ok) {
+			snprintf(m->failed, sizeof(m->failed), "%s", m->fetching);
+		}
+		art_fetch_free(m->fetch);
+		m->fetch = NULL;
+	}
+	char path[PATH_MAX];
+	if (!p->art_url[0] || p->art[0] || !art_cached_path(p->art_url, path, sizeof(path))) {
+		return;
+	}
+	if (access(path, R_OK) == 0) {
+		snprintf(p->art, sizeof(p->art), "%s", path);
+	} else if (strcmp(p->art_url, m->failed)) {
+		m->fetch = art_fetch_start(p->art_url, m->wake, m->data);
+		snprintf(m->fetching, sizeof(m->fetching), "%s", p->art_url);
+	}
+}
+
 bool media_get(struct media *m, struct media_now *out) {
 	struct player *p = m ? shown(m) : NULL;
 	if (!p) {
 		return false;
 	}
+	web_art(m, p);
 	out->playing = p->playing;
 	snprintf(out->title, sizeof(out->title), "%s", p->title);
 	snprintf(out->artist, sizeof(out->artist), "%s", p->artist);

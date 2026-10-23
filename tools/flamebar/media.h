@@ -7,21 +7,22 @@
 
 // what's playing, from the players on the session bus (mpris): the one
 // playing, else the one that changed last. changed called when any of it
-// does
+// does, wake (from another thread) when its art from the web is in
 
 struct media;
 
 struct media_now {
 	bool playing;
 	char title[256], artist[256];
-	char art[PATH_MAX]; // a picture file, "" for none
+	char art[PATH_MAX]; // a picture file (the web's fetched into one), "" for none
 	// where it is in it, how long it is (seconds, 0: it doesn't say), and
 	// whether it can be moved to another place in it
 	double position, length;
 	bool can_seek;
 };
 
-struct media *media_start(sd_bus *bus, void (*changed)(void *data), void *data);
+struct media *media_start(sd_bus *bus, void (*changed)(void *data), void (*wake)(void *data),
+	void *data);
 void media_stop(struct media *media);
 
 // false with no player
