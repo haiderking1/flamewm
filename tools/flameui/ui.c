@@ -80,6 +80,7 @@ void fui_frame_end(struct fui *ui) {
 	ui->released = false;
 	ui->scroll = 0;
 	ui->keys_len = 0;
+	ui->entered = 0;
 	fui_dnd_frame_end(ui); // a drop's files were the app's this frame
 	if (!ui->button_down) {
 		ui->active = 0;
@@ -330,6 +331,10 @@ const char *fui_typed(struct fui *ui) {
 		}
 	}
 	return ui->typed;
+}
+
+bool fui_entered(const struct fui *ui, uint64_t id) {
+	return ui->entered == id;
 }
 
 void fui_focus(struct fui *ui, uint64_t id, const char *text) {
@@ -667,6 +672,7 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 				continue;
 			} else if (k->sym == XKB_KEY_Return || k->sym == XKB_KEY_KP_Enter) {
 				committed = true;
+				ui->entered = id;
 			} else if (k->sym == XKB_KEY_Escape) {
 				snprintf(text, (size_t)size, "%s", ui->focus_before);
 				ui->focus = 0;

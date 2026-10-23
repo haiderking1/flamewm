@@ -214,6 +214,8 @@ const char *fui_typed(struct fui *ui);
 // field id has the keys from now on, as if clicked (text: what it says now,
 // escape goes back to it)
 void fui_focus(struct fui *ui, uint64_t id, const char *text);
+// field id had enter pressed in it this frame, changed or not
+bool fui_entered(const struct fui *ui, uint64_t id);
 
 // fd has something to read: f's called from the window's loop, till
 // fui_unwatch. a few at most
