@@ -91,6 +91,14 @@ struct fui {
 	struct xdg_toplevel *toplevel;
 	// a panel's instead
 	struct zwlr_layer_shell_v1 *layer_shell;
+	// the session's lock (config.lock): the manager, the first screen it
+	// goes on, the lock and the surface on that screen
+	struct ext_session_lock_manager_v1 *lock_manager;
+	struct wl_output *output;
+	struct ext_session_lock_v1 *session_lock;
+	struct ext_session_lock_surface_v1 *lock_surface;
+	bool caps; // caps lock's on
+	int status; // what fui_run returns once it's quit: 1 when it went wrong
 	struct zwlr_layer_surface_v1 *layer_surface;
 	struct fui_panel panel;
 	// while it's popped up: a surface under it over all the rest, one

@@ -13,6 +13,7 @@
 
 #include "content-type-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
+#include "ext-session-lock-v1-client-protocol.h"
 #include "flame-eyecandy-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "internal.h"
@@ -313,6 +314,55 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 	.configure = toplevel_configure,
 	.close = toplevel_close,
 };
+
+// ---- the lock ----
+
+static void session_locked(void *data, struct ext_session_lock_v1 *lock) {
+}
+
+// turned away (another locker has it), or flame's done with it
+static void session_finished(void *data, struct ext_session_lock_v1 *lock) {
+	struct fui *ui = data;
+	if (ui->session_lock) {
+		fprintf(stderr, "flameui: the session can't be locked (another lock has it?)\n");
+		ext_session_lock_v1_destroy(ui->session_lock);
+		ui->session_lock = NULL;
+		ui->status = 1;
+		fui_quit(ui);
+	}
+}
+
+static const struct ext_session_lock_v1_listener session_lock_listener = {
+	.locked = session_locked,
+	.finished = session_finished,
+};
+
+static void lock_surface_configure(void *data, struct ext_session_lock_surface_v1 *surface,
+		uint32_t serial, uint32_t width, uint32_t height) {
+	struct fui *ui = data;
+	ext_session_lock_surface_v1_ack_configure(surface, serial);
+	ui->width = (int)width;
+	ui->height = (int)height;
+	ui->configured = true;
+	fui_redraw(ui);
+}
+
+static const struct ext_session_lock_surface_v1_listener lock_surface_listener = {
+	.configure = lock_surface_configure,
+};
+
+void fui_unlock(struct fui *ui) {
+	if (ui->session_lock) {
+		ext_session_lock_v1_unlock_and_destroy(ui->session_lock);
+		ui->session_lock = NULL;
+		wl_display_roundtrip(ui->display);
+	}
+	fui_quit(ui);
+}
+
+bool fui_caps_lock(const struct fui *ui) {
+	return ui->caps;
+}
 
 // a panel's size from flame: what it's stretched to, else what it asked
 static void panel_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial,
@@ -696,6 +746,12 @@ static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard, uint32_
 	struct fui *ui = data;
 	if (ui->xkb_state) {
 		xkb_state_update_mask(ui->xkb_state, depressed, latched, locked, 0, 0, group);
+		bool caps = xkb_state_mod_name_is_active(ui->xkb_state, XKB_MOD_NAME_CAPS,
+			XKB_STATE_MODS_EFFECTIVE) > 0;
+		if (caps != ui->caps) {
+			ui->caps = caps;
+			fui_redraw(ui);
+		}
 	}
 }
 
@@ -773,6 +829,11 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
 		ui->data_manager = wl_registry_bind(registry, name, &wl_data_device_manager_interface,
 			version < 3 ? version : 3);
+	} else if (!strcmp(interface, ext_session_lock_manager_v1_interface.name)) {
+		ui->lock_manager = wl_registry_bind(registry, name,
+			&ext_session_lock_manager_v1_interface, 1);
+	} else if (!strcmp(interface, wl_output_interface.name) && !ui->output) {
+		ui->output = wl_registry_bind(registry, name, &wl_output_interface, 1);
 	} else if (!strcmp(interface, flame_eyecandy_manager_v1_interface.name)) {
 		ui->eyecandy_version = version < 2 ? version : 2;
 		ui->eyecandy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface,
@@ -820,6 +881,11 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->registry = wl_display_get_registry(ui->display);
 	wl_registry_add_listener(ui->registry, &registry_listener, ui);
 	wl_display_roundtrip(ui->display);
+	if (config->lock && (!ui->lock_manager || !ui->output)) {
+		fprintf(stderr, "flameui: the compositor can't lock the session\n");
+		fui_destroy(ui);
+		return NULL;
+	}
 	if (!ui->compositor || !ui->shm || !ui->wm || (config->panel && !ui->layer_shell)) {
 		fprintf(stderr, "flameui: the compositor lacks what a window needs\n");
 		fui_destroy(ui);
@@ -846,6 +912,16 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->input_len = -1; // all of it takes clicks, as any surface does
 	ui->width = config->width;
 	ui->height = config->height;
+	if (config->lock) {
+		// the lock: the surface on the first screen, sized by flame
+		ui->session_lock = ext_session_lock_manager_v1_lock(ui->lock_manager);
+		ext_session_lock_v1_add_listener(ui->session_lock, &session_lock_listener, ui);
+		ui->lock_surface = ext_session_lock_v1_get_lock_surface(ui->session_lock, ui->surface,
+			ui->output);
+		ext_session_lock_surface_v1_add_listener(ui->lock_surface, &lock_surface_listener, ui);
+		ui->running = true;
+		return ui;
+	}
 	if (config->panel) {
 		// a panel: its edges, its room, over the windows
 		ui->panel = *config->panel;
@@ -978,7 +1054,7 @@ int fui_run(struct fui *ui) {
 			draw(ui);
 		}
 	}
-	return 0;
+	return ui->status;
 }
 
 void fui_destroy(struct fui *ui) {

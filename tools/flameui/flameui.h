@@ -44,6 +44,10 @@ struct fui_config {
 	const char *app_id, *title;
 	// NULL: a window
 	const struct fui_panel *panel;
+	// the session's lock instead (ext-session-lock): over everything on the
+	// first screen, nothing else gets a key or the pointer till fui_unlock.
+	// the app gone without it, it stays locked
+	bool lock;
 	int width, height; // what it opens at
 	// how small the user can make it. 0: it can't be resized, it stays
 	// width x height (flame floats it)
@@ -78,6 +82,11 @@ struct fui_rect {
 // it lets them through to what's under it (a panel grown taller than what
 // it shows). NULL: all of it, as a window starts
 void fui_set_input(struct fui *ui, const struct fui_rect *rects, int len);
+
+// the session unlocked (config.lock), and the app's loop ends
+void fui_unlock(struct fui *ui);
+// caps lock's on
+bool fui_caps_lock(const struct fui *ui);
 
 // NULL without a wayland display. runs till the window's closed or fui_quit
 struct fui *fui_create(const struct fui_config *config);
@@ -143,6 +152,9 @@ cairo_t *fui_cairo(struct fui *ui);
 // the window's size now, layout units: what flame made it
 int fui_width(const struct fui *ui);
 int fui_height(const struct fui *ui);
+// how many pixels a layout unit is (1.25 at 125%): a picture made to show
+// sharp is made that much bigger
+double fui_scale(const struct fui *ui);
 double fui_time(const struct fui *ui); // seconds, monotonic
 
 // a value easing toward target, kept by id from frame to frame. speed:
