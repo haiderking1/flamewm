@@ -119,7 +119,7 @@ static void media_key(struct app *app, const char *key) {
 			osd_show(&app->osd, OSD_MIC, volume, !muted, now);
 		}
 	} else if (!strncmp(key, "brightness-", 11)) {
-		if (c->backlight) {
+		if (backlight_there(c->backlight)) {
 			double level = step(backlight_get(c->backlight), !strcmp(key, "brightness-up")
 				? 1 : -1);
 			backlight_set(c->backlight, level);

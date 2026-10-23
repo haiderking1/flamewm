@@ -976,7 +976,7 @@ print(next(x for x in range(w // 2, w) if px[(16 * w + x) * 3] > 200) + 7)
 \"; }
 # no session bus: the user's would be found through XDG_RUNTIME_DIR, and
 # its notifications would come here
-DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+FLAMEBAR_NO_DDC=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
 sleep 1
 $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
@@ -1006,7 +1006,7 @@ click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button 
 bus=\$(dbus-daemon --session --fork --print-address=1 --print-pid=1 --nopidfile)
 export DBUS_SESSION_BUS_ADDRESS=\$(echo \"\$bus\" | sed -n 1p)
 buspid=\$(echo \"\$bus\" | sed -n 2p)
-$(dirname $CTL)/flamebar > /dev/null 2>&1 &
+FLAMEBAR_NO_DDC=1 $(dirname $CTL)/flamebar > /dev/null 2>&1 &
 sleep 1
 gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.GetServerInformation
 $(dirname $CTL)/flamefiles > /dev/null 2>&1 &

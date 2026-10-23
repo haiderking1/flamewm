@@ -17,21 +17,6 @@ void osd_show(struct osd *osd, enum osd_kind kind, double level, bool muted, dou
 	osd->until = now + SHOWN;
 }
 
-// a sun: a disc and its rays
-static void icon_sun(cairo_t *cr, double cx, double cy, double s) {
-	cairo_new_path(cr);
-	cairo_arc(cr, cx, cy, s * 0.2, 0, 2 * M_PI);
-	cairo_fill(cr);
-	for (int i = 0; i < 8; i++) {
-		double a = i * M_PI / 4;
-		cairo_move_to(cr, cx + cos(a) * s * 0.3, cy + sin(a) * s * 0.3);
-		cairo_line_to(cr, cx + cos(a) * s * 0.42, cy + sin(a) * s * 0.42);
-	}
-	cairo_set_line_width(cr, s * 0.08);
-	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-	cairo_stroke(cr);
-}
-
 // the level changed by hand: to the sound server or the screen, and shown
 static void set_level(struct osd *osd, struct control *c, double level) {
 	osd->level = level;
