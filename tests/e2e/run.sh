@@ -7,6 +7,7 @@
 FLAME=$(realpath "$1")
 CTL=$(realpath "$2")
 BIN=$(realpath "$3")
+TESTS=$(cd "$(dirname "$0")" && pwd) # this folder: the cases' own scripts (fakepower.py)
 WORK=$(mktemp -d /tmp/flame-e2e.XXXXXX)
 failed=0
 
@@ -1155,6 +1156,46 @@ print('volume-up', 'again and again' if counts.get('volume-up', 0) > 5 else coun
 PY
 python3 -I keys.py $CTL" \
 	"mute 1" "play-pause 1" "volume-up again and again"
+case_run "flamebar: a laptop's battery in the bar, warned when it's low; a desktop shows none" "
+# the first lit thing right of the bar's middle: the battery's percent
+# when there's one, else the control center's button
+first() { grim -t ppm bar.ppm; python3 -I -c \"
+d = open('bar.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+print(next(x for x in range(w // 2, w) if px[(16 * w + x) * 3] > 200))
+\"; }
+# the cards' corner, how bright: a warning there or not
+cards() { grim -t ppm cards.ppm; python3 -I -c \"
+d = open('cards.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+print(sum(px[(y * w + x) * 3] for y in range(46, 96, 2) for x in range(w - 320, w - 20, 2)))
+\"; }
+power() { echo \"{\\\"IsPresent\\\": \$1, \\\"Type\\\": 2, \\\"State\\\": 2, \\\"Percentage\\\": \$2, \\\"TimeToEmpty\\\": 3600, \\\"TimeToFull\\\": 0}\" > power.json; sleep 1.5; }
+# a system bus and a session bus of the case's own, upower faked on it
+sys=\$(dbus-daemon --session --fork --print-address=1 --print-pid=1 --nopidfile)
+export DBUS_SYSTEM_BUS_ADDRESS=\$(echo \"\$sys\" | sed -n 1p)
+syspid=\$(echo \"\$sys\" | sed -n 2p)
+ses=\$(dbus-daemon --session --fork --print-address=1 --print-pid=1 --nopidfile)
+export DBUS_SESSION_BUS_ADDRESS=\$(echo \"\$ses\" | sed -n 1p)
+sespid=\$(echo \"\$ses\" | sed -n 2p)
+power false 0
+python3 -I $TESTS/fakepower.py power.json > fake.log 2>&1 &
+fakepid=\$!
+sleep 0.5
+FLAMEBAR_NO_DDC=1 $(dirname $CTL)/flamebar > /dev/null 2>&1 &
+sleep 1.5
+desk=\$(first)
+a=\$(cards)
+power true 64
+laptop=\$(first)
+echo desktop \$([ \$laptop -lt \$((desk - 30)) ] && echo none, a laptop has one)
+power true 15
+b=\$(cards)
+echo low \$([ \$b -gt \$((a + a / 20)) ] && echo warned)
+kill \$fakepid \$syspid \$sespid" \
+	"desktop none, a laptop has one" "low warned"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt

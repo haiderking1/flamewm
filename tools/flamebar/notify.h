@@ -67,6 +67,11 @@ void notify_invoke(struct notify *notify, uint32_t id, const char *key);
 // a closed one the bar's done taking away
 void notify_forget(struct notify *notify, uint32_t id);
 
+// one of the bar's own (a low battery): like an app's, *id the one it
+// replaces (0 for none), set to its own
+void notify_post(struct notify *notify, const char *app, const char *icon, const char *summary,
+	const char *body, bool critical, uint32_t *id);
+
 // do not disturb: new ones go to the list without a card (critical ones
 // still get one)
 void notify_set_quiet(struct notify *notify, bool quiet);
