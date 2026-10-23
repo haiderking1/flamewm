@@ -703,6 +703,8 @@ bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *lab
 #define MENU_ITEM_H 26
 #define MENU_LINE_H 9
 #define MENU_PAD 5
+#define MENU_HEADING_H 22
+#define MENU_HEADING_FONT "Inter Semi-Bold 8.5"
 
 void fui_menu_open(struct fui *ui, uint64_t id, double x, double y) {
 	ui->menu = id;
@@ -725,14 +727,19 @@ int fui_menu(struct fui *ui, uint64_t id, const struct fui_menu_item *items, int
 	if (ui->menu != id) {
 		return -1;
 	}
+	// ticks: room for them before every item
+	double tick = 0;
+	for (int i = 0; i < count; i++) {
+		tick = items[i].label && items[i].checked ? 18 : tick;
+	}
 	double w = 160, h = 2 * MENU_PAD;
 	for (int i = 0; i < count; i++) {
 		if (!items[i].label) {
 			h += MENU_LINE_H;
 			continue;
 		}
-		h += MENU_ITEM_H;
-		double tw = fui_text_width(ui, items[i].label, FONT) + 40;
+		h += items[i].heading ? MENU_HEADING_H : MENU_ITEM_H;
+		double tw = fui_text_width(ui, items[i].label, FONT) + 40 + tick;
 		if (items[i].shortcut) {
 			tw += fui_text_width(ui, items[i].shortcut, FONT) + 24;
 		}
@@ -768,6 +775,12 @@ int fui_menu(struct fui *ui, uint64_t id, const struct fui_menu_item *items, int
 			iy += MENU_LINE_H;
 			continue;
 		}
+		if (items[i].heading) {
+			fui_text(ui, x + 14, iy + 5, items[i].label, MENU_HEADING_FONT,
+				with_alpha(TEXT, 0.45), FUI_LEFT, 0);
+			iy += MENU_HEADING_H;
+			continue;
+		}
 		bool over = !items[i].disabled && fui_hover(ui, x + MENU_PAD, iy, w - 2 * MENU_PAD,
 			MENU_ITEM_H);
 		if (over) {
@@ -777,7 +790,19 @@ int fui_menu(struct fui *ui, uint64_t id, const struct fui_menu_item *items, int
 			}
 		}
 		uint32_t color = items[i].disabled ? with_alpha(TEXT, 0.35) : TEXT;
-		fui_text(ui, x + 14, iy + 4, items[i].label, FONT, color, FUI_LEFT, 0);
+		if (items[i].checked) {
+			cairo_t *cr = ui->cr;
+			double cx = x + 14, cy = iy + MENU_ITEM_H / 2.0;
+			cairo_move_to(cr, cx, cy);
+			cairo_line_to(cr, cx + 3.5, cy + 3.5);
+			cairo_line_to(cr, cx + 10, cy - 4);
+			cairo_set_line_width(cr, 1.8);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+			cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+			fui_color(ui, color);
+			cairo_stroke(cr);
+		}
+		fui_text(ui, x + 14 + tick, iy + 4, items[i].label, FONT, color, FUI_LEFT, 0);
 		if (items[i].shortcut) {
 			fui_text(ui, x + w - 14, iy + 4, items[i].shortcut, FONT,
 				over ? TEXT : with_alpha(TEXT, 0.45), FUI_RIGHT, 0);

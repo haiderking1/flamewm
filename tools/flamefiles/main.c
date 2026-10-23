@@ -1771,8 +1771,9 @@ static void menus(struct app *app) {
 		enum { OPEN, RENAME, TRASH, COPY, CUT, COPY_PATH, DUPLICATE, PUT_BACK, DELETE, PICK, COUNT };
 		struct fui_menu_item items[12];
 		int what[12], n = 0;
-#define ITEM(id, label, key, off) \
-	(items[n] = (struct fui_menu_item){label, key, off}, what[n++] = (id))
+#define ITEM(id, name, key, off) \
+	(items[n] = (struct fui_menu_item){.label = (name), .shortcut = (key), .disabled = (off)}, \
+		what[n++] = (id))
 #define LINE() (items[n] = (struct fui_menu_item){0}, what[n++] = -1)
 		if (app->pick) {
 			ITEM(PICK, app->pick_folder ? "Choose" : "Open", "Enter", false);
