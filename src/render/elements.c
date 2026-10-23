@@ -172,6 +172,9 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 	// faded all together (set_opacity), all the way: none of them
 	float opacity = (float)eyecandy_opacity(surface);
 	for (size_t i = 0; opacity > 0 && i < panes_len; i++) {
+		if (panes[i].opacity <= 0) {
+			continue; // faded all the way on its own
+		}
 		// clipped to the surface in its own coords first: "all of it" comes as
 		// 0, 0, INT32_MAX, INT32_MAX (foot's blur), moved before it's cut
 		// down it would overflow
@@ -203,7 +206,7 @@ static void collect_surface(struct wlr_surface *surface, int sx, int sy, void *d
 		pane->glass.blur *= collect->t.ax;
 		pane->glass.refraction *= collect->t.ax;
 		mark(pane, collect);
-		pane->alpha *= opacity;
+		pane->alpha *= opacity * panes[i].opacity;
 	}
 
 	struct flame_element *element = push(collect->list);

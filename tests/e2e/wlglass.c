@@ -1,7 +1,8 @@
 // a see-through window with glass behind it: flame-eyecandy-v1 ("candy",
-// a rounded tinted pane) or ext-background-effect-v1 ("blur", the whole
-// window). fixed size, so flame floats it over what's below.
-// usage: wlglass candy|blur [seconds]
+// a rounded tinted pane; "faded", that pane faded all the way on its own)
+// or ext-background-effect-v1 ("blur", the whole window). fixed size, so
+// flame floats it over what's below.
+// usage: wlglass candy|faded|blur [seconds]
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@ static struct wl_shm *shm;
 static struct xdg_wm_base *wm;
 static struct flame_eyecandy_manager_v1 *candy;
 static struct ext_background_effect_manager_v1 *background;
+static uint32_t candy_version;
 static int configured;
 
 static void global(void *data, struct wl_registry *registry, uint32_t name,
@@ -34,7 +36,9 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, xdg_wm_base_interface.name)) {
 		wm = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
 	} else if (!strcmp(interface, flame_eyecandy_manager_v1_interface.name)) {
-		candy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface, 1);
+		candy_version = version < 3 ? version : 3;
+		candy = wl_registry_bind(registry, name, &flame_eyecandy_manager_v1_interface,
+			candy_version);
 	} else if (!strcmp(interface, ext_background_effect_manager_v1_interface.name)) {
 		background = wl_registry_bind(registry, name,
 			&ext_background_effect_manager_v1_interface, 1);
@@ -72,7 +76,8 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 };
 
 int main(int argc, char **argv) {
-	int use_candy = argc > 1 && !strcmp(argv[1], "candy");
+	int faded = argc > 1 && !strcmp(argv[1], "faded");
+	int use_candy = faded || (argc > 1 && !strcmp(argv[1], "candy"));
 	int seconds = argc > 2 ? atoi(argv[2]) : 4;
 	struct wl_display *display = wl_display_connect(NULL);
 	if (!display) {
@@ -101,6 +106,13 @@ int main(int argc, char **argv) {
 		flame_glass_v1_add_pane(glass, 0, 0, W, H, wl_fixed_from_int(24), wl_fixed_from_int(20),
 			0x00000030, wl_fixed_from_double(1.6), wl_fixed_from_double(0.6),
 			wl_fixed_from_int(6));
+		if (faded) {
+			if (candy_version < 3) {
+				printf("no set_pane_opacity\n");
+				return 1;
+			}
+			flame_glass_v1_set_pane_opacity(glass, wl_fixed_from_int(0));
+		}
 	} else {
 		struct ext_background_effect_surface_v1 *effect =
 			ext_background_effect_manager_v1_get_background_effect(background, surface);

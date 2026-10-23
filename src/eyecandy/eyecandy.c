@@ -210,8 +210,19 @@ static void glass_handle_add_pane(struct wl_client *client, struct wl_resource *
 			.edge = clampf((float)wl_fixed_to_double(edge), 0, 2),
 			.refraction = clampf((float)wl_fixed_to_double(refraction), 0, 32),
 		},
+		.opacity = 1,
 	};
 	glass->candy_dirty = true;
+}
+
+static void glass_handle_set_pane_opacity(struct wl_client *client,
+		struct wl_resource *resource, wl_fixed_t opacity) {
+	struct surface_glass *glass = wl_resource_get_user_data(resource);
+	if (glass && glass->candy_pending.len) {
+		glass->candy_pending.panes[glass->candy_pending.len - 1].opacity =
+			clampf((float)wl_fixed_to_double(opacity), 0, 1);
+		glass->candy_dirty = true;
+	}
 }
 
 static void glass_handle_set_shape(struct wl_client *client, struct wl_resource *resource,
@@ -238,6 +249,7 @@ static const struct flame_glass_v1_interface glass_impl = {
 	.set_shape = glass_handle_set_shape,
 	.set_opacity = glass_handle_set_opacity,
 	.add_pane = glass_handle_add_pane,
+	.set_pane_opacity = glass_handle_set_pane_opacity,
 };
 
 static void glass_resource_destroy(struct wl_resource *resource) {
@@ -330,6 +342,7 @@ static void background_handle_set_blur_region(struct wl_client *client,
 			.box = {rects[i].x1, rects[i].y1, span(rects[i].x1, rects[i].x2),
 				span(rects[i].y1, rects[i].y2)},
 			.style = blur_style,
+			.opacity = 1,
 		};
 	}
 }
@@ -404,7 +417,7 @@ bool eyecandy_init(struct flame_eyecandy *eyecandy, struct flame_server *server)
 		return true;
 	}
 	eyecandy->eyecandy = wl_global_create(server->display, &flame_eyecandy_manager_v1_interface,
-		2, eyecandy, bind_eyecandy);
+		3, eyecandy, bind_eyecandy);
 	eyecandy->background = wl_global_create(server->display,
 		&ext_background_effect_manager_v1_interface, 1, eyecandy, bind_background);
 	return eyecandy->eyecandy && eyecandy->background;

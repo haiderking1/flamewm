@@ -23,6 +23,7 @@ struct flame_eyecandy {
 struct eyecandy_pane {
 	struct wlr_box box;
 	struct flame_glass_style style;
+	float opacity; // how much of it shows (set_pane_opacity), 1 for all
 };
 
 bool eyecandy_init(struct flame_eyecandy *eyecandy, struct flame_server *server);

@@ -29,7 +29,7 @@
     flame draws them, with whatever is behind the surface right then.
   </description>
 
-  <interface name="flame_eyecandy_manager_v1" version="2">
+  <interface name="flame_eyecandy_manager_v1" version="3">
     <description summary="effects for surfaces">
       Gets effect objects for surfaces.
     </description>
@@ -55,7 +55,7 @@
     </request>
   </interface>
 
-  <interface name="flame_glass_v1" version="2">
+  <interface name="flame_glass_v1" version="3">
     <description summary="panes of glass behind a surface">
       Rounded panes of glass behind the surface's content: what's behind the
       surface is blurred, its colors pushed, tinted, bent at the pane's edge
@@ -123,6 +123,17 @@
         comes and goes with what's drawn over it.
 
         Double buffered like the panes, made current by wl_surface.commit.
+      </description>
+      <arg name="opacity" type="fixed"/>
+    </request>
+
+    <request name="set_pane_opacity" since="3">
+      <description summary="how much of the last pane added shows">
+        The pane added last to the pending set faded on its own, under
+        set_opacity's fade of them all: 1 (each pane's start) for all of
+        it, 0 for none. For panes that come and go each with what's drawn
+        over it, a few on one surface. With no pane in the pending set it
+        does nothing.
       </description>
       <arg name="opacity" type="fixed"/>
     </request>
