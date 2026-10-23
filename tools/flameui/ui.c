@@ -104,16 +104,31 @@ double fui_time(const struct fui *ui) {
 	return ui->now;
 }
 
-double fui_ease(struct fui *ui, uint64_t id, double target, double speed) {
-	struct fui_ease_slot *slot = NULL;
+// the slot kept for id, NULL when they're all taken
+static struct fui_ease_slot *ease_slot(struct fui *ui, uint64_t id) {
 	size_t at = (size_t)(id % FUI_EASES);
 	for (size_t i = 0; i < FUI_EASES; i++) {
 		struct fui_ease_slot *s = &ui->eases[(at + i) % FUI_EASES];
 		if (!s->used || s->id == id) {
-			slot = s;
-			break;
+			return s;
 		}
 	}
+	return NULL;
+}
+
+// how far a slot's moved on since the last frame. one that was resting
+// starts from this frame, the one that saw it change: not from whenever
+// the last frame was, a long while back maybe, as a jump
+static double ease_dt(struct fui *ui, const struct fui_ease_slot *slot) {
+	if (slot->value == slot->target) {
+		return 0;
+	}
+	double dt = ui->now - ui->last_frame;
+	return dt > 0.1 ? 0.1 : dt; // a long pause doesn't snap it
+}
+
+double fui_ease(struct fui *ui, uint64_t id, double target, double speed) {
+	struct fui_ease_slot *slot = ease_slot(ui, id);
 	if (!slot) {
 		return target;
 	}
@@ -122,13 +137,33 @@ double fui_ease(struct fui *ui, uint64_t id, double target, double speed) {
 			.used = true};
 		return target;
 	}
-	double dt = ui->now - ui->last_frame;
-	dt = dt > 0.1 ? 0.1 : dt; // a long pause doesn't snap it
+	double dt = ease_dt(ui, slot);
 	slot->target = target;
 	slot->value += (target - slot->value) * (1 - exp(-dt * speed));
 	if (fabs(target - slot->value) < 0.002) {
 		slot->value = target;
 	} else {
+		ui->moving = true;
+	}
+	return slot->value;
+}
+
+double fui_ramp(struct fui *ui, uint64_t id, double target, double seconds) {
+	struct fui_ease_slot *slot = ease_slot(ui, id);
+	if (!slot) {
+		return target;
+	}
+	if (!slot->used) {
+		*slot = (struct fui_ease_slot){.id = id, .value = target, .target = target,
+			.used = true};
+		return target;
+	}
+	double step = ease_dt(ui, slot) / seconds;
+	slot->target = target;
+	if (fabs(target - slot->value) <= step) {
+		slot->value = target;
+	} else {
+		slot->value += target > slot->value ? step : -step;
 		ui->moving = true;
 	}
 	return slot->value;

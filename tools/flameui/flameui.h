@@ -24,8 +24,22 @@ struct fui_pane {
 	double saturation, edge, refraction;
 };
 
+// a panel rather than a window (layer-shell): against a screen's edges,
+// over the windows (or fullscreen ones too), like a bar
+enum { FUI_EDGE_TOP = 1, FUI_EDGE_BOTTOM = 2, FUI_EDGE_LEFT = 4, FUI_EDGE_RIGHT = 8 };
+struct fui_panel {
+	// the edges it's against: both of a pair stretches it along them (its
+	// width or height 0 in the config)
+	uint32_t edges;
+	int room; // kept clear of windows at its edge, 0 for none
+	bool over_fullscreen;
+	bool keyboard; // keys once it's clicked
+};
+
 struct fui_config {
 	const char *app_id, *title;
+	// NULL: a window
+	const struct fui_panel *panel;
 	int width, height; // what it opens at
 	// how small the user can make it. 0: it can't be resized, it stays
 	// width x height (flame floats it)
@@ -38,6 +52,13 @@ struct fui_config {
 	void (*frame)(struct fui *ui, void *data);
 	void *data;
 };
+
+// a panel grown height tall over everything for a while (a popover out of
+// it), its room at its edge as it was, and a click anywhere else on the
+// screen caught for it (fui_panel_outside). 0: back to its own size
+void fui_panel_popup(struct fui *ui, int height);
+// a click outside the popup came since the last frame (once)
+bool fui_panel_outside(struct fui *ui);
 
 // NULL without a wayland display. runs till the window's closed or fui_quit
 struct fui *fui_create(const struct fui_config *config);
@@ -108,6 +129,10 @@ double fui_time(const struct fui *ui); // seconds, monotonic
 // a value easing toward target, kept by id from frame to frame. speed:
 // 1/seconds it takes to get most of the way. the first call jumps there
 double fui_ease(struct fui *ui, uint64_t id, double target, double speed);
+// a value going to target at a steady pace, 1 in seconds: where an
+// animation's at in its time, for one the app shapes itself (parts of it
+// starting later than others, its own curve). the first call jumps there
+double fui_ramp(struct fui *ui, uint64_t id, double target, double seconds);
 
 // the pointer: where (window coords), over a box, clicked in it this frame
 bool fui_hover(struct fui *ui, double x, double y, double w, double h);
@@ -201,7 +226,8 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 	int size, bool grab);
 // a picture file's thumbnail (jpeg, png, webp), width x height pixels cut to
 // cover that. worker threads make it, the window redraws when it's there:
-// NULL till then, or when it can't be read (failed). kept a while
+// NULL till then, or when it can't be read (failed, NULL when that's not
+// wanted). kept a while
 cairo_surface_t *fui_thumb(struct fui *ui, const char *path, int width, int height,
 	bool *failed);
 // the same, the whole picture in its shape, its longest side size pixels

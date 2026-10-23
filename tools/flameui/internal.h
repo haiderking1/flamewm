@@ -51,6 +51,10 @@ struct fui_buffer {
 	int width, height, stride;
 	size_t size;
 	bool busy;
+	// the memory under it, kept from size to size: a window growing back to
+	// a size it's been isn't new memory to fault in, a frame late
+	struct wl_shm_pool *pool;
+	size_t capacity;
 };
 
 struct fui {
@@ -82,6 +86,16 @@ struct fui {
 	struct wl_surface *surface;
 	struct xdg_surface *xdg_surface;
 	struct xdg_toplevel *toplevel;
+	// a panel's instead
+	struct zwlr_layer_shell_v1 *layer_shell;
+	struct zwlr_layer_surface_v1 *layer_surface;
+	struct fui_panel panel;
+	// while it's popped up: a surface under it over all the rest, one
+	// clear pixel the screen's size, that only takes clicks
+	struct wl_surface *catcher;
+	struct zwlr_layer_surface_v1 *catcher_layer;
+	struct wp_viewport *catcher_viewport;
+	bool on_catcher, caught;
 	struct wp_fractional_scale_v1 *fractional;
 	struct wp_viewport *viewport;
 	struct flame_glass_v1 *glass;
