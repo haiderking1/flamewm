@@ -174,6 +174,23 @@ static void handle_desktop_changed(struct wl_listener *listener, void *data) {
 	}
 }
 
+bool ipc_media_key(struct flame_ipc *ipc, const char *name) {
+	char line[128];
+	int len = snprintf(line, sizeof(line), "{\"event\":\"key\",\"key\":\"%s\"}", name);
+	bool taken = false;
+	struct flame_ipc_client *client, *tmp;
+	wl_list_for_each_safe(client, tmp, &ipc->clients, link) {
+		if (client->media_keys && !client->dead) {
+			ipc_client_send(client, line, (size_t)len);
+			taken |= !client->dead;
+		}
+		if (client->dead) {
+			client_free(client);
+		}
+	}
+	return taken;
+}
+
 bool ipc_init(struct flame_ipc *ipc, struct flame_server *server) {
 	ipc->server = server;
 	ipc->fd = -1;

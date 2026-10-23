@@ -1,6 +1,7 @@
 #ifndef FLAME_INPUT_INPUT_H
 #define FLAME_INPUT_INPUT_H
 
+#include "input/media.h"
 #include <stdbool.h>
 #include <wayland-server-core.h>
 
@@ -20,6 +21,7 @@ struct flame_input {
 	struct flame_dnd dnd;
 	struct wl_list keyboards; // flame_keyboard.link
 	struct flame_fake_keyboard *fake; // FLAME_TEST_INPUT=1 only
+	struct flame_media_keys media; // to the bar, see media.h
 
 	struct wl_listener new_input;
 	struct wl_listener request_set_selection;

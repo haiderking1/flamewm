@@ -22,6 +22,7 @@ struct flame_ipc_client {
 	struct wl_event_source *source;
 	struct strbuf in, out;
 	bool subscribed;
+	bool media_keys; // the media keys come to it ("media-keys")
 	// broken or too far behind, freed once nobody is using it anymore
 	bool dead;
 	struct {
@@ -49,5 +50,7 @@ void ipc_finish(struct flame_ipc *ipc);
 
 // queue a line for client, the newline gets added here
 void ipc_client_send(struct flame_ipc_client *client, const char *line, size_t len);
+// a media key to whoever takes them: false when nobody does
+bool ipc_media_key(struct flame_ipc *ipc, const char *name);
 
 #endif

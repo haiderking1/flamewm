@@ -1114,6 +1114,41 @@ $BIN/wllock unlock 200 > /dev/null
 sleep 0.4
 clock back" \
 	"before no clock" "locked clock" "still 1" "killed no clock black" "back no clock"
+case_run "media keys: to whoever takes them, volume again and again while it's held, play once" "
+cat > keys.py <<'PY'
+import json, os, socket, subprocess, sys, time
+ctl = sys.argv[1]
+def key(name, how):
+    subprocess.run([ctl, 'key', name, how], stdout=subprocess.DEVNULL)
+s = socket.socket(socket.AF_UNIX)
+s.connect(os.environ['FLAMEWM_SOCKET'])
+s.sendall(b'media-keys\\n')
+time.sleep(0.3)
+key('XF86AudioMute', 'press'); key('XF86AudioMute', 'release')
+key('XF86AudioPlay', 'press'); time.sleep(0.6); key('XF86AudioPlay', 'release')
+key('XF86AudioRaiseVolume', 'press'); time.sleep(0.8); key('XF86AudioRaiseVolume', 'release')
+time.sleep(0.3)
+s.setblocking(False)
+data = b''
+try:
+    while True:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+except BlockingIOError:
+    pass
+counts = {}
+for line in data.decode().splitlines():
+    event = json.loads(line)
+    if event.get('event') == 'key':
+        counts[event['key']] = counts.get(event['key'], 0) + 1
+print('mute', counts.get('mute'))
+print('play-pause', counts.get('play-pause'))
+print('volume-up', 'again and again' if counts.get('volume-up', 0) > 5 else counts.get('volume-up'))
+PY
+python3 -I keys.py $CTL" \
+	"mute 1" "play-pause 1" "volume-up again and again"
 case_run "flameplay: subtitles: a file beside it on from the start, off, the video's own (paused)" "
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nINSIDE THE VIDEO\\n' > own.srt
 printf '1\\n00:00:00,300 --> 00:00:30,000\\nBESIDE IT IN A FILE\\n' > subs.fr.srt
