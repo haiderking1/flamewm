@@ -18,6 +18,7 @@
 #include "internal.h"
 #include "linux-dmabuf-v1-client-protocol.h"
 #include "single-pixel-buffer-v1-client-protocol.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -45,35 +46,43 @@ void fui_buffer_free(struct fui_buffer *b) {
 	if (b->buffer) {
 		wl_buffer_destroy(b->buffer);
 	}
+	if (b->pool) {
+		wl_shm_pool_destroy(b->pool);
+	}
 	if (b->data) {
-		munmap(b->data, b->size);
+		munmap(b->data, b->capacity);
 	}
 	*b = (struct fui_buffer){0};
 }
 
 bool fui_buffer_make(struct fui *ui, struct fui_buffer *b, int width, int height) {
-	fui_buffer_free(b);
 	int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
 	size_t size = (size_t)stride * (size_t)height;
-	int fd = memfd_create("flameui", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
-		if (fd >= 0) {
-			close(fd);
+	if (!b->pool || size > b->capacity) {
+		fui_buffer_free(b);
+		int fd = memfd_create("flameui", MFD_CLOEXEC);
+		if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
+			if (fd >= 0) {
+				close(fd);
+			}
+			return false;
 		}
-		return false;
-	}
-	void *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
+		// all of it in now, in one go: not page by page in the first frame
+		void *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd, 0);
+		if (data == MAP_FAILED) {
+			close(fd);
+			return false;
+		}
+		b->pool = wl_shm_create_pool(ui->shm, fd, (int32_t)size);
 		close(fd);
-		return false;
+		b->data = data;
+		b->capacity = size;
+	} else if (b->buffer) {
+		wl_buffer_destroy(b->buffer);
 	}
-	struct wl_shm_pool *pool = wl_shm_create_pool(ui->shm, fd, (int32_t)size);
-	b->buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride,
+	b->buffer = wl_shm_pool_create_buffer(b->pool, 0, width, height, stride,
 		WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
 	wl_buffer_add_listener(b->buffer, &buffer_listener, b);
-	b->data = data;
 	b->width = width;
 	b->height = height;
 	b->stride = stride;
@@ -155,7 +164,9 @@ static void draw(struct fui *ui) {
 	}
 	// the window is this, whatever its subsurfaces (a video layer still the
 	// size it was) stick out to
-	xdg_surface_set_window_geometry(ui->xdg_surface, 0, 0, ui->width, ui->height);
+	if (ui->xdg_surface) {
+		xdg_surface_set_window_geometry(ui->xdg_surface, 0, 0, ui->width, ui->height);
+	}
 	// nothing drawn: a pixel of no colour the window's size (flame shows
 	// what's under it as it is, a video straight from the gpu), sized by the
 	// viewport (a buffer scale can't make one pixel a window)
@@ -283,6 +294,100 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 	.close = toplevel_close,
 };
 
+// a panel's size from flame: what it's stretched to, else what it asked
+static void panel_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial,
+		uint32_t width, uint32_t height) {
+	struct fui *ui = data;
+	zwlr_layer_surface_v1_ack_configure(surface, serial);
+	ui->width = width > 0 ? (int)width : ui->width;
+	ui->height = height > 0 ? (int)height : ui->height;
+	ui->configured = true;
+	fui_redraw(ui);
+}
+
+static void panel_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
+	fui_quit(data);
+}
+
+static const struct zwlr_layer_surface_v1_listener panel_listener = {
+	.configure = panel_configure,
+	.closed = panel_closed,
+};
+
+// the catcher: as big as the screen, a pixel of nothing stretched over it
+static void catcher_configure(void *data, struct zwlr_layer_surface_v1 *surface,
+		uint32_t serial, uint32_t width, uint32_t height) {
+	struct fui *ui = data;
+	zwlr_layer_surface_v1_ack_configure(surface, serial);
+	if (!ui->nothing) {
+		ui->nothing = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(ui->single_pixel,
+			0, 0, 0, 0);
+	}
+	wp_viewport_set_destination(ui->catcher_viewport, (int32_t)width, (int32_t)height);
+	wl_surface_attach(ui->catcher, ui->nothing, 0, 0);
+	wl_surface_damage_buffer(ui->catcher, 0, 0, 1, 1);
+	wl_surface_commit(ui->catcher);
+}
+
+static void catcher_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
+}
+
+static const struct zwlr_layer_surface_v1_listener catcher_listener = {
+	.configure = catcher_configure,
+	.closed = catcher_closed,
+};
+
+static void catcher_gone(struct fui *ui) {
+	if (!ui->catcher) {
+		return;
+	}
+	zwlr_layer_surface_v1_destroy(ui->catcher_layer);
+	wp_viewport_destroy(ui->catcher_viewport);
+	wl_surface_destroy(ui->catcher);
+	ui->catcher = NULL;
+	ui->catcher_layer = NULL;
+	ui->catcher_viewport = NULL;
+	ui->on_catcher = ui->caught = false;
+}
+
+void fui_panel_popup(struct fui *ui, int height) {
+	if (!ui->layer_surface) {
+		return;
+	}
+	bool up = height > 0;
+	// over the windows' own popups while it's up (overlay): the catcher
+	// takes the top layer's place
+	if (zwlr_layer_surface_v1_get_version(ui->layer_surface) >= 2) {
+		zwlr_layer_surface_v1_set_layer(ui->layer_surface, up || ui->panel.over_fullscreen
+			? ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY : ZWLR_LAYER_SHELL_V1_LAYER_TOP);
+	}
+	zwlr_layer_surface_v1_set_size(ui->layer_surface, (uint32_t)ui->config.width,
+		(uint32_t)(up ? height : ui->config.height));
+	wl_surface_commit(ui->surface);
+	if (!up) {
+		catcher_gone(ui);
+		return;
+	}
+	if (ui->catcher || !ui->viewporter || !ui->single_pixel) {
+		return;
+	}
+	ui->catcher = wl_compositor_create_surface(ui->compositor);
+	ui->catcher_viewport = wp_viewporter_get_viewport(ui->viewporter, ui->catcher);
+	ui->catcher_layer = zwlr_layer_shell_v1_get_layer_surface(ui->layer_shell, ui->catcher, NULL,
+		ZWLR_LAYER_SHELL_V1_LAYER_TOP, ui->config.app_id);
+	zwlr_layer_surface_v1_add_listener(ui->catcher_layer, &catcher_listener, ui);
+	zwlr_layer_surface_v1_set_anchor(ui->catcher_layer, FUI_EDGE_TOP | FUI_EDGE_BOTTOM
+		| FUI_EDGE_LEFT | FUI_EDGE_RIGHT);
+	zwlr_layer_surface_v1_set_exclusive_zone(ui->catcher_layer, -1); // all of the screen
+	wl_surface_commit(ui->catcher);
+}
+
+bool fui_panel_outside(struct fui *ui) {
+	bool caught = ui->caught;
+	ui->caught = false;
+	return caught;
+}
+
 static void preferred_scale(void *data, struct wp_fractional_scale_v1 *fractional,
 		uint32_t scale) {
 	struct fui *ui = data;
@@ -299,6 +404,15 @@ static const struct wp_fractional_scale_v1_listener fractional_listener = {prefe
 static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 		struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y) {
 	struct fui *ui = data;
+	if (surface && surface == ui->catcher) {
+		// the screen outside a popup: a plain pointer, a click there caught
+		ui->on_catcher = true;
+		if (ui->cursor_device) {
+			wp_cursor_shape_device_v1_set_shape(ui->cursor_device, serial,
+				WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
+		}
+		return;
+	}
 	ui->pointer_in = true;
 	ui->pointer_serial = serial;
 	ui->mx = wl_fixed_to_double(x);
@@ -310,6 +424,10 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
 static void pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 		struct wl_surface *surface) {
 	struct fui *ui = data;
+	if (ui->on_catcher) {
+		ui->on_catcher = false;
+		return;
+	}
 	ui->pointer_in = false;
 	ui->mx = ui->my = -1;
 	fui_redraw(ui);
@@ -318,6 +436,9 @@ static void pointer_leave(void *data, struct wl_pointer *pointer, uint32_t seria
 static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 		wl_fixed_t x, wl_fixed_t y) {
 	struct fui *ui = data;
+	if (ui->on_catcher) {
+		return;
+	}
 	ui->mx = wl_fixed_to_double(x);
 	ui->my = wl_fixed_to_double(y);
 	fui_redraw(ui);
@@ -327,6 +448,11 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 		uint32_t time, uint32_t button, uint32_t state) {
 	struct fui *ui = data;
 	bool down = state == WL_POINTER_BUTTON_STATE_PRESSED;
+	if (ui->on_catcher) {
+		ui->caught |= down;
+		fui_redraw(ui);
+		return;
+	}
 	if (button == BTN_RIGHT && down) {
 		ui->right_pressed = true;
 		fui_redraw(ui);
@@ -551,6 +677,9 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (!strcmp(interface, wp_cursor_shape_manager_v1_interface.name)) {
 		ui->cursor_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
+		ui->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface,
+			version < 5 ? version : 5);
 	} else if (!strcmp(interface, wp_single_pixel_buffer_manager_v1_interface.name)) {
 		ui->single_pixel = wl_registry_bind(registry, name,
 			&wp_single_pixel_buffer_manager_v1_interface, 1);
@@ -611,7 +740,7 @@ struct fui *fui_create(const struct fui_config *config) {
 	ui->registry = wl_display_get_registry(ui->display);
 	wl_registry_add_listener(ui->registry, &registry_listener, ui);
 	wl_display_roundtrip(ui->display);
-	if (!ui->compositor || !ui->shm || !ui->wm) {
+	if (!ui->compositor || !ui->shm || !ui->wm || (config->panel && !ui->layer_shell)) {
 		fprintf(stderr, "flameui: the compositor lacks what a window needs\n");
 		fui_destroy(ui);
 		return NULL;
@@ -634,14 +763,33 @@ struct fui *fui_create(const struct fui_config *config) {
 			flame_glass_v1_set_shape(ui->glass, wl_fixed_from_double(config->corner_radius));
 		}
 	}
+	ui->width = config->width;
+	ui->height = config->height;
+	if (config->panel) {
+		// a panel: its edges, its room, over the windows
+		ui->panel = *config->panel;
+		ui->config.panel = &ui->panel;
+		ui->layer_surface = zwlr_layer_shell_v1_get_layer_surface(ui->layer_shell, ui->surface,
+			NULL, ui->panel.over_fullscreen ? ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY
+			: ZWLR_LAYER_SHELL_V1_LAYER_TOP, config->app_id);
+		zwlr_layer_surface_v1_add_listener(ui->layer_surface, &panel_listener, ui);
+		zwlr_layer_surface_v1_set_anchor(ui->layer_surface, ui->panel.edges);
+		zwlr_layer_surface_v1_set_size(ui->layer_surface, (uint32_t)config->width,
+			(uint32_t)config->height);
+		zwlr_layer_surface_v1_set_exclusive_zone(ui->layer_surface, ui->panel.room);
+		zwlr_layer_surface_v1_set_keyboard_interactivity(ui->layer_surface, ui->panel.keyboard
+			? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+			: ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+		wl_surface_commit(ui->surface);
+		ui->running = true;
+		return ui;
+	}
 	ui->xdg_surface = xdg_wm_base_get_xdg_surface(ui->wm, ui->surface);
 	xdg_surface_add_listener(ui->xdg_surface, &xdg_surface_listener, ui);
 	ui->toplevel = xdg_surface_get_toplevel(ui->xdg_surface);
 	xdg_toplevel_add_listener(ui->toplevel, &toplevel_listener, ui);
 	xdg_toplevel_set_title(ui->toplevel, config->title);
 	xdg_toplevel_set_app_id(ui->toplevel, config->app_id);
-	ui->width = config->width;
-	ui->height = config->height;
 	if (config->min_width) {
 		xdg_toplevel_set_min_size(ui->toplevel, config->min_width, config->min_height);
 	} else {
@@ -751,6 +899,7 @@ int fui_run(struct fui *ui) {
 }
 
 void fui_destroy(struct fui *ui) {
+	ui->configured = false; // going: what asks for a redraw on the way out draws nothing
 	fui_thumbs_free(ui); // its threads wake the window: gone before it is
 	fui_dnd_finish(ui);
 	for (int i = 0; i < 2; i++) {
@@ -824,6 +973,9 @@ void fui_set_glass_opacity(struct fui *ui, double opacity) {
 }
 
 void fui_set_fullscreen(struct fui *ui, bool fullscreen) {
+	if (!ui->toplevel) {
+		return; // a panel's where it is
+	}
 	if (fullscreen) {
 		xdg_toplevel_set_fullscreen(ui->toplevel, NULL);
 	} else {

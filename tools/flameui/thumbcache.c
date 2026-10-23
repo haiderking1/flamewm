@@ -40,12 +40,30 @@ static void cache_dir(char *out, size_t size) {
 }
 
 // where path's thumbnail of this size is kept, false for files that don't
-// get one kept (the cache's own)
+// get one kept (the cache's own, temporary ones)
+// path in dir (a folder, its name without the last /)
+static bool under(const char *path, const char *dir) {
+	size_t len = dir ? strlen(dir) : 0;
+	while (len > 1 && dir[len - 1] == '/') {
+		len--;
+	}
+	return len && !strncmp(path, dir, len) && path[len] == '/';
+}
+
+// a file in a temporary place ($TMPDIR, /tmp without it, /var/tmp, the
+// session's runtime dir): gone soon, its thumbnail isn't kept (the
+// thumbnail spec's word, and a player's art for every song would pile up)
+static bool temporary(const char *path) {
+	const char *tmp = getenv("TMPDIR");
+	return under(path, tmp && *tmp == '/' ? tmp : "/tmp") || under(path, "/var/tmp")
+		|| under(path, getenv("XDG_RUNTIME_DIR"));
+}
+
 static bool cache_path(const char *path, int size, char *uri, size_t uri_size, char *out,
 		size_t out_size) {
 	char dir[PATH_MAX];
 	cache_dir(dir, sizeof(dir));
-	if (!strncmp(path, dir, strlen(dir))) {
+	if (!strncmp(path, dir, strlen(dir)) || temporary(path)) {
 		return false;
 	}
 	uri_of(path, uri, uri_size);

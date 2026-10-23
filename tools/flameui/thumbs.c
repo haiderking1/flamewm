@@ -233,6 +233,8 @@ static struct fui_thumbs *thumbs_of(struct fui *ui) {
 
 static cairo_surface_t *get(struct fui *ui, const char *path, int width, int height, bool fit,
 		bool *failed) {
+	bool ignored;
+	failed = failed ? failed : &ignored; // NULL: not wanted
 	*failed = false;
 	struct fui_thumbs *thumbs = thumbs_of(ui);
 	if (!thumbs || !thumbs->threads_up) {

@@ -730,8 +730,11 @@ $CTL unset wallpaper > /dev/null; sleep 1.2
 grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
 	"not a jpeg, png or webp it can read" "still True" "none blue"
 # flame's apps keep how they show things in XDG_CONFIG_HOME, the trash in
-# XDG_DATA_HOME, thumbnails in XDG_CACHE_HOME: never the user's
-CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache XDG_STATE_HOME=$WORK/apps/state"
+# XDG_DATA_HOME, thumbnails in XDG_CACHE_HOME: never the user's. their
+# temporary files in a TMPDIR of their own: the cases' files (under /tmp)
+# aren't temporary to them
+mkdir -p "$WORK/apps/tmp"
+CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache XDG_STATE_HOME=$WORK/apps/state TMPDIR=$WORK/apps/tmp"
 case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
 mkdir walls
 $CTL set background '#ff0000' > /dev/null; sleep 0.5; grim walls/red.png
