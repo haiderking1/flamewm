@@ -375,7 +375,6 @@ double notes_list_height(struct fui *ui, struct notes *ns, double max) {
 
 void notes_list(struct fui *ui, struct notes *ns, double right, double top, double max,
 		struct fui_pane *panes, int *n_panes, int max_panes) {
-	cairo_t *cr = fui_cairo(ui);
 	double x0 = right - NOTES_W;
 	shadowed_text(ui, x0 + 6, top + 6, "Notifications", F_BIG_TITLE, TEXT, FUI_LEFT, 0);
 	if (any_open(ns)) {
@@ -405,14 +404,8 @@ void notes_list(struct fui *ui, struct notes *ns, double right, double top, doub
 		content += (ns->heights[i] + GAP) * ns->ins[i];
 	}
 	bool over = fui_hover(ui, x0 - 10, y0, NOTES_W + 20, view);
-	if (over) {
-		ns->scroll += fui_scrolled(ui);
-	}
-	ns->scroll = fmax(0, fmin(ns->scroll, content - view));
-	cairo_save(cr);
-	cairo_rectangle(cr, x0 - 12, y0, NOTES_W + 24, view);
-	cairo_clip(cr);
-	double y = y0 + 8 - ns->scroll;
+	double y = y0 + 8 - fui_scroll_begin(ui, fui_id("notes scroll", 0), x0 - 12, y0, NOTES_W + 24,
+		view, &ns->scroll);
 	for (int i = 0; i < notify_count(ns->notify) && i < 64; i++) {
 		struct note *n = notify_at(ns->notify, i);
 		double h = ns->heights[i], in = ns->ins[i];
@@ -428,7 +421,7 @@ void notes_list(struct fui *ui, struct notes *ns, double right, double top, doub
 		}
 		y += (h + GAP) * in;
 	}
-	cairo_restore(cr);
+	fui_scroll_end(ui, content);
 }
 
 void notes_done(struct notes *ns) {

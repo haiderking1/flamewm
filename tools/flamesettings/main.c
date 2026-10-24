@@ -1043,15 +1043,8 @@ static void content(struct app *app) {
 	int slot = searching ? SEARCH_SLOT : app->page;
 	// a page switching fades in from a little lower
 	double shown = fui_ease(ui, fui_id("page", (uint64_t)slot), 1, 14);
-	double *scroll = &app->scroll[slot];
-	if (fui_hover(ui, CONTENT_X - 20, 0, W - CONTENT_X + 20, H)) {
-		*scroll += fui_scrolled(ui);
-	}
-	double eased = fui_ease(ui, fui_id("scroll", (uint64_t)slot), *scroll, 24);
-
-	cairo_save(cr);
-	cairo_rectangle(cr, CONTENT_X - 12, 0, W - CONTENT_X + 12, H);
-	cairo_clip(cr);
+	double eased = fui_scroll_begin(ui, fui_id("scroll", (uint64_t)slot), CONTENT_X - 12, 0,
+		W - CONTENT_X + 12, H, &app->scroll[slot]);
 	cairo_push_group(cr);
 	struct page p = {.app = app, .ui = ui, .y = 24 - eased + (1 - shown) * 10};
 	if (searching) {
@@ -1081,11 +1074,8 @@ static void content(struct app *app) {
 	}
 	cairo_pop_group_to_source(cr);
 	cairo_paint_with_alpha(cr, shown);
-	cairo_restore(cr);
-	// scrolled no further than there is
-	double bottom = p.y + eased - (1 - shown) * 10;
-	double most = bottom > H - 20 ? bottom - (H - 20) : 0;
-	*scroll = *scroll < 0 ? 0 : *scroll > most ? most : *scroll;
+	// down to the last row, room under it
+	fui_scroll_end(ui, p.y + eased - (1 - shown) * 10 + 20);
 
 	// a refusal, for a few seconds
 	double age = fui_time(ui) - app->toast_at;

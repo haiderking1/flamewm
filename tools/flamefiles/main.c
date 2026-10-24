@@ -1732,25 +1732,16 @@ static void view(struct app *app) {
 	struct fui *ui = app->ui;
 	cairo_t *cr = fui_cairo(ui);
 	double view_h = VIEW_BOTTOM - VIEW_TOP;
-	if (fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, view_h)) {
+	if (fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, view_h) && (fui_mods(ui) & FUI_CTRL)) {
+		// ctrl and the wheel: bigger up, smaller down
 		double wheel = fui_scrolled(ui);
-		if (fui_mods(ui) & FUI_CTRL) {
-			// ctrl and the wheel: bigger up, smaller down
-			if (wheel != 0) {
-				zoom(app, pow(1.015, -wheel));
-			}
-		} else {
-			app->scroll += wheel;
+		if (wheel != 0) {
+			zoom(app, pow(1.015, -wheel));
 		}
 	}
-	double most = content_height(app) - view_h;
-	app->scroll = fmax(0, fmin(app->scroll, fmax(most, 0)));
-	double eased = fui_ease(ui, fui_id("scroll", 0), app->scroll, 26);
-	double top = VIEW_TOP - eased;
+	double top = VIEW_TOP - fui_scroll_begin(ui, fui_id("scroll", 0), VIEW_X, VIEW_TOP, VIEW_W,
+		view_h, &app->scroll);
 	app->view_top = top;
-	cairo_save(cr);
-	cairo_rectangle(cr, VIEW_X, VIEW_TOP, VIEW_W, view_h);
-	cairo_clip(cr);
 	if (app->list_view) {
 		list_view(app, top);
 	} else {
@@ -1771,7 +1762,7 @@ static void view(struct app *app) {
 		cairo_set_line_width(cr, 2);
 		cairo_stroke(cr);
 	}
-	cairo_restore(cr);
+	fui_scroll_end(ui, content_height(app));
 	// what's left of a click in the view: the empty space between files
 	bool over = fui_hover(ui, VIEW_X, VIEW_TOP, VIEW_W, view_h);
 	if (over && fui_right_clicked(ui, VIEW_X, VIEW_TOP, VIEW_W, view_h)) {
