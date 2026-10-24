@@ -73,6 +73,9 @@ bool xs_xi_selected(struct flame_xserver *xserver, struct xs_window *window, int
 }
 
 bool xs_xi_client_selected(struct xs_client *client, struct xs_window *window, int evtype) {
+	if (evtype < 0) {
+		return false; // a core event XI2 doesn't stand in for
+	}
 	struct select *select = find_select(client->xserver, client, window->id);
 	return select && ((select->master | select->slave) >> evtype & 1);
 }

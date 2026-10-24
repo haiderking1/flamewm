@@ -209,7 +209,11 @@ static void crossing(struct flame_xserver *xserver, uint8_t type, struct xs_wind
 			return;
 		}
 	}
-	xs_event_deliver_input(xserver, window, mask, evtype, &event, false, how.only);
+	// core Enter/Leave go whether or not the client asked for XI2's too,
+	// like Xorg: they're no device events, XI2's don't stand in for them.
+	// chrome hears the pointer leave only from the core one (steam's hover
+	// menus closing), and asks for both
+	xs_event_deliver_input(xserver, window, mask, -1, &event, false, how.only);
 	xs_xi_crossing(xserver, evtype, window, detail, child, state, time, cross_mode, &how);
 }
 

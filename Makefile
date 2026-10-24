@@ -349,6 +349,10 @@ $(E2E)/xcursor: tests/e2e/xcursor.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xfixes xcb-render)
 
+$(E2E)/xcross: tests/e2e/xcross.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xinput)
+
 $(E2E)/xkeys: tests/e2e/xkeys.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb xcb-xinput)
@@ -389,7 +393,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed \
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xcross $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed \
 		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 

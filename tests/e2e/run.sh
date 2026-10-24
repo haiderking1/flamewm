@@ -299,6 +299,8 @@ st fixed
 sleep 1.5
 st again
 wait" "tiled False 6 6 1268 708" "fixed True 338 158 604 404" "again False 6 6 1268 708"
+case_run "a window asking for XI2 Enter/Leave and the core ones (chrome) hears both: its menus hear the pointer leave" "
+$BIN/xcross $CTL" "in: core enter 1 leave 0, xi2 enter 1 leave 0" "out: core enter 0 leave 1, xi2 enter 0 leave 1"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "
