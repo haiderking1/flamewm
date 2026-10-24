@@ -23,6 +23,8 @@ struct flame_wallpaper {
 	uint64_t next_id;
 	// what the screens show now: a change of any of these makes them again
 	char *path; // NULL for none
+	// the login screen's for the person picked, over the config's. NULL: the config's
+	char *instead;
 	enum flame_wallpaper_mode mode;
 	float color[4];
 	// the same again on every screen, here (the lock's backdrop): what's
@@ -48,5 +50,8 @@ void wallpaper_output_changed(struct flame_wallpaper *wallpaper, struct flame_ou
 void wallpaper_output_gone(struct flame_wallpaper *wallpaper, struct flame_output *output);
 // the config was loaded again: a new picture, mode or background color
 void wallpaper_config_changed(struct flame_wallpaper *wallpaper);
+// path shown instead of the config's wallpaper, for now (not saved). NULL:
+// the config's again
+void wallpaper_instead(struct flame_wallpaper *wallpaper, const char *path);
 
 #endif

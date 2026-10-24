@@ -394,15 +394,16 @@ void wallpaper_output_gone(struct flame_wallpaper *wallpaper, struct flame_outpu
 
 void wallpaper_config_changed(struct flame_wallpaper *wallpaper) {
 	const struct flame_config *config = wallpaper->server->config;
-	bool same = (!wallpaper->path == !config->wallpaper)
-		&& (!wallpaper->path || !strcmp(wallpaper->path, config->wallpaper))
+	const char *path = wallpaper->instead ? wallpaper->instead : config->wallpaper;
+	bool same = (!wallpaper->path == !path)
+		&& (!wallpaper->path || !strcmp(wallpaper->path, path))
 		&& wallpaper->mode == config->wallpaper_mode
 		&& !memcmp(wallpaper->color, config->background_color, sizeof(wallpaper->color));
 	if (same) {
 		return;
 	}
 	free(wallpaper->path);
-	wallpaper->path = config->wallpaper ? strdup(config->wallpaper) : NULL;
+	wallpaper->path = path ? strdup(path) : NULL;
 	wallpaper->mode = config->wallpaper_mode;
 	memcpy(wallpaper->color, config->background_color, sizeof(wallpaper->color));
 	struct wallpaper_screen *screen;
@@ -410,6 +411,12 @@ void wallpaper_config_changed(struct flame_wallpaper *wallpaper) {
 		mirror_sync(screen); // the color now, the picture once it's made
 		remake(screen);
 	}
+}
+
+void wallpaper_instead(struct flame_wallpaper *wallpaper, const char *path) {
+	free(wallpaper->instead);
+	wallpaper->instead = path ? strdup(path) : NULL;
+	wallpaper_config_changed(wallpaper);
 }
 
 bool wallpaper_init(struct flame_wallpaper *wallpaper, struct flame_server *server) {
@@ -472,6 +479,8 @@ void wallpaper_finish(struct flame_wallpaper *wallpaper) {
 			close(wallpaper->notify[i]);
 		}
 	}
+	free(wallpaper->instead);
+	wallpaper->instead = NULL;
 	pthread_mutex_destroy(&wallpaper->lock);
 	pthread_cond_destroy(&wallpaper->wake);
 	free(wallpaper->path);

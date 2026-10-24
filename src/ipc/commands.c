@@ -8,6 +8,7 @@
 #include "bindings/action.h"
 #include "config/settings.h"
 #include "core/server.h"
+#include "image/image.h"
 #include "input/fake.h"
 #include "ipc/ipc.h"
 #include "ipc/state.h"
@@ -172,6 +173,23 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 			reply_ok(client);
 		} else {
 			reply_error(client, error);
+		}
+		return;
+	}
+	if (!strcmp(name, "greeter-wallpaper")) {
+		// greeter-wallpaper PATH: the login screen's for the person picked,
+		// shown now, nothing saved. nothing after it: the config's again
+		const char *path = save;
+		while (path && (*path == ' ' || *path == '\t')) {
+			path++;
+		}
+		if (!greeter_active(&client->ipc->server->greeter)) {
+			reply_error(client, "only on the login screen (flamewm -g)");
+		} else if (path && *path && (path[0] != '/' || image_sniff(path) == IMAGE_NONE)) {
+			reply_error(client, "not a jpeg, png or webp it can read");
+		} else {
+			wallpaper_instead(&client->ipc->server->wallpaper, path && *path ? path : NULL);
+			reply_ok(client);
 		}
 		return;
 	}
