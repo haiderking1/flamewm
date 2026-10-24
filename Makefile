@@ -107,8 +107,11 @@ UI_LIBS = $(shell pkg-config --cflags --libs $(UI_PKGS)) -lm -pthread
 IPC_SRCS := tools/flameipc/ipc.c tools/flameipc/json.c
 IPC_DEPS := $(IPC_SRCS) tools/flameipc/ipc.h tools/flameipc/json.h
 
-SETTINGS_SRCS := tools/flamesettings/main.c tools/flamesettings/browser.c $(IPC_SRCS)
-$(SETTINGS): $(SETTINGS_SRCS) $(IPC_DEPS) tools/flamesettings/browser.h $(FLAMEUI_DEPS)
+# the login screen's look is flamegreet's store: flamesettings writes it
+SETTINGS_SRCS := tools/flamesettings/main.c tools/flamesettings/browser.c \
+	tools/flamegreet/store.c $(IPC_SRCS)
+$(SETTINGS): $(SETTINGS_SRCS) $(IPC_DEPS) tools/flamesettings/browser.h \
+		tools/flamegreet/store.h $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(SETTINGS_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS)
 

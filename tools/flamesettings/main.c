@@ -4,6 +4,7 @@
 // init.lua sets shows locked: init.lua wins
 
 #include <ctype.h>
+#include <pwd.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@
 #include "../flameui/flameui.h"
 #include "../flameipc/ipc.h"
 #include "../flameipc/json.h"
+#include "../flamegreet/store.h"
 #include "browser.h"
 
 // the window's size, what flame made it: read every frame
@@ -66,6 +68,11 @@ struct app {
 	pid_t picker_pid;
 	char picked[PATH_MAX];
 	size_t picked_len;
+	bool picking_login; // what's picked is the login screen's, not the desktop's
+	// the login screen's look while we're the one picked (flamegreet's
+	// store), read again after every change
+	struct greet_look login;
+	bool login_read;
 };
 
 static void refresh(struct app *app) {
@@ -119,6 +126,11 @@ static void set(struct app *app, const char *key, const char *text) {
 	json_free(answer);
 	free(reply);
 	fui_after(app->ui, 150, refresh_later, app);
+}
+
+static void toast(struct app *app, const char *what, const char *why) {
+	snprintf(app->toast, sizeof(app->toast), "%s: %s", what, why);
+	app->toast_at = fui_time(app->ui);
 }
 
 static void set_number(struct app *app, const char *key, double v, bool whole) {
@@ -692,10 +704,11 @@ static void picked_wallpaper(struct fui *ui, int fd, void *data);
 
 // flamefiles asked to pick a picture, from the folder open. it says the
 // path on its stdout, read down a pipe the window's loop watches
-static void browse(struct app *app) {
+static void browse(struct app *app, bool login) {
 	if (app->picking >= 0) {
 		return; // one open already
 	}
+	app->picking_login = login;
 	int out[2];
 	if (pipe(out) < 0) {
 		return;
@@ -744,7 +757,13 @@ static void picked_wallpaper(struct fui *ui, int fd, void *data) {
 	waitpid(app->picker_pid, NULL, 0);
 	app->picked[app->picked_len] = '\0';
 	app->picked[strcspn(app->picked, "\n")] = '\0';
-	if (app->picked[0] == '/') {
+	if (app->picked[0] == '/' && app->picking_login) {
+		const char *error = NULL;
+		if (!store_set_wallpaper(app->picked, &error)) {
+			toast(app, "Login screen", error);
+		}
+		app->login_read = false;
+	} else if (app->picked[0] == '/') {
 		set_string(app, "wallpaper", app->picked);
 		char dir[PATH_MAX];
 		snprintf(dir, sizeof(dir), "%s", app->picked);
@@ -755,6 +774,83 @@ static void picked_wallpaper(struct fui *ui, int fd, void *data) {
 		}
 	}
 	fui_redraw(ui);
+}
+
+// ---- the login screen's ----
+
+static void login_read(struct app *app) {
+	if (app->login_read) {
+		return;
+	}
+	struct passwd *pw = getpwuid(getuid());
+	store_read(pw ? pw->pw_name : "", getuid(), &app->login);
+	app->login_read = true;
+}
+
+static void login_wallpaper(struct app *app, const char *from) {
+	const char *error = NULL;
+	if (!store_set_wallpaper(from, &error)) {
+		toast(app, "Login screen", error);
+	}
+	app->login_read = false;
+}
+
+// how the login screen (flamegreet) looks while you're the one picked on it
+static void wallpaper_login(struct page *p) {
+	struct fui *ui = p->ui;
+	struct app *app = p->app;
+	login_read(app);
+	if (shown(p, "Login Screen", "Wallpaper picture greeter log in", "login")) {
+		const char *path = app->login.wallpaper;
+		const double top = p->y, pw = 176, ph = 110, x = CONTENT_X + CARD_PAD;
+		if (*path) {
+			picture_in(p, path, x, top + 14, pw, ph, 8);
+		} else {
+			fui_fill_rounded(ui, x, top + 14, pw, ph, 8, 0xffffff0a);
+			fui_text(ui, x + pw / 2, top + 14 + ph / 2 - 8, "Its own", F_SMALL, TEXT_FAINT,
+				FUI_CENTER, 0);
+		}
+		const double tx = x + pw + 20, room = RIGHT - tx;
+		fui_text(ui, tx, top + 22, *path ? "Your own wallpaper" : "The login screen's wallpaper",
+			F_LABEL, TEXT, FUI_LEFT, room);
+		fui_text(ui, tx, top + 42, "Shown behind it while you're the one picked", F_SMALL,
+			TEXT_FAINT, FUI_LEFT, room);
+		// a copy goes there: the login screen can't see into your home
+		const char *desktop = json_str(value(app, "wallpaper"), "");
+		double bx = tx;
+		const char *labels[] = {"Use Desktop's", "Choose…", "Default"};
+		for (int i = 0; i < 3; i++) {
+			if ((i == 0 && !*desktop) || (i == 2 && !*path)) {
+				continue;
+			}
+			double bw = fui_text_width(ui, labels[i], "Inter Medium 10.5") + 28;
+			if (fui_button(ui, fui_id("login wallpaper", (uint64_t)i), bx, top + 92, labels[i])) {
+				if (i == 0) {
+					login_wallpaper(app, desktop);
+				} else if (i == 1) {
+					browse(app, true);
+				} else {
+					login_wallpaper(app, NULL);
+				}
+			}
+			bx += bw + 10;
+		}
+		p->y = top + ph + 28;
+		p->first_row = false;
+	}
+	const char *detail = "The wallpaper softened behind it, or as it is";
+	if (shown(p, "Blur", detail, "login blur")) {
+		double top = row(p, "Blur", detail, false, 40);
+		bool on = app->login.blur;
+		if (fui_toggle(ui, fui_id("login blur", 0), RIGHT - 40, row_mid(top, true) - 12, &on,
+				true)) {
+			const char *error = NULL;
+			if (!store_set_blur(on, &error)) {
+				toast(app, "Login screen", error);
+			}
+			app->login_read = false;
+		}
+	}
 }
 
 // the folder the pictures are from, and a way to any other
@@ -771,7 +867,7 @@ static void wallpaper_path(struct page *p) {
 	fui_text(ui, CONTENT_X + 4, y + 6, shown, F_LABEL, TEXT_DIM, FUI_LEFT,
 		CONTENT_W - bw - 20);
 	if (fui_button(ui, fui_id("browse", 0), RIGHT + CARD_PAD - bw, y, "Browse…")) {
-		browse(p->app);
+		browse(p->app, false);
 	}
 	p->y += 40;
 }
@@ -858,7 +954,11 @@ static void page_wallpaper(struct page *p) {
 		browse_somewhere(p->app);
 		p->app->browsing = true;
 	}
-	card(p, p->query ? "ON THE DESKTOP" : NULL, wallpaper_current);
+	bool login = store_available();
+	card(p, p->query || login ? "ON THE DESKTOP" : NULL, wallpaper_current);
+	if (login) {
+		card(p, "LOGIN SCREEN", wallpaper_login);
+	}
 	if (p->query) {
 		// the open folder's pictures that match, under whose they are
 		double start = p->y;
