@@ -287,6 +287,8 @@ $BIN/xewmh mapfull > mapfull.out
 cat mapfull.out
 echo told a tile first: \$(grep told mapfull.out | grep -vc 1280x720)" "state: FULLSCREEN FOCUSED" \
 	"told 1280x720" "told a tile first: 0"
+case_run "a dropdown opening under a still pointer gets the click right after, not the window under it" "
+$BIN/xewmh menuclick $CTL" "pressed on the dropdown"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

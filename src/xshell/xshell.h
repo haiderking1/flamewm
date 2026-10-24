@@ -54,6 +54,9 @@ struct flame_xshell {
 	// when idle
 	int unfocus;
 	struct wl_event_source *unfocus_idle;
+	// windows changed under a still pointer: which one it's over, worked
+	// out again once they settle
+	struct wl_event_source *pointer_idle;
 
 	// the msc X apps see, Present paces them on it. NVIDIA flips carry no
 	// vblank counter, so it's counted here: the clock output's flips move it

@@ -2,7 +2,7 @@
 // usage: xewmh check | fullscreen | startfull | activate | steal | wayland CMD | close | dpi |
 //   configure | subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL |
 //   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL | latefull SECONDS |
-//   mapfull
+//   mapfull | menuclick FLAMECTL
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -332,6 +332,45 @@ int main(int argc, char **argv) {
 					last_h = cn->height;
 					printf("told %dx%d\n", last_w, last_h);
 				}
+			}
+			free(e);
+		}
+	} else if (!strcmp(mode, "menuclick") && argc > 2) {
+		// a dropdown opens under the pointer, which doesn't move (steam's
+		// settings): the click right after is the dropdown's
+		xcb_window_t w = window(false);
+		uint32_t mask = XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+		xcb_change_window_attributes(c, w, XCB_CW_EVENT_MASK, &mask);
+		settle();
+		xcb_translate_coordinates_reply_t *t = xcb_translate_coordinates_reply(c,
+			xcb_translate_coordinates(c, w, s->root, 0, 0), NULL);
+		int x = (t ? t->dst_x : 0) + 100, y = (t ? t->dst_y : 0) + 100;
+		free(t);
+		char cmd[300];
+		snprintf(cmd, sizeof(cmd), "%s pointer move %d %d > /dev/null", argv[2], x, y);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		xcb_window_t menu = xcb_generate_id(c);
+		uint32_t values[] = {s->white_pixel, 1, XCB_EVENT_MASK_BUTTON_PRESS};
+		xcb_create_window(c, XCB_COPY_FROM_PARENT, menu, s->root, x - 20, y - 20, 120, 160, 0,
+			XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual,
+			XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, values);
+		xcb_map_window(c, menu);
+		settle();
+		snprintf(cmd, sizeof(cmd), "%s pointer button left press > /dev/null && "
+			"%s pointer button left release > /dev/null", argv[2], argv[2]);
+		if (system(cmd) != 0) {
+			return 1;
+		}
+		settle();
+		xcb_generic_event_t *e;
+		while ((e = xcb_poll_for_event(c))) {
+			if ((e->response_type & 0x7f) == XCB_BUTTON_PRESS) {
+				xcb_button_press_event_t *b = (xcb_button_press_event_t *)e;
+				printf("pressed on the %s\n", b->event == menu ? "dropdown"
+					: b->event == w ? "window under it" : "something else");
 			}
 			free(e);
 		}

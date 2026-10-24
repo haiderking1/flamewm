@@ -2660,7 +2660,25 @@ static void handle_desktop_changed(struct wl_listener *listener, void *data) {
 	ewmh_update(xshell);
 }
 
+static void handle_pointer_idle(void *data) {
+	struct flame_xshell *xshell = data;
+	xshell->pointer_idle = NULL;
+	cursor_refresh(&xshell->server->input.cursor);
+}
+
+// X windows came, went or moved without the pointer moving (a dropdown
+// opening under it): which one it's over is worked out again once they
+// settle, the way an X server does, so a click right after lands on the
+// dropdown, not what was under it before
+static void pointer_restructured(struct flame_xshell *xshell) {
+	if (!xshell->pointer_idle) {
+		xshell->pointer_idle = wl_event_loop_add_idle(xshell->server->loop, handle_pointer_idle,
+			xshell);
+	}
+}
+
 void xshell_windows_changed(struct flame_xshell *xshell) {
+	pointer_restructured(xshell);
 	struct xs_window *root = xshell->xserver->root;
 	struct xs_window *x;
 	wl_list_for_each(x, &root->children, link) {
@@ -2782,6 +2800,7 @@ void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t ty
 
 void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *x) {
 	wlr_log(WLR_DEBUG, "xshell: 0x%x unmapped", x->id);
+	pointer_restructured(xshell);
 	struct flame_xwindow *window;
 	wl_list_for_each(window, &xshell->windows, link) {
 		struct xlayer *layer;
@@ -2798,6 +2817,7 @@ void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *x) {
 }
 
 void xshell_window_destroyed(struct flame_xshell *xshell, struct xs_window *x) {
+	pointer_restructured(xshell);
 	struct flame_xwindow *window = find_window(xshell, x->id);
 	if (window) {
 		window_destroy(window);
@@ -3221,6 +3241,10 @@ void xshell_finish(struct flame_xshell *xshell) {
 	wl_list_for_each_safe(notify, ntmp, &xshell->notifies, link) {
 		wl_list_remove(&notify->link);
 		free(notify);
+	}
+	if (xshell->pointer_idle) {
+		wl_event_source_remove(xshell->pointer_idle);
+		xshell->pointer_idle = NULL;
 	}
 	if (xshell->unfocus_idle) {
 		wl_event_source_remove(xshell->unfocus_idle);
