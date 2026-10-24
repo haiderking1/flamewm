@@ -259,10 +259,10 @@ $BIN/xewmh warp" "pointer in window 50,60" "motion 50,60" "after another app tri
 case_run "an X grab confining the pointer to a window keeps flame's cursor in it" "
 $BIN/xewmh confine $CTL" "grabbed: yes" "moved inside: yes" "mouse pushed out: 100,100" \
 	"let go: 2,3"
-case_run "X cursors: a window's shows, hides, theme shapes by name, a grab's wins" "
+case_run "X cursors: a window's shows, hides, theme shapes by name, a grab's wins, one sent straight is clear" "
 $BIN/xcursor $CTL" "window's: 16x16 name []" "shown: red" "hidden: white" "again: red" \
 	"font's: 1x1 name [text]" "grab's: 1x1 name [crosshair]" "after the grab: 1x1 name [text]" \
-	"argb: 24x20 name []" "argb shot: green"
+	"argb: 24x20 name []" "argb shot: green" "straight shot: black"
 case_run "keys typed in a wayland window: X apps see them like on Xorg, push to talk, hotkeys" "
 foot sh -c 'cat > typed' > /dev/null 2>&1 &
 sleep 1.5

@@ -1,7 +1,8 @@
 // X cursors showing over X windows: a window's own cursor from a bitmap
 // shows where the pointer is, XFixes hides it and shows it again, the
 // cursor font's shapes come out as theme cursors, a grab's cursor wins over
-// the window's. screenshots (grim -c) say what flame drew
+// the window's, an ARGB one's clear pixels are clear even sent straight
+// (unity's). screenshots (grim -c) say what flame drew
 // usage: xcursor FLAMECTL
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +45,7 @@ static void shot(const char *name) {
 	fclose(f);
 	printf("%s: %s (%d %d %d)\n", name, r > 200 && g < 60 && b < 60 ? "red"
 		: r > 200 && g > 200 && b > 200 ? "white" : r < 60 && g > 200 && b < 60 ? "green"
-		: "other", r, g, b);
+		: r < 60 && g < 60 && b < 60 ? "black" : "other", r, g, b);
 }
 
 // what XFixes says the pointer looks like
@@ -172,6 +173,31 @@ int main(int argc, char **argv) {
 	settle();
 	print_image("argb");
 	shot("argb shot");
+
+	// unity's: an ARGB cursor's pixels sent straight, not premultiplied,
+	// the clear ones still white. over a black window, black shows
+	// through, not a white square
+	uint32_t black = 0;
+	xcb_change_gc(c, gc, XCB_GC_FOREGROUND, &black);
+	xcb_poly_fill_rectangle(c, w, gc, 1, &all);
+	uint32_t straight[24 * 20];
+	for (int i = 0; i < 24 * 20; i++) {
+		straight[i] = 0x00ffffff;
+	}
+	straight[0] = 0x80ffffff; // half there, white: straight too
+	xcb_pixmap_t straight_pixmap = xcb_generate_id(c);
+	xcb_create_pixmap(c, 32, straight_pixmap, w, 24, 20);
+	xcb_gcontext_t gc32 = xcb_generate_id(c);
+	xcb_create_gc(c, gc32, straight_pixmap, 0, NULL);
+	xcb_put_image(c, XCB_IMAGE_FORMAT_Z_PIXMAP, straight_pixmap, gc32, 24, 20, 0, 0, 0, 32,
+		sizeof(straight), (const uint8_t *)straight);
+	xcb_render_picture_t straight_picture = xcb_generate_id(c);
+	xcb_render_create_picture(c, straight_picture, straight_pixmap, argb, 0, NULL);
+	xcb_cursor_t unity = xcb_generate_id(c);
+	xcb_render_create_cursor(c, unity, straight_picture, 0, 0);
+	xcb_change_window_attributes(c, w, XCB_CW_CURSOR, &unity);
+	settle();
+	shot("straight shot");
 	xcb_disconnect(c);
 	return 0;
 }

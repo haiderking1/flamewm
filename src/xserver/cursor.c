@@ -302,8 +302,28 @@ static void create_glyph_cursor(struct xs_client *client, const struct xin *in) 
 	}
 }
 
+// an ARGB cursor's pixels are premultiplied, RENDER says so. some send
+// theirs straight (unity's: clear pixels still white, a white square where
+// its cursor should be). premultiplied, no color is brighter than its
+// alpha: one that is says they're straight, and they're made premultiplied
+static void premultiply_if_straight(uint32_t *pixels, size_t n) {
+	bool straight = false;
+	for (size_t i = 0; i < n && !straight; i++) {
+		uint32_t a = pixels[i] >> 24;
+		straight = (pixels[i] >> 16 & 0xff) > a || (pixels[i] >> 8 & 0xff) > a
+			|| (pixels[i] & 0xff) > a;
+	}
+	for (size_t i = 0; straight && i < n; i++) {
+		uint32_t p = pixels[i], a = p >> 24;
+		uint32_t r = ((p >> 16 & 0xff) * a + 127) / 255, g = ((p >> 8 & 0xff) * a + 127) / 255,
+			b = ((p & 0xff) * a + 127) / 255;
+		pixels[i] = a << 24 | r << 16 | g << 8 | b;
+	}
+}
+
 bool xs_cursor_create_argb(struct xs_client *client, uint32_t id, uint32_t *pixels, int width,
 		int height, int hot_x, int hot_y, uint8_t major, uint8_t minor) {
+	premultiply_if_straight(pixels, (size_t)width * (size_t)height);
 	struct xs_cursor *cursor = cursor_new(client, id, major, minor);
 	if (!cursor) {
 		free(pixels);
