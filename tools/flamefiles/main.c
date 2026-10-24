@@ -105,6 +105,8 @@ struct app {
 	bool rename_next;
 	// asking before deleting for good
 	bool confirming;
+	// a job's clash being asked about: the same answer for the rest of them
+	bool clash_all;
 
 	// a press on a file: a drag once it moves far enough, else on release
 	// just that one picked (a click on one of several selected)
@@ -1883,9 +1885,7 @@ static void status_bar(struct app *app) {
 		cairo_line_to(cr, cx - 2.5, cy + 2.5);
 		cairo_stroke(cr);
 		if (fui_clicked(ui, cx - 8, cy - 8, 16, 16)) {
-			pthread_mutex_lock(&job->lock);
-			job->cancel = true;
-			pthread_mutex_unlock(&job->lock);
+			ops_job_cancel(job);
 		}
 	}
 	fui_text(ui, VIEW_X + 14, y + 8, text, F_SMALL, TEXT_DIM, FUI_LEFT, VIEW_W / 2);
@@ -1909,6 +1909,7 @@ static void job_check(struct app *app) {
 	}
 	ops_job_free(job);
 	app->job = NULL;
+	app->clash_all = false;
 	if (error[0]) {
 		toast(app, "%s", error);
 	}
@@ -2072,6 +2073,111 @@ static cairo_pattern_t *confirm(struct app *app) {
 	return layer;
 }
 
+// a job's waiting on a clash: what it is, false for none
+static bool clash_asked(struct app *app, struct ops_clash *clash) {
+	if (!app->job) {
+		return false;
+	}
+	pthread_mutex_lock(&app->job->lock);
+	bool asking = app->job->asking;
+	*clash = app->job->clash;
+	pthread_mutex_unlock(&app->job->lock);
+	return asking;
+}
+
+// one side of a clash: "4.2 MB, Today at 14:03"
+static void clash_side(char *out, size_t size, bool folder, long long bytes, time_t mtime) {
+	struct file f = {.kind = folder ? KIND_FOLDER : KIND_OTHER, .size = (off_t)bytes};
+	char amount[32], when[64];
+	format_size(&f, amount, sizeof(amount));
+	format_date(mtime, when, sizeof(when));
+	snprintf(out, size, "%s, %s", amount, when);
+}
+
+// a copy or move going where something by its name already is: replaced
+// (the one there to the trash), both kept, or left out. drawn into a layer
+// of its own like the delete question, its buttons first to the click
+static cairo_pattern_t *clash_question(struct app *app) {
+	struct fui *ui = app->ui;
+	struct ops_clash c;
+	if (!clash_asked(app, &c)) {
+		return NULL;
+	}
+	cairo_t *cr = fui_cairo(ui);
+	cairo_push_group(cr);
+	fui_fill_rounded(ui, 0, 0, W, H, 18, 0x00000066);
+	const double w = 440, pad = 22;
+	double h = 236 + (c.others ? 36 : 0), x = round((W - w) / 2), y = round((H - h) / 2);
+	fui_fill_rounded(ui, x, y, w, h, 14, 0x2b2b31ff);
+	fui_rounded(ui, x + 0.5, y + 0.5, w - 1, h - 1, 14);
+	fui_color(ui, 0xffffff24);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+
+	char title[NAME_MAX + 32];
+	snprintf(title, sizeof(title), "Replace “%s”?", c.name);
+	fui_text(ui, x + pad, y + 22, title, F_TITLE, TEXT, FUI_LEFT, w - 2 * pad);
+	fui_paragraph(ui, x + pad, y + 50, w - 2 * pad, c.folder
+		? "A folder by that name is already here. Replacing it puts that folder, "
+			"and everything in it, in the trash."
+		: "A file by that name is already here. Replacing it puts that one in the trash.",
+		F_TEXT, TEXT_DIM);
+	// the two side by side: what's here, what's coming, which is newer
+	char here[96], coming[96];
+	clash_side(here, sizeof(here), c.folder, c.size, c.mtime);
+	clash_side(coming, sizeof(coming), c.new_folder, c.new_size, c.new_mtime);
+	double ry = y + 102;
+	fui_fill_rounded(ui, x + pad, ry, w - 2 * pad, 56, 10, 0xffffff0d);
+	const char *labels[] = {"Here now", "Coming in"};
+	const char *sides[] = {here, coming};
+	time_t times[] = {c.mtime, c.new_mtime};
+	for (int i = 0; i < 2; i++) {
+		double ly = ry + 9 + i * 20;
+		fui_text(ui, x + pad + 12, ly, labels[i], F_SMALL, TEXT_DIM, FUI_LEFT, 0);
+		double tw = fui_text(ui, x + pad + 92, ly, sides[i], F_SMALL, TEXT, FUI_LEFT,
+			w - 2 * pad - 160);
+		if (times[i] > times[1 - i]) {
+			fui_text(ui, x + pad + 92 + tw + 8, ly, "newer", F_SMALL, ACCENT, FUI_LEFT, 0);
+		}
+	}
+	double by = ry + 56 + 16;
+	if (c.others) {
+		char all[64];
+		snprintf(all, sizeof(all), "The same for the other %zu", c.others);
+		fui_toggle(ui, fui_id("clash all", 0), x + pad, by, &app->clash_all, true);
+		fui_text(ui, x + pad + 50, by + 4, all, F_TEXT, TEXT, FUI_LEFT, w - 2 * pad - 50);
+		by += 36;
+	}
+	by = y + h - 46;
+	// right to left: replace, keep both, skip, and cancel at the left
+	const char *names[] = {"Replace", "Keep Both", "Skip"};
+	enum ops_clash_answer answers[] = {OPS_REPLACE, OPS_KEEP_BOTH, OPS_SKIP};
+	enum ops_clash_answer picked = OPS_ASK;
+	double bx = x + w - pad;
+	for (int i = 0; i < 3; i++) {
+		bx -= fui_text_width(ui, names[i], F_MEDIUM) + 28;
+		if (fui_button(ui, fui_id("clash", (uint64_t)i), bx, by, names[i])) {
+			picked = answers[i];
+		}
+		bx -= 10;
+	}
+	if (fui_key_pressed(ui, XKB_KEY_Return, 0) || fui_key_pressed(ui, XKB_KEY_KP_Enter, 0)) {
+		picked = OPS_REPLACE;
+	}
+	bool cancel = fui_button(ui, fui_id("clash cancel", 0), x + pad, by, "Cancel")
+		|| fui_key_pressed(ui, XKB_KEY_Escape, 0);
+	// nothing under it takes a click
+	fui_clicked(ui, 0, 0, W, H);
+	fui_right_clicked(ui, 0, 0, W, H);
+	cairo_pattern_t *layer = cairo_pop_group(cr);
+	if (cancel) {
+		ops_job_cancel(app->job);
+	} else if (picked != OPS_ASK) {
+		ops_job_answer(app->job, picked, app->clash_all && c.others);
+	}
+	return layer;
+}
+
 static void frame(struct fui *ui, void *data) {
 	struct app *app = data;
 	W = fui_width(ui);
@@ -2099,8 +2205,9 @@ static void frame(struct fui *ui, void *data) {
 	fui_fill_rounded(ui, SIDEBAR_W, 0, 1, H, 0, 0x00000066);
 
 	// the question answered this frame: its key isn't the window's too
-	bool asking = app->confirming;
-	cairo_pattern_t *question = confirm(app);
+	struct ops_clash clash;
+	bool asking = app->confirming || clash_asked(app, &clash);
+	cairo_pattern_t *question = app->confirming ? confirm(app) : clash_question(app);
 	if (!asking) {
 		keys(app);
 		typeahead(app);

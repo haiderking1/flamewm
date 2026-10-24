@@ -938,6 +938,36 @@ combo Control_L v; sleep 0.5; key Return; sleep 0.8
 echo docs \$(ls box/docs | tr '\n' ' ')" \
 	"gnome copy a.txt" "text a.txt" "docs a.txt" "docs a.txt x.txt elsewhere x.txt y.txt" \
 	"docs a.txt x.txt y.txt elsewhere x.txt clipboard 0" "docs a.txt renamed.txt y.txt"
+case_run "flamefiles: pasted over names that are there: asked, replaced (the old one in the trash), both kept, the same for all" "
+mkdir box src config
+echo old > box/a.txt; echo oldb > box/b.txt; echo new > src/a.txt; echo newb > src/b.txt; echo c > src/c.txt
+export XDG_DATA_HOME=\$PWD/data XDG_CONFIG_HOME=\$PWD/config XDG_CACHE_HOME=\$PWD/cache
+$(dirname $CTL)/flamefiles \$PWD/box > /dev/null 2>&1 &
+sleep 2
+click() { $CTL pointer move \$1 \$2 > /dev/null; sleep 0.2; $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; sleep 0.6; }
+combo() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; done; for k in \"\$@\"; do $CTL key \$k release > /dev/null; done; sleep 0.6; }
+printf 'file://%s/src/a.txt\\nfile://%s/src/b.txt\\nfile://%s/src/c.txt\\n' \$PWD \$PWD \$PWD | wl-copy -t text/uri-list; sleep 0.3
+$CTL pointer move 700 600 > /dev/null; sleep 0.2
+combo Control_L v; sleep 0.5
+echo asked \$(ls box | tr '\\n' ' ')
+combo Return
+click 700 446
+sleep 0.5
+echo box \$(cd box; for f in *; do printf '%s=%s ' \"\$f\" \$(cat \"\$f\"); done)
+echo trash \$(cat data/Trash/files/a.txt)
+combo Control_L v; sleep 0.5
+click 462 410
+click 700 464
+sleep 0.5
+echo both \$(ls box | tr '\\n' ' ')
+combo Control_L v; sleep 0.5
+click 462 410
+click 617 464
+sleep 0.5
+echo skipped \$(ls box | tr '\\n' ' ') trash \$(ls data/Trash/files | wc -l)" \
+	"asked a.txt b.txt" "box a.txt=new b 2.txt=newb b.txt=oldb c.txt=c" "trash old" \
+	"both a 2.txt a.txt b 2.txt b 3.txt b.txt c 2.txt c.txt" \
+	"skipped a 2.txt a.txt b 2.txt b 3.txt b.txt c 2.txt c.txt trash 1"
 case_run "flamefiles: a video's frame and a song's cover for previews, kept in the thumbnail cache" "
 mkdir media; grim -t jpeg cover.jpg
 ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=30:duration=3 -c:v libx264 -pix_fmt yuv420p media/clip.mp4

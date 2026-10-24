@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "../flameui/flameui.h"
 
@@ -34,6 +35,20 @@ bool ops_put_back(const char *name, const char **error);
 // gone for good: path, all of it
 bool ops_delete(const char *path, const char **error);
 
+// what to do with one that's going where something by its name already
+// is: asked (the job waits for it), the one there to the trash and this in
+// its place, both kept (this one " 2"), this one left out
+enum ops_clash_answer { OPS_ASK, OPS_REPLACE, OPS_KEEP_BOTH, OPS_SKIP };
+
+// a name that's there already, what it and the one coming are
+struct ops_clash {
+	char name[NAME_MAX + 1];
+	bool folder, new_folder;
+	long long size, new_size; // bytes, a folder's: how many things in it
+	time_t mtime, new_mtime;
+	size_t others; // more clashes after this one in the job
+};
+
 // copying or moving files into a folder, on a thread of its own
 struct ops_job {
 	struct fui *ui; // woken as it goes
@@ -51,15 +66,27 @@ struct ops_job {
 	char error[160];
 	// the names it made in dest, the first one (to select after)
 	char first[NAME_MAX + 1];
+	// a clash it's waiting on (asking), what it is, the answer (and whether
+	// it goes for the rest too), said to it with ops_job_answer
+	bool asking;
+	struct ops_clash clash;
+	enum ops_clash_answer answer;
+	bool answer_all;
+	pthread_cond_t answered;
 	// the thread's own
 	char *buf;
 	double last_wake;
 };
 
-// paths copied (or moved) into dest: what'd go over something there gets
-// " 2" (a copy into its own folder: " copy"). NULL when it can't start
+// paths copied (or moved) into dest. what'd go over something there is
+// asked about (asking, the ui woken), a copy into its own folder gets
+// " copy". NULL when it can't start
 struct ops_job *ops_job_start(struct fui *ui, char *const *paths, size_t len, const char *dest,
 	bool move);
+// the clash asked about answered, all: the rest of them too
+void ops_job_answer(struct ops_job *job, enum ops_clash_answer answer, bool all);
+// stopped where it is (a clash asked about too)
+void ops_job_cancel(struct ops_job *job);
 // it's finished: freed, its thread joined
 void ops_job_free(struct ops_job *job);
 

@@ -561,6 +561,64 @@ static bool copy_tree(struct ops_job *job, const char *from, const char *to) {
 	return ok;
 }
 
+// what's at path for the question: a folder (how many things in it) or a
+// file (how big), when it changed
+static void clash_side(const char *path, bool *folder, long long *size, time_t *mtime) {
+	struct stat st;
+	if (stat(path, &st) < 0) {
+		lstat(path, &st);
+	}
+	*folder = S_ISDIR(st.st_mode);
+	*mtime = st.st_mtime;
+	*size = st.st_size;
+	if (*folder) {
+		*size = 0;
+		DIR *d = opendir(path);
+		struct dirent *e;
+		while (d && (e = readdir(d))) {
+			*size += strcmp(e->d_name, ".") && strcmp(e->d_name, "..");
+		}
+		if (d) {
+			closedir(d);
+		}
+	}
+}
+
+// from's name is there in dest already: the user's answer (or the one
+// they gave for all of them). OPS_ASK back when it was cancelled
+static enum ops_clash_answer ask(struct ops_job *job, size_t i, const char *from,
+		const char *name, const char *there) {
+	pthread_mutex_lock(&job->lock);
+	if (job->answer_all) {
+		enum ops_clash_answer a = job->answer;
+		pthread_mutex_unlock(&job->lock);
+		return a;
+	}
+	pthread_mutex_unlock(&job->lock);
+	struct ops_clash c = {0};
+	snprintf(c.name, sizeof(c.name), "%s", name);
+	clash_side(there, &c.folder, &c.size, &c.mtime);
+	clash_side(from, &c.new_folder, &c.new_size, &c.new_mtime);
+	for (size_t k = i + 1; k < job->len; k++) {
+		const char *slash = strrchr(job->paths[k], '/');
+		char path[PATH_MAX];
+		snprintf(path, sizeof(path), "%s/%s", job->dest, slash ? slash + 1 : job->paths[k]);
+		c.others += exists(path);
+	}
+	pthread_mutex_lock(&job->lock);
+	job->clash = c;
+	job->answer = OPS_ASK;
+	job->asking = true;
+	fui_wake(job->ui);
+	while (job->answer == OPS_ASK && !job->cancel) {
+		pthread_cond_wait(&job->answered, &job->lock);
+	}
+	job->asking = false;
+	enum ops_clash_answer a = job->cancel ? OPS_ASK : job->answer;
+	pthread_mutex_unlock(&job->lock);
+	return a;
+}
+
 static void *job_thread(void *data) {
 	struct ops_job *job = data;
 	uint64_t total = 0;
@@ -591,6 +649,35 @@ static void *job_thread(void *data) {
 		struct stat st;
 		bool folder = lstat(from, &st) == 0 && S_ISDIR(st.st_mode);
 		char as[NAME_MAX + 1], to[PATH_MAX];
+		snprintf(to, sizeof(to), "%s/%s", job->dest, name);
+		// clashing: asked. kept alongside, it's given a name nothing has
+		if (!same_dir && exists(to)) {
+			enum ops_clash_answer a = ask(job, i, from, name, to);
+			if (a == OPS_ASK) {
+				break; // cancelled
+			} else if (a == OPS_SKIP) {
+				progress(job, tree_size(from));
+				continue;
+			} else if (a == OPS_REPLACE) {
+				// the one there out of the way, into the trash: never lost.
+				// not the folder this one's in, though
+				size_t tl = strlen(to);
+				const char *error;
+				if (!strncmp(from, to, tl) && from[tl] == '/') {
+					pthread_mutex_lock(&job->lock);
+					snprintf(job->error, sizeof(job->error), "%s can't replace the folder it's in",
+						name);
+					pthread_mutex_unlock(&job->lock);
+					break;
+				}
+				if (!ops_trash(to, &error)) {
+					pthread_mutex_lock(&job->lock);
+					snprintf(job->error, sizeof(job->error), "can't replace %s: %s", name, error);
+					pthread_mutex_unlock(&job->lock);
+					break;
+				}
+			}
+		}
 		if (!free_name(job->dest, name, folder, same_dir, as, sizeof(as))) {
 			job_error(job, "no free name for", name, EEXIST);
 			break;
@@ -651,6 +738,7 @@ struct ops_job *ops_job_start(struct fui *ui, char *const *paths, size_t len, co
 		job->paths[i] = strdup(paths[i]);
 	}
 	pthread_mutex_init(&job->lock, NULL);
+	pthread_cond_init(&job->answered, NULL);
 	if (pthread_create(&job->thread, NULL, job_thread, job)) {
 		job->thread = 0;
 		ops_job_free(job);
@@ -659,11 +747,24 @@ struct ops_job *ops_job_start(struct fui *ui, char *const *paths, size_t len, co
 	return job;
 }
 
+void ops_job_answer(struct ops_job *job, enum ops_clash_answer answer, bool all) {
+	pthread_mutex_lock(&job->lock);
+	job->answer = answer;
+	job->answer_all = all;
+	pthread_cond_broadcast(&job->answered);
+	pthread_mutex_unlock(&job->lock);
+}
+
+void ops_job_cancel(struct ops_job *job) {
+	pthread_mutex_lock(&job->lock);
+	job->cancel = true;
+	pthread_cond_broadcast(&job->answered);
+	pthread_mutex_unlock(&job->lock);
+}
+
 void ops_job_free(struct ops_job *job) {
 	if (job->thread) {
-		pthread_mutex_lock(&job->lock);
-		job->cancel = true;
-		pthread_mutex_unlock(&job->lock);
+		ops_job_cancel(job);
 		pthread_join(job->thread, NULL);
 	}
 	for (size_t i = 0; i < job->len; i++) {
@@ -671,6 +772,7 @@ void ops_job_free(struct ops_job *job) {
 	}
 	free(job->paths);
 	free(job->buf);
+	pthread_cond_destroy(&job->answered);
 	pthread_mutex_destroy(&job->lock);
 	free(job);
 }
