@@ -30,7 +30,9 @@
 #define SPACING 120 // between people's middles
 #define POWER_R 20
 #define AWAKE 10.0
-#define PANES_MAX (4 + PEOPLE_MAX + POWER_COUNT)
+#define PANES_MAX (5 + PEOPLE_MAX + POWER_COUNT)
+#define MENU_ITEM 30
+#define MENU_PAD 6
 
 struct greet {
 	struct fui *ui;
@@ -42,6 +44,12 @@ struct greet {
 	bool started, leaving;
 	bool can[POWER_COUNT];
 	char hint[256]; // why the last one didn't go, till something's typed
+	// the sessions' list, open under the session's pill: where the pill
+	// is, the one the keys are on. while it's open nothing else is clicked
+	bool menu, menu_was;
+	bool moved; // the mouse, this frame
+	double pill_x, pill_y, pill_w;
+	int menu_hot;
 	struct fui_pane panes[PANES_MAX];
 	int panes_len;
 };
@@ -119,6 +127,20 @@ static void keys(struct fui *ui, struct greet *g) {
 		if (greet_state() != GREET_IDLE || g->leaving || !n) {
 			continue;
 		}
+		// the sessions' list open: the keys go through it
+		if (g->menu) {
+			int count = g->people.sessions;
+			if (sym == XKB_KEY_Escape) {
+				g->menu = false;
+			} else if (sym == XKB_KEY_Up || sym == XKB_KEY_Down) {
+				g->menu_hot = (g->menu_hot + (sym == XKB_KEY_Up ? count - 1 : 1)) % count;
+			} else if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter
+					|| sym == XKB_KEY_space) {
+				g->session = g->menu_hot;
+				g->menu = false;
+			}
+			continue;
+		}
 		// someone else: tab, or the arrows while nothing's typed
 		bool shift = mods & FUI_SHIFT;
 		if (sym == XKB_KEY_Tab || sym == XKB_KEY_ISO_Left_Tab) {
@@ -166,7 +188,7 @@ static void people(struct fui *ui, struct greet *g, double cx, double cy, double
 			glass(g, x - size / 2, cy - size / 2, size, size, 0xffffff26);
 		}
 		double r = size / 2;
-		if (!picked && n > 1) {
+		if (!picked && n > 1 && !g->menu_was) {
 			if (fui_hover(ui, x - r, cy - r, size, size)) {
 				fui_cursor_pointer(ui);
 			}
@@ -183,7 +205,7 @@ static void people(struct fui *ui, struct greet *g, double cx, double cy, double
 		.shaken_at = g->shaken_at,
 		.typed_at = g->typed_at,
 	};
-	if (look_field(ui, &field, cx, *fy, fx, lit)) {
+	if (look_field(ui, &field, cx, *fy, fx, lit) && !g->menu_was) {
 		submit(g);
 	}
 }
@@ -214,8 +236,80 @@ static void session(struct fui *ui, struct greet *g, double cx, double y) {
 			fui_cursor_pointer(ui);
 		}
 		if (fui_clicked(ui, x, y, w, h) && greet_state() != GREET_CHECKING) {
-			g->session = (g->session + 1) % g->people.sessions;
+			g->menu = !g->menu;
+			g->menu_hot = g->session;
 		}
+	}
+	g->pill_x = x;
+	g->pill_y = y;
+	g->pill_w = w;
+}
+
+// the sessions to log into, a list dropped under the pill (over it when
+// there's no room under), the current one ticked. a click outside closes it
+static void sessions_menu(struct fui *ui, struct greet *g) {
+	int count = g->people.sessions;
+	double open = fui_glide(ui, fui_id("menu", 0), g->menu ? 1 : 0, 0.12);
+	if (open < 0.01) {
+		return;
+	}
+	double w = g->pill_w;
+	for (int i = 0; i < count; i++) {
+		w = fmax(w, fui_text_width(ui, g->people.session[i].name, F_OTHER) + 64);
+	}
+	double h = count * MENU_ITEM + 2 * MENU_PAD;
+	double x = round(g->pill_x + g->pill_w / 2 - w / 2), y = g->pill_y + 24 + 8;
+	if (y + h > fui_height(ui) - 8) {
+		y = g->pill_y - 8 - h; // no room under: over it
+	}
+	y = round(y + (1 - open) * -6);
+	cairo_t *cr = fui_cairo(ui);
+	cairo_push_group(cr);
+	// dark enough to read over anything
+	fui_fill_rounded(ui, x, y, w, h, 12, 0x1c1c22eb);
+	fui_rounded(ui, x + 0.5, y + 0.5, w - 1, h - 1, 11.5);
+	fui_color(ui, 0xffffff26);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	for (int i = 0; i < count; i++) {
+		double iy = y + MENU_PAD + i * MENU_ITEM, ix = x + MENU_PAD, iw = w - 2 * MENU_PAD;
+		bool over = g->menu && fui_hover(ui, ix, iy, iw, MENU_ITEM);
+		if (over && g->moved) {
+			g->menu_hot = i; // the mouse moving onto it, the keys' choice otherwise
+		}
+		if (i == g->menu_hot) {
+			fui_fill_rounded(ui, ix, iy, iw, MENU_ITEM, 7, 0xffffff24);
+		}
+		if (i == g->session) {
+			double cx = ix + 12, cy = iy + MENU_ITEM / 2.0;
+			cairo_new_path(cr);
+			cairo_move_to(cr, cx, cy);
+			cairo_line_to(cr, cx + 3.5, cy + 3.5);
+			cairo_line_to(cr, cx + 10, cy - 4);
+			cairo_set_line_width(cr, 1.8);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+			cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+			fui_color(ui, LOOK_TEXT);
+			cairo_stroke(cr);
+		}
+		fui_text(ui, ix + 32, iy + 7, g->people.session[i].name, F_OTHER,
+			i == g->session ? LOOK_TEXT : 0xffffffd9, FUI_LEFT, iw - 40);
+		if (over) {
+			fui_cursor_pointer(ui);
+		}
+		if (g->menu && fui_clicked(ui, ix, iy, iw, MENU_ITEM)) {
+			g->session = i;
+			g->menu = false;
+		}
+	}
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, open);
+	pane(g, (struct fui_pane){(int)x, (int)y, (int)w, (int)h, 12, 12, 0xffffff14, 1.8, 0.22, 18,
+		1 - open});
+	// a click anywhere else: closed, and that's all it does
+	if (g->menu && g->menu_was && fui_clicked(ui, 0, 0, fui_width(ui), fui_height(ui))
+			&& !fui_hover(ui, x, y, w, h)) {
+		g->menu = false;
 	}
 }
 
@@ -267,11 +361,17 @@ static void power(struct fui *ui, struct greet *g, double cx, double y) {
 	}
 	double x = cx - (shown - 1) * 90 / 2.0;
 	cairo_t *cr = fui_cairo(ui);
+	// the sessions' list drops over them: they go while it's open
+	double away = fui_glide(ui, fui_id("menu", 0), g->menu ? 1 : 0, 0.12);
+	cairo_push_group(cr);
+	int first_pane = g->panes_len;
 	for (int i = 0; i < POWER_COUNT; i++) {
 		if (!g->can[i]) {
 			continue;
 		}
-		bool over = fui_hover(ui, x - POWER_R, y - POWER_R, POWER_R * 2, POWER_R * 2);
+		// under the sessions' list while it's open: nothing to click
+		bool over = !g->menu_was
+			&& fui_hover(ui, x - POWER_R, y - POWER_R, POWER_R * 2, POWER_R * 2);
 		double lit = fui_glide(ui, fui_id("power lit", (uint64_t)i), over ? 1 : 0, 0.15);
 		glass(g, x - POWER_R, y - POWER_R, POWER_R * 2, POWER_R * 2,
 			0xffffff00 | (uint32_t)(0x1a + 0x1c * lit));
@@ -288,11 +388,16 @@ static void power(struct fui *ui, struct greet *g, double cx, double y) {
 		if (over) {
 			fui_cursor_pointer(ui);
 		}
-		if (fui_clicked(ui, x - POWER_R, y - POWER_R, POWER_R * 2, POWER_R * 2)
+		if (over && fui_clicked(ui, x - POWER_R, y - POWER_R, POWER_R * 2, POWER_R * 2)
 				&& !g->leaving) {
 			power_do((enum power)i);
 		}
 		x += 90;
+	}
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, 1 - away);
+	for (int i = first_pane; i < g->panes_len; i++) {
+		g->panes[i].fade = away;
 	}
 }
 
@@ -307,9 +412,11 @@ static void frame(struct fui *ui, void *data) {
 	if (fui_button_held(ui) || fui_scrolled(ui) != 0) {
 		g->active_at = now;
 	}
+	g->menu_was = g->menu;
 	double px, py;
 	fui_pointer(ui, &px, &py);
-	if (px != g->mx || py != g->my) {
+	g->moved = px != g->mx || py != g->my;
+	if (g->moved) {
 		g->mx = px;
 		g->my = py;
 		g->active_at = now;
@@ -348,8 +455,12 @@ static void frame(struct fui *ui, void *data) {
 	}
 
 	g->panes_len = 0;
-	pane(g, (struct fui_pane){0, 0, (int)w, (int)h, 0, 40 * blur,
-		0x00000000 | (uint32_t)(0x1a + 0x30 * blur), 1 + 0.25 * blur, 0, 0, 0});
+	// logged in: down to black on the way out, the console behind it is black
+	// too and the session comes up from there, no flash of anything between
+	double dim = 0x1a + 0x30 * blur;
+	dim += (0xff - dim) * (g->leaving ? 1 - in : 0);
+	pane(g, (struct fui_pane){0, 0, (int)w, (int)h, 0, 40 * blur, (uint32_t)dim,
+		1 + 0.25 * blur, 0, 0, 0});
 	cairo_t *cr = fui_cairo(ui);
 	cairo_push_group(cr);
 	time_t t = time(NULL);
@@ -381,11 +492,14 @@ static void frame(struct fui *ui, void *data) {
 		look_shadowed(ui, w / 2, ay, "No one here can log in", F_NAME, LOOK_TEXT_DIM, 0.3);
 	}
 	power(ui, g, w / 2, h - 72);
+	if (g->people.len) {
+		sessions_menu(ui, g);
+	}
 	cairo_pop_group_to_source(cr);
 	cairo_paint_with_alpha(cr, in);
 	// the glass fades with what's on it, the wallpaper's own stays
 	for (int i = 1; i < g->panes_len; i++) {
-		g->panes[i].fade = 1 - in;
+		g->panes[i].fade = fmax(g->panes[i].fade, 1 - in);
 	}
 	fui_set_glass(ui, g->panes, g->panes_len);
 	fui_after(ui, (int)(60 - tm.tm_sec) * 1000 + 50, minute, g);

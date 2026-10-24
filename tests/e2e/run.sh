@@ -34,13 +34,14 @@ wait_below() {
 
 # the case in dir $1, named $2, flame's args $3, what flame runs inside $4
 # (CASE_WRAP: dbus-run-session for a bus of its own), the case's env $5. its
-# flame has its own settings and config (never the user's init.lua: what
-# that starts would be in every case). its result printed in one go, a
-# block the others running don't tear up
+# flame has its own settings, config and login screen looks (never the
+# user's init.lua: what that starts would be in every case). its result
+# printed in one go, a block the others running don't tear up
 run_case() {
 	dir=$1
 	timeout 30 $4 env WLR_BACKENDS=headless FLAME_TEST_INPUT=1 \
-		FLAME_SETTINGS="$dir/settings.lua" XDG_CONFIG_HOME="$dir/config" $5 "$FLAME" $3 \
+		FLAME_SETTINGS="$dir/settings.lua" XDG_CONFIG_HOME="$dir/config" \
+		FLAMEGREET_DIR="$dir/greetstore" $5 "$FLAME" $3 \
 		-s "$dir/case.sh" > "$dir/flame.log" 2>&1
 	ok=1
 	while IFS= read -r want; do
@@ -1474,7 +1475,7 @@ $BIN/wllock unlock 200 > /dev/null
 sleep 0.4
 clock back" \
 	"before no clock" "locked clock" "still 1" "killed no clock black" "back no clock"
-case_run "flamegreet: flame as the login screen, a wrong password shakes, the right one starts the picked session and flame goes" "
+case_run "flamegreet: flame as the login screen, a wrong password shakes, the right one starts the session picked from its list and flame goes" "
 mkdir -p sessions
 printf '[Desktop Entry]\nName=Another\nExec=another --x %%U\n' > sessions/another.desktop
 printf '[Desktop Entry]\nName=flame\nExec=flamewm\nDesktopNames=flamewm\n' > sessions/flamewm.desktop
@@ -1484,6 +1485,11 @@ cat > inner.sh <<'SH'
 #!/bin/sh
 type() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done; }
 sleep 1.5
+# the sessions' list open (its pill, under the field), the one over flame
+$CTL pointer move 640 587 > /dev/null
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.3
+type Up Return
 type w r o n g Return
 sleep 1.5
 type h u n t e r 2 Return
@@ -1497,9 +1503,9 @@ kill \$fake
 sed \"s/ \$first\\\$/ the first one/\" greetd.out
 sed \"s/^\$first /the first one /\" cache/flamegreet/last" \
 	"flame went with it: 0" "session for the first one" "refused wrong" "cancelled" \
-	"right password" "start /bin/sh -c flamewm" \
-	"env XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=flamewm XDG_CURRENT_DESKTOP=flamewm" \
-	"the first one flamewm"
+	"right password" "start /bin/sh -c another --x" \
+	"env XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=another XDG_CURRENT_DESKTOP=another" \
+	"the first one another"
 case_run "flamegreet: the picked one's own wallpaper behind it, sharp with their blur off" "
 first=\$(getent passwd | awk -F: '\$3 >= 1000 && \$3 <= 60000 && \$7 !~ /(nologin|false)\$/ { print \$1; exit }')
 mkdir -p store/\$first
