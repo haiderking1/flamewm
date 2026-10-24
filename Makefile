@@ -163,10 +163,10 @@ $(LOCK): $(LOCK_SRCS) $(LOCK_HDRS) $(FLAMEUI_DEPS)
 	$(UI_CC) -o $@ $(LOCK_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) -lpam
 
 GREET_SRCS := tools/flamegreet/main.c tools/flamegreet/greetd.c tools/flamegreet/people.c \
-	tools/flamegreet/power.c tools/flamelock/look.c
+	tools/flamegreet/power.c tools/flamegreet/store.c tools/flamelock/look.c $(IPC_SRCS)
 GREET_HDRS := tools/flamegreet/greetd.h tools/flamegreet/people.h tools/flamegreet/power.h \
-	tools/flamelock/look.h
-$(GREET): $(GREET_SRCS) $(GREET_HDRS) $(FLAMEUI_DEPS)
+	tools/flamegreet/store.h tools/flamelock/look.h
+$(GREET): $(GREET_SRCS) $(GREET_HDRS) $(IPC_DEPS) $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(GREET_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs libsystemd)
@@ -198,7 +198,8 @@ $(BUILD)/obj/gen/%-protocol.o: $(BUILD)/gen/%-protocol.c
 
 # pure logic modules get unit tests, sanitizers on
 TESTS := $(BUILD)/tests/schedule_test $(BUILD)/tests/hiccup_test $(BUILD)/tests/sync_test \
-	$(BUILD)/tests/mode_test $(BUILD)/tests/pacer_test $(BUILD)/tests/gl_test
+	$(BUILD)/tests/mode_test $(BUILD)/tests/pacer_test $(BUILD)/tests/gl_test \
+	$(BUILD)/tests/greetstore_test
 
 $(BUILD)/tests/schedule_test: tests/schedule_test.c src/render/schedule.c
 	@mkdir -p $(dir $@)
@@ -219,6 +220,12 @@ $(BUILD)/tests/mode_test: tests/mode_test.c src/output/mode.c
 $(BUILD)/tests/pacer_test: tests/pacer_test.c src/game/pacer.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c17 -O1 -g $(WARN) -fsanitize=address,undefined -Isrc -o $@ $^
+
+$(BUILD)/tests/greetstore_test: tests/greetstore_test.c tools/flamegreet/store.c \
+		tools/flamegreet/store.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=c17 -O1 -g $(WARN) -D_DEFAULT_SOURCE -fsanitize=address,undefined -o $@ \
+		tests/greetstore_test.c tools/flamegreet/store.c
 
 # flame's renderer against wlroots' on a real gpu. no sanitizers: gpu
 # drivers trip them on their own
@@ -534,6 +541,8 @@ install: release
 	install -Dm755 build-release/flamelock $(DESTDIR)$(PREFIX)/bin/flamelock
 	install -Dm644 data/flamelock.pam $(DESTDIR)/etc/pam.d/flamelock
 	install -Dm755 build-release/flamegreet $(DESTDIR)$(PREFIX)/bin/flamegreet
+	# everyone's login screen look, a folder each made as themselves (like /tmp)
+	install -dm1777 $(DESTDIR)/var/lib/flamegreet
 	install -Dm644 data/flamewm.desktop $(DESTDIR)$(PREFIX)/share/wayland-sessions/flamewm.desktop
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop

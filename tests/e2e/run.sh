@@ -1500,6 +1500,37 @@ sed \"s/^\$first /the first one /\" cache/flamegreet/last" \
 	"right password" "start /bin/sh -c flamewm" \
 	"env XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=flamewm XDG_CURRENT_DESKTOP=flamewm" \
 	"the first one flamewm"
+case_run "flamegreet: the picked one's own wallpaper behind it, sharp with their blur off" "
+first=\$(getent passwd | awk -F: '\$3 >= 1000 && \$3 <= 60000 && \$7 !~ /(nologin|false)\$/ { print \$1; exit }')
+mkdir -p store/\$first
+chmod 755 store/\$first
+ffmpeg -loglevel error -f lavfi -i color=red:s=64x64 -f lavfi -i color=blue:s=64x64 \
+	-filter_complex hstack -frames:v 1 store/\$first/wallpaper-1.png
+cat > inner.sh <<'SH'
+#!/bin/sh
+sleep 2
+grim -t ppm seam.ppm
+python3 -I -c \"
+d = open('seam.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+r, g, b = px[(20 * w + w // 2 - 6) * 3:][:3]
+print('\$1', 'red' if r > 150 and b < 40 else 'blue' if b > 150 and r < 40 else 'mixed' if r > 40 and b > 40 else 'dark', (r, g, b))
+\" >> seen.txt
+for p in \$(pgrep -x flamegreet); do grep -qzx \"WAYLAND_DISPLAY=\$WAYLAND_DISPLAY\" /proc/\$p/environ && kill \$p; done
+SH
+chmod +x inner.sh
+greet() { FLAMEGREET_DIR=\$PWD/store FLAMEGREET_SESSIONS=\$PWD XDG_CACHE_HOME=\$PWD/cache \
+	WLR_BACKENDS=headless timeout 15 $FLAME -g flamegreet -s \"./inner.sh \$1\" > inner.log 2>&1; }
+greet none
+printf 'wallpaper = wallpaper-1.png\nblur = false\n' > store/\$first/look
+greet sharp
+printf 'wallpaper = wallpaper-1.png\nblur = true\n' > store/\$first/look
+greet blurred
+chmod 777 store/\$first
+greet strangers
+cat seen.txt" \
+	"none dark" "sharp red" "blurred mixed" "strangers dark"
 case_run "media keys: to whoever takes them, volume again and again while it's held, play once" "
 cat > keys.py <<'PY'
 import json, os, socket, subprocess, sys, time

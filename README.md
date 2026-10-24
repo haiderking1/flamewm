@@ -77,9 +77,11 @@ user = "greeter"
 
 `systemctl enable greetd` (with your current display manager disabled).
 `-g` makes flame the login screen: just the greeter, no binds, and flame
-gone the moment someone's logged in. the wallpaper's whatever the greeter
-user's config says: `-c /etc/greetd/flame.lua` with a
-`flame.set{ wallpaper = ... }` in it (the picture readable by `greeter`).
+gone the moment someone's logged in. everyone picks how it looks while
+they're the one picked, in settings (wallpaper, login screen): their own
+wallpaper (a copy goes to `/var/lib/flamegreet`, no root needed) and the
+blur on or off. for nobody's in particular, the greeter user's config:
+`-c /etc/greetd/flame.lua` with a `flame.set{ wallpaper = ... }` in it.
 the sessions are `/usr/share/wayland-sessions`' (flame's put there), the
 last person and session picked come up first next time.
 

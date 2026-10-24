@@ -6,12 +6,14 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
 #include "../flameui/flameui.h"
+#include "../flameipc/ipc.h"
 #include "../flamelock/look.h"
 #include "greetd.h"
 #include "people.h"
@@ -86,6 +88,15 @@ static void submit(struct greet *g) {
 	g->hint[0] = '\0';
 }
 
+// the picked one's wallpaper behind it, flame fading it in. none of their
+// own: the login screen's
+static void their_wallpaper(struct greet *g) {
+	char command[4200];
+	snprintf(command, sizeof(command), "greeter-wallpaper %s",
+		g->people.look[g->person].wallpaper);
+	free(ipc_call(command));
+}
+
 static void pick(struct greet *g, int person) {
 	if (person == g->person || greet_state() == GREET_CHECKING) {
 		return;
@@ -93,6 +104,7 @@ static void pick(struct greet *g, int person) {
 	g->person = person;
 	wipe(g);
 	g->hint[0] = '\0';
+	their_wallpaper(g);
 }
 
 // ---- keys ----
@@ -322,7 +334,10 @@ static void frame(struct fui *ui, void *data) {
 	if (awake) {
 		fui_after(ui, (int)((AWAKE - (now - g->active_at)) * 1000) + 50, minute, g);
 	}
-	double blur = fui_glide(ui, fui_id("blur", 0), awake || g->leaving ? 1 : 0, 0.45);
+	// the picked one may have it off: then it's the wallpaper as it is
+	bool blurred = !g->people.len || g->people.look[g->person].blur;
+	double blur = fui_glide(ui, fui_id("blur", 0), blurred && (awake || g->leaving) ? 1 : 0,
+		0.45);
 	// in once it's up, out once someone's logged in: then it's gone, and
 	// greetd starts their session
 	double in = fui_glide_from(ui, fui_id("in", 0), 0, g->leaving ? 0 : 1, g->leaving
@@ -383,6 +398,9 @@ int main(int argc, char **argv) {
 	g.person = g.people.last_person;
 	g.session = g.people.last_session;
 	power_check(g.can);
+	if (g.people.len) {
+		their_wallpaper(&g);
+	}
 	g.ui = fui_create(&(struct fui_config){
 		.app_id = "flamegreet",
 		.title = "Log In",

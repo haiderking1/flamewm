@@ -168,6 +168,7 @@ void people_load(struct people *people) {
 	struct passwd *pw;
 	while ((pw = getpwent()) && people->len < PEOPLE_MAX) {
 		if (can_log_in(pw)) {
+			store_read(pw->pw_name, pw->pw_uid, &people->look[people->len]);
 			look_person(&people->person[people->len++], pw);
 		}
 	}

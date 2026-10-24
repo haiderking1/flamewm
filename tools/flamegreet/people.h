@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "../flamelock/look.h"
+#include "store.h"
 
 // who can log in and into what: the people (not the system's own accounts)
 // and the wayland sessions installed, the last ones picked first
@@ -20,6 +21,7 @@ struct session {
 
 struct people {
 	struct look_person person[PEOPLE_MAX];
+	struct greet_look look[PEOPLE_MAX]; // how the screen looks while they're picked
 	int len;
 	struct session session[SESSIONS_MAX];
 	int sessions;
