@@ -4,6 +4,7 @@
 #include <wlr/util/log.h>
 
 #include "config/config.h"
+#include "core/console.h"
 #include "core/priority.h"
 #include "core/server.h"
 
@@ -56,6 +57,7 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	console_quiet(greeter_cmd != NULL);
 	wlr_log_init(verbosity, NULL);
 	priority_raise();
 
@@ -81,5 +83,6 @@ int main(int argc, char *argv[]) {
 	server_run(&server);
 	server_finish(&server);
 	config_free((struct flame_config *)server.config);
+	console_restore();
 	return 0;
 }

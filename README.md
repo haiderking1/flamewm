@@ -61,7 +61,9 @@ sudo make install  # flamewm, flamectl, its apps, the portal files sharing and d
 ```
 
 `flamewm -c config -s command -d`: a config file, a command to run once
-it's up, debug logs.
+it's up, debug logs. started on a console (a tty, greetd) the logs go to
+`$XDG_RUNTIME_DIR/flamewm.log` instead (`flamewm-greeter.log` for the
+login screen), the screen stays black around flame.
 
 ## logging in
 
