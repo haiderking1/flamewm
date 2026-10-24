@@ -2,6 +2,7 @@
 
 #include "anim/window.h"
 #include "core/server.h"
+#include "util/timer.h"
 
 bool fullscreen_area(struct flame_desktop *desktop, struct wlr_box *box) {
 	struct flame_output *output = outputs_primary(&desktop->server->outputs);
@@ -22,6 +23,9 @@ static void claim(struct flame_workspace *workspace, struct flame_view *view) {
 	view->fullscreen_wanted = true;
 }
 
+// how long a window that just opened may take the screen without the focus
+#define OPENING_NS (5 * 1000000000LL)
+
 bool fullscreen_request(struct flame_desktop *desktop, struct flame_view *view,
 		bool fullscreen) {
 	struct flame_workspace *workspace = view->workspace;
@@ -29,8 +33,18 @@ bool fullscreen_request(struct flame_desktop *desktop, struct flame_view *view,
 		view->fullscreen_wanted = fullscreen;
 		return true;
 	}
+	// one that isn't focused can't take the screen from under the user.
+	// unless it just opened, nothing's fullscreen and it's in sight: a game
+	// starting asks once its window's up, the click that launched it (a
+	// second one on steam's play) may have left the focus behind. it gets
+	// the keys with the screen
+	bool opening = false;
 	if (fullscreen && workspace->fullscreen != view && desktop->focused != view) {
-		return false;
+		opening = !workspace->fullscreen && workspace == desktop->active
+			&& now_ns() - view->mapped_at < OPENING_NS;
+		if (!opening) {
+			return false;
+		}
 	}
 
 	// a held window can't also be fullscreen
@@ -38,6 +52,9 @@ bool fullscreen_request(struct flame_desktop *desktop, struct flame_view *view,
 
 	if (fullscreen) {
 		claim(workspace, view);
+		if (opening) {
+			focus_view(desktop, view);
+		}
 	} else {
 		view->fullscreen_wanted = false;
 		if (workspace->fullscreen == view) {

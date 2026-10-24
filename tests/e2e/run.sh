@@ -265,6 +265,23 @@ title wiggled
 $CTL pointer move 900 400 > /dev/null; sleep 0.3
 $CTL pointer move 300 400 > /dev/null; sleep 0.3
 title crossed" "opened game" "wiggled game" "crossed steam"
+case_run "a window that just opened takes the screen when it asks, though the user clicked elsewhere meanwhile; one long open doesn't" "
+click() { $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; }
+$BIN/xtyped steam > /dev/null &
+sleep 1
+$CTL pointer move 300 400 > /dev/null; sleep 0.3
+$BIN/xewmh latefull 1 > late.out &
+sleep 0.6
+click
+wait \$!
+echo just opened: \$(cat late.out)
+sleep 0.5
+$BIN/xewmh latefull 7 > late.out &
+sleep 0.6
+click
+wait \$!
+echo long open, fullscreen: \$(grep -c FULLSCREEN late.out)" \
+	"just opened: state: FULLSCREEN FOCUSED geometry 0,0 1280x720" "long open, fullscreen: 0"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

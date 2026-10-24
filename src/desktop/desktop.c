@@ -7,6 +7,7 @@
 #include "config/config.h"
 #include "core/server.h"
 #include "layout/tree.h"
+#include "util/timer.h"
 
 bool desktop_init(struct flame_desktop *desktop, struct flame_server *server) {
 	struct flame_tree *tiled = server->render.layers[FLAME_LAYER_TILED];
@@ -149,6 +150,7 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
+	view->mapped_at = now_ns();
 	drag_tree_changed(&desktop->server->input.drag);
 	// the user's rules for it (init.lua): float or not, which workspace,
 	// fullscreen

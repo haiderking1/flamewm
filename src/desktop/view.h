@@ -89,6 +89,9 @@ struct flame_view {
 	bool fullscreen_wanted;
 	// on screen as fullscreen right now, flips only when a transaction lands
 	bool fullscreen_shown;
+	// when it last mapped (now_ns): just opened, it may still take the
+	// screen while the user's elsewhere
+	int64_t mapped_at;
 
 	// told it's in an interactive resize. terminals hold back the size from
 	// their shell meanwhile, so it doesn't redraw its prompt every frame

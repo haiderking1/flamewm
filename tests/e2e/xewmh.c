@@ -1,7 +1,7 @@
 // flame as X's window manager, the EWMH way an app sees it
 // usage: xewmh check | fullscreen | startfull | activate | steal | wayland CMD | close | dpi |
 //   configure | subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL |
-//   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL
+//   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL | latefull SECONDS
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -302,6 +302,16 @@ int main(int argc, char **argv) {
 		settle();
 		printf("in it, asked out: ");
 		print_state(w);
+	} else if (!strcmp(mode, "latefull") && argc > 2) {
+		// a game asks for fullscreen a while after its window's up (unity's
+		// sdl does), the user maybe somewhere else by then
+		xcb_window_t w = window(false);
+		settle();
+		nanosleep(&(struct timespec){atoi(argv[2]), 0}, NULL);
+		wm_message(w, "_NET_WM_STATE", 1, atom("_NET_WM_STATE_FULLSCREEN"), 0);
+		settle();
+		print_state(w);
+		print_geometry(w);
 	} else if (!strcmp(mode, "iconify")) {
 		// ICCCM's minimize, wine's way (XIconifyWindow): flame has none, the
 		// app hears WM_STATE is still Normal, it's never left waiting
