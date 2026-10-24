@@ -50,7 +50,8 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 
 static void server_keymap_names(struct flame_server *server);
 
-bool server_start(struct flame_server *server, const char *startup_cmd) {
+bool server_start(struct flame_server *server, const char *startup_cmd,
+		const char *greeter_cmd) {
 	server->socket = wl_display_add_socket_auto(server->display);
 	if (!server->socket) {
 		wlr_log(WLR_ERROR, "failed to open a wayland socket");
@@ -69,6 +70,15 @@ bool server_start(struct flame_server *server, const char *startup_cmd) {
 	setenv("XDG_SESSION_TYPE", "wayland", true);
 	// before anything gets started, they all inherit $FLAMEWM_SOCKET
 	ipc_start(&server->ipc, server->socket);
+	if (greeter_cmd) {
+		// the login screen: nobody's session yet, nothing of one
+		wlr_log(WLR_INFO, "flamewm greeting on WAYLAND_DISPLAY=%s", server->socket);
+		server_keymap_names(server);
+		if (startup_cmd) {
+			spawn_shell(startup_cmd);
+		}
+		return greeter_start(&server->greeter, server, greeter_cmd);
+	}
 	// flame's own X server, $DISPLAY for everyone
 	xbridge_start(&server->xbridge);
 	// apps started by the session (launchers through systemd, dbus
@@ -170,6 +180,7 @@ void server_finish(struct flame_server *server) {
 		server->reload_idle = NULL;
 	}
 	server->terminating = true;
+	greeter_finish(&server->greeter);
 	wl_display_destroy_clients(server->display);
 	anims_finish(&server->anims);
 	// stop listening to the desktop before it goes

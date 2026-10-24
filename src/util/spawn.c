@@ -130,6 +130,27 @@ pid_t spawn_reading(const char *const argv[], int *out) {
 	return pid;
 }
 
+pid_t spawn_child(const char *const argv[]) {
+	pid_t pid = fork();
+	if (pid < 0) {
+		wlr_log_errno(WLR_ERROR, "fork failed for %s", argv[0]);
+		return -1;
+	}
+	if (pid == 0) {
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, NULL);
+		signal(SIGPIPE, SIG_DFL);
+		setpriority(PRIO_PROCESS, 0, 0);
+		setsid();
+		path_near_flame();
+		exec_near_flame(argv);
+		execvp(argv[0], (char *const *)argv);
+		_exit(127);
+	}
+	return pid;
+}
+
 void spawn_shell(const char *command) {
 	const char *const argv[] = {"/bin/sh", "-c", command, NULL};
 	spawn(argv);

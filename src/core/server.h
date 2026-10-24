@@ -8,6 +8,7 @@
 #include "backend/backend.h"
 #include "capture/capture.h"
 #include "eyecandy/eyecandy.h"
+#include "greeter/greeter.h"
 #include "idle/idle.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
@@ -62,10 +63,13 @@ struct flame_server {
 	struct flame_portal portal;
 	struct flame_xselection xselection;
 	struct flame_ext_workspaces ext_workspaces;
+	struct flame_greeter greeter;
 };
 
 bool server_init(struct flame_server *server, const struct flame_config *config);
-bool server_start(struct flame_server *server, const char *startup_cmd);
+// greeter_cmd: flame's the login screen, see greeter/greeter.h. NULL else
+bool server_start(struct flame_server *server, const char *startup_cmd,
+	const char *greeter_cmd);
 void server_run(struct flame_server *server);
 void server_terminate(struct flame_server *server);
 void server_finish(struct flame_server *server);

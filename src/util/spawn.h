@@ -9,5 +9,7 @@ void spawn_shell(const char *command);
 // argv started with what it prints to a pipe, *out its end (non-blocking).
 // not double forked: the caller reaps it (a pidfd). -1 when it couldn't be
 pid_t spawn_reading(const char *const argv[], int *out);
+// argv started, not double forked: the caller reaps it. -1 when it couldn't be
+pid_t spawn_child(const char *const argv[]);
 
 #endif

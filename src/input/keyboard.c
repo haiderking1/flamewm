@@ -32,6 +32,9 @@ static bool handle_press(struct flame_keyboard *keyboard, xkb_keycode_t keycode)
 	if (handle_vt_switch(server, syms, count)) {
 		return true;
 	}
+	if (greeter_active(&server->greeter)) {
+		return false; // the login screen: no binds, nothing to open or quit
+	}
 
 	// binds match the unshifted level so mod+shift+1 stays "1", not "!"
 	uint32_t mods = wlr_keyboard_get_modifiers(keyboard->wlr);
