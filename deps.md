@@ -43,6 +43,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | librsvg, gio | `librsvg-2.0` `gio-2.0` | flame's apps (flameui): icons from the desktop's icon theme (gsettings' theme, else gtk's settings.ini, then hicolor), drawn sharp at their size when they're svg. an app's icon on its notifications |
 | gio-unix | `gio-unix-2.0` | flamesearch: the apps there are (their .desktop files, as they're installed or removed), opened the way they ask (a terminal for a terminal app), a file in the app that opens its kind |
 | pam | `-lpam` (`pam`) | flamelock: the password checked the way a console login checks it (`/etc/pam.d/flamelock`, which `make install` puts there: login's rules). systemd's logind (sd-bus): flame locks before the computer sleeps |
+| sd-bus (systemd) | `libsystemd` | flamegreet: sleep, restart and shut down asked of logind from the login screen |
 | uchardet | `uchardet` | flameplay: what encoding a subtitle file that isn't utf-8 is in (old .srt files: windows' arabic, cyrillic, western...), read as that |
 | libass | `libass` | flameplay's subtitles: every text kind (srt, ass, webvtt, a video's own) drawn by it, a styled one the way it was made, a plain one in flame's look. fonts through fontconfig and the ones a file brings |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
@@ -59,6 +60,7 @@ not linked, flame works without them, these features don't.
 | dep | why |
 | --- | --- |
 | xdg-desktop-portal, pipewire, wireplumber | screen sharing and screenshots (obs, discord, browsers): xdg-desktop-portal asks flame's own portal, flame's picker asks you, flame streams it into pipewire. apps' open and save dialogs the same way, flamefiles as the dialog. `make install` puts `data/flamewm.portal` and `data/flamewm-portals.conf` where xdg-desktop-portal looks (`/usr/share/xdg-desktop-portal`) |
+| greetd | the login screen: flamegreet is a greetd greeter (`flamewm -g flamegreet` as its `default_session`). greetd does the logging in (pam) and starts the session, flamegreet just asks |
 | xdg-desktop-portal-gtk | the rest of the portal: what flame doesn't serve itself (settings, app chooser and such) |
 | Inter (`inter-font`) | flamesettings' font, falls back to the system sans without it |
 | networkmanager, bluez, an mpris player | what flamebar's control center shows: the network and wi-fi, bluetooth, what's playing. without one its tile says so. neither is started by the bar |

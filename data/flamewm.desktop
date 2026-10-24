@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=flame
+Comment=a tiling wayland compositor
+Exec=flamewm
+Type=Application
+DesktopNames=flamewm

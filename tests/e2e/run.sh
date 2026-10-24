@@ -1474,6 +1474,32 @@ $BIN/wllock unlock 200 > /dev/null
 sleep 0.4
 clock back" \
 	"before no clock" "locked clock" "still 1" "killed no clock black" "back no clock"
+case_run "flamegreet: flame as the login screen, a wrong password shakes, the right one starts the picked session and flame goes" "
+mkdir -p sessions
+printf '[Desktop Entry]\nName=Another\nExec=another --x %%U\n' > sessions/another.desktop
+printf '[Desktop Entry]\nName=flame\nExec=flamewm\nDesktopNames=flamewm\n' > sessions/flamewm.desktop
+python3 -I $TESTS/fakegreetd.py \$PWD/greetd.sock > greetd.out 2>&1 &
+fake=\$!
+cat > inner.sh <<'SH'
+#!/bin/sh
+type() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done; }
+sleep 1.5
+type w r o n g Return
+sleep 1.5
+type h u n t e r 2 Return
+SH
+chmod +x inner.sh
+first=\$(getent passwd | awk -F: '\$3 >= 1000 && \$3 <= 60000 && \$7 !~ /(nologin|false)\$/ { print \$1; exit }')
+GREETD_SOCK=\$PWD/greetd.sock FLAMEGREET_SESSIONS=\$PWD/sessions XDG_CACHE_HOME=\$PWD/cache \
+	WLR_BACKENDS=headless timeout 20 $FLAME -g flamegreet -s ./inner.sh > inner.log 2>&1
+echo \"flame went with it: \$?\"
+kill \$fake
+sed \"s/ \$first\\\$/ the first one/\" greetd.out
+sed \"s/^\$first /the first one /\" cache/flamegreet/last" \
+	"flame went with it: 0" "session for the first one" "refused wrong" "cancelled" \
+	"right password" "start /bin/sh -c flamewm" \
+	"env XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=flamewm XDG_CURRENT_DESKTOP=flamewm" \
+	"the first one flamewm"
 case_run "media keys: to whoever takes them, volume again and again while it's held, play once" "
 cat > keys.py <<'PY'
 import json, os, socket, subprocess, sys, time

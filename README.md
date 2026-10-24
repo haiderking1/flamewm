@@ -32,6 +32,10 @@ Xwayland needed, Steam and Proton games included.
   wallpaper with the time big over it, your picture and a glass field for
   the password. locked, nothing but it shows or hears a key, and a lock
   that crashes stays locked
+- **a login screen**, flamegreet: the lock screen's look before anyone's
+  logged in. everyone who can log in side by side, a field for the picked
+  one's password, what to log into, sleep, restart and shut down. it's a
+  greetd greeter, see [logging in](#logging-in)
 - **its own bar**, flamebar: see through over the wallpaper, the app in
   front and the workspaces in use, the time (a click: a calendar), and a
   control center of glass tiles (sound, what's playing, network,
@@ -58,6 +62,26 @@ sudo make install  # flamewm, flamectl, its apps, the portal files sharing and d
 
 `flamewm -c config -s command -d`: a config file, a command to run once
 it's up, debug logs.
+
+## logging in
+
+flamegreet greets through [greetd](https://git.sr.ht/~kennylevinsen/greetd),
+flame itself showing it. `sudo make install`, then in
+`/etc/greetd/config.toml`:
+
+```toml
+[default_session]
+command = "flamewm -g flamegreet"
+user = "greeter"
+```
+
+`systemctl enable greetd` (with your current display manager disabled).
+`-g` makes flame the login screen: just the greeter, no binds, and flame
+gone the moment someone's logged in. the wallpaper's whatever the greeter
+user's config says: `-c /etc/greetd/flame.lua` with a
+`flame.set{ wallpaper = ... }` in it (the picture readable by `greeter`).
+the sessions are `/usr/share/wayland-sessions`' (flame's put there), the
+last person and session picked come up first next time.
 
 ## config
 
