@@ -83,6 +83,9 @@ struct flame_view {
 	// float when it maps (dialogs, fixed size windows). has_float_box: it
 	// floated before, toggling back puts it where it was
 	bool floating, float_wanted, has_float_box;
+	// floated by flame because it turned one size only, see floating_fixed:
+	// it tiles again once it's any size (one the user floated stays)
+	bool float_auto;
 	struct wlr_box float_box;
 
 	// the client or the user wants it fullscreen

@@ -65,6 +65,7 @@ void floating_toggle(struct flame_desktop *desktop, struct flame_view *view) {
 	drag_forget(&desktop->server->input.drag, view);
 	drag_tree_changed(&desktop->server->input.drag);
 	transaction_flush(&desktop->transaction);
+	view->float_auto = false; // the user's now
 	if (view->floating) {
 		workspace_remove_view(workspace, view);
 		view->floating = false;
@@ -86,6 +87,39 @@ void floating_toggle(struct flame_desktop *desktop, struct flame_view *view) {
 	workspace->last_focused = view;
 	desktop_arrange(desktop);
 	focus_view(desktop, view);
+	desktop_notify(desktop);
+}
+
+void floating_fixed(struct flame_desktop *desktop, struct flame_view *view, bool fixed,
+		int width, int height) {
+	struct flame_workspace *workspace = view->workspace;
+	if (!workspace || view->fullscreen_wanted || fixed == view->floating
+			|| (!fixed && !view->float_auto)) {
+		return;
+	}
+	drag_forget(&desktop->server->input.drag, view);
+	drag_tree_changed(&desktop->server->input.drag);
+	transaction_flush(&desktop->transaction);
+	workspace_remove_view(workspace, view);
+	if (fixed) {
+		int bw = view_border_width(view, false);
+		view->float_box = centered(desktop, width + 2 * bw, height + 2 * bw);
+		view->has_float_box = true;
+		view->floating = true;
+		view->float_auto = true;
+		workspace_add_float(workspace, view);
+	} else {
+		view->floating = false;
+		view->float_auto = false;
+		view->has_float_box = false; // a float of its own later starts over
+		if (!workspace_add_view(workspace, view)) {
+			view->floating = true;
+			workspace_add_float(workspace, view);
+		}
+	}
+	if (workspace == desktop->active) {
+		desktop_arrange(desktop);
+	}
 	desktop_notify(desktop);
 }
 

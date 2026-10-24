@@ -21,6 +21,12 @@ struct wlr_box floating_on_screen(struct flame_desktop *desktop, struct wlr_box 
 // tile it, or float it
 void floating_toggle(struct flame_desktop *desktop, struct flame_view *view);
 
+// a mapped window turned one size only (width x height, a welcome screen
+// of a fixed size): floated in the middle at that size. any size again:
+// back to its tile, when it was flame that floated it. no focus moves
+void floating_fixed(struct flame_desktop *desktop, struct flame_view *view, bool fixed,
+	int width, int height);
+
 // a floating window's new box, border included: from a mouse drag (live,
 // nothing waits) or the client asking for a size of its own
 void floating_set_box(struct flame_desktop *desktop, struct flame_view *view,

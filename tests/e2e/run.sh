@@ -289,6 +289,16 @@ echo told a tile first: \$(grep told mapfull.out | grep -vc 1280x720)" "state: F
 	"told 1280x720" "told a tile first: 0"
 case_run "a dropdown opening under a still pointer gets the click right after, not the window under it" "
 $BIN/xewmh menuclick $CTL" "pressed on the dropdown"
+case_run "a wayland window turning one size only after it maps floats in the middle at that size, any size again it tiles" "
+st() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print(w['floating'], w['x'], w['y'], w['width'], w['height'])\"; }
+$BIN/wlfixed &
+sleep 0.6
+st tiled
+sleep 1.2
+st fixed
+sleep 1.5
+st again
+wait" "tiled False 6 6 1268 708" "fixed True 338 158 604 404" "again False 6 6 1268 708"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

@@ -8,6 +8,7 @@
 
 #include "anim/window.h"
 #include "core/server.h"
+#include "desktop/floating.h"
 #include "shell/xdg_tree.h"
 #include "util/listener.h"
 #include "util/macros.h"
@@ -411,11 +412,16 @@ static void handle_unmap(struct wl_listener *listener, void *data) {
 	toplevel->configured_fullscreen = false;
 }
 
+// it only comes in one size: min and max the same
+static bool fixed_size(struct wlr_xdg_toplevel *xdg) {
+	struct wlr_xdg_toplevel_state *state = &xdg->current;
+	return state->min_width > 0 && state->min_height > 0
+		&& state->min_width == state->max_width && state->min_height == state->max_height;
+}
+
 // dialogs (they have a parent) and windows that only come in one size float
 static bool wants_float(struct wlr_xdg_toplevel *xdg) {
-	struct wlr_xdg_toplevel_state *state = &xdg->current;
-	return xdg->parent || (state->min_width > 0 && state->min_height > 0
-		&& state->min_width == state->max_width && state->min_height == state->max_height);
+	return xdg->parent || fixed_size(xdg);
 }
 
 // configures a window that hasn't mapped yet with exactly what it's going to
@@ -484,8 +490,23 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 			toplevel->view.fullscreen_wanted = true;
 		}
 		wlr_xdg_toplevel_set_wm_capabilities(xdg, WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
+		toplevel->fixed = fixed_size(xdg);
 		configure_unmapped(toplevel);
 		return;
+	}
+	// one size only now, or any size again, after it mapped (zen's welcome
+	// turns 1200x720 once it's up, the browser after it any size)
+	bool fixed = fixed_size(xdg);
+	if (fixed != toplevel->fixed) {
+		toplevel->fixed = fixed;
+		// what it would take changed: a size it turned down once is asked
+		// for again (zen drew its 1200x720 welcome in a corner of its
+		// tile, then never filled it after)
+		toplevel->corrected = false;
+		if (toplevel->view.workspace && !xdg->parent) {
+			floating_fixed(toplevel->view.desktop, &toplevel->view, fixed,
+				xdg->current.min_width, xdg->current.min_height);
+		}
 	}
 	// window geometry can move with any commit
 	update_clip(toplevel);

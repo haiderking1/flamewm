@@ -24,6 +24,8 @@ struct flame_toplevel {
 	uint32_t configure_serial;
 	// already re-sent once for this size because the client ignored it
 	bool corrected;
+	// it only comes in one size (min = max), as last seen
+	bool fixed;
 
 	// what we're showing, the client can't draw past it
 	int display_width, display_height;
