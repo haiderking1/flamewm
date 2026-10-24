@@ -139,6 +139,13 @@ struct flame_frame {
 	struct wlr_drm_syncobj_timeline_waiter done_waiter;
 	bool done_waiting;
 	int64_t done_since;
+	// apps' dmabufs this frame's gpu work reads that have no explicit sync to
+	// hear when it's done: held, so the app doesn't get them back to draw
+	// into while the gpu's still reading. let go once the gpu's past the
+	// point that read them, the oldest one watched
+	struct wl_array held; // struct flame_held_read
+	struct wlr_drm_syncobj_timeline_waiter held_waiter;
+	bool held_waiting;
 
 	struct wl_listener scene_changed;
 	struct wl_listener scene_damage;

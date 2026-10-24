@@ -313,6 +313,77 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	queue_process(frame);
 }
 
+// ---- apps' buffers the gpu still reads ----
+
+struct flame_held_read {
+	struct wlr_buffer *buffer;
+	uint64_t point; // on in_timeline
+};
+
+static void watch_held(struct flame_frame *frame);
+
+// everything read by point and before is done with
+static void let_go_held(struct flame_frame *frame, uint64_t point) {
+	if (frame->held_waiting) {
+		wlr_drm_syncobj_timeline_waiter_finish(&frame->held_waiter);
+		frame->held_waiting = false;
+	}
+	struct flame_held_read *reads = frame->held.data;
+	size_t len = frame->held.size / sizeof(*reads), kept = 0;
+	for (size_t i = 0; i < len; i++) {
+		if (reads[i].point <= point) {
+			wlr_buffer_unlock(reads[i].buffer);
+		} else {
+			reads[kept++] = reads[i];
+		}
+	}
+	frame->held.size = kept * sizeof(*reads);
+	watch_held(frame);
+}
+
+static void handle_held_done(struct wlr_drm_syncobj_timeline_waiter *waiter) {
+	struct flame_frame *frame = wl_container_of(waiter, frame, held_waiter);
+	struct flame_held_read *reads = frame->held.data;
+	let_go_held(frame, reads[0].point); // the oldest is what was watched
+}
+
+// points only go up, the oldest held is the first
+static void watch_held(struct flame_frame *frame) {
+	if (frame->held_waiting || frame->held.size == 0 || !frame->in_timeline) {
+		return;
+	}
+	struct flame_held_read *reads = frame->held.data;
+	frame->held_waiting = wlr_drm_syncobj_timeline_waiter_init(&frame->held_waiter,
+		frame->in_timeline, reads[0].point, 0, frame->output->event_loop, handle_held_done);
+	if (!frame->held_waiting) {
+		// can't hear when: the old way, let go now
+		for (size_t i = 0; i < frame->held.size / sizeof(*reads); i++) {
+			wlr_buffer_unlock(reads[i].buffer);
+		}
+		frame->held.size = 0;
+	}
+}
+
+// surface's buffer is read by this frame's gpu work
+static void hold_read(struct flame_frame *frame, struct wlr_surface *surface) {
+	if (!frame->in_timeline || !surface->buffer
+			|| wlr_linux_drm_syncobj_v1_get_surface_state(surface)) {
+		return; // explicit sync has its release point, see sampled()
+	}
+	// shm is copied into a texture of ours, only a dmabuf is read in place
+	struct wlr_dmabuf_attributes dmabuf;
+	if (!surface->buffer->source
+			|| !wlr_buffer_get_dmabuf(surface->buffer->source, &dmabuf)) {
+		return;
+	}
+	struct flame_held_read *read = wl_array_add(&frame->held, sizeof(*read));
+	if (!read) {
+		return;
+	}
+	read->buffer = wlr_buffer_lock(&surface->buffer->base);
+	read->point = frame->in_point;
+}
+
 // ---- setup ----
 
 bool frame_init(struct flame_frame *frame, struct flame_render *render,
@@ -326,6 +397,7 @@ bool frame_init(struct flame_frame *frame, struct flame_render *render,
 	frame->callback_cycle = 1;
 	wl_signal_init(&frame->events.presented);
 	wl_signal_init(&frame->events.destroy);
+	wl_array_init(&frame->held);
 	wlr_damage_ring_init(&frame->ring);
 	pixman_region32_init(&frame->pending);
 	elements_init(&frame->prev);
@@ -393,6 +465,9 @@ void frame_finish(struct flame_frame *frame) {
 		wlr_drm_syncobj_timeline_waiter_finish(&frame->done_waiter);
 		frame->done_waiting = false;
 	}
+	let_go_held(frame, UINT64_MAX);
+	wl_array_release(&frame->held);
+	wl_array_init(&frame->held);
 	if (frame->scene_changed.link.next) {
 		listener_disconnect(&frame->scene_changed);
 		listener_disconnect(&frame->scene_damage);
@@ -536,6 +611,7 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 	});
 	if (client) {
 		sampled(frame, element->surface);
+		hold_read(frame, element->surface);
 		// a new buffer's first time on screen, for the latency probe
 		struct flame_surface_state *state = scene_surface_state(element->surface);
 		if (state && state->buffer_since && frame->timing.enabled
@@ -663,6 +739,8 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 
 	bool submitted = pass_submit(&pass);
 	gpu_time_end(&frame->gpu);
+	// not submitted: the next frame's point coming covers this one's too
+	watch_held(frame);
 	if (!submitted) {
 		// whatever made it into the buffer can't be trusted
 		wlr_damage_ring_add_whole(&frame->ring);
