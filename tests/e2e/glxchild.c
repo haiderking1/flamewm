@@ -8,9 +8,14 @@
 //     only its corner inside that window shows
 // glxchild remap: green is unmapped and mapped again in one go without
 // drawing, like an app reusing a popup: its old picture is gone with it
+// glxchild swap: green is unmapped and a new child in its place draws
+// magenta a moment later, the way CEF swaps the window a page is drawn in
+// (steam): screenshots in the gap (gap.ppm, green should still show) and
+// after (after.ppm)
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -75,6 +80,24 @@ int main(int argc, char **argv) {
 	draw(ctx, blue, 0, 0, 1);
 	draw(ctx, yellow, 1, 1, 0);
 	XSync(d, False);
+	if (argc > 1 && !strcmp(argv[1], "swap")) {
+		usleep(300000);
+		XUnmapWindow(d, green);
+		XSync(d, False);
+		usleep(30000);
+		if (system("grim -t ppm gap.ppm") != 0) {
+			puts("no screenshot");
+		}
+		Window fresh = child(top, 40, 30, 120, 90);
+		XSync(d, False);
+		usleep(30000);
+		draw(ctx, fresh, 1, 0, 1);
+		XSync(d, False);
+		usleep(300000);
+		if (system("grim -t ppm after.ppm") != 0) {
+			puts("no screenshot");
+		}
+	}
 	if (argc > 1 && !strcmp(argv[1], "remap")) {
 		usleep(300000);
 		XUnmapWindow(d, green);

@@ -734,6 +734,21 @@ print('green gone' if pixels[at:at + 3] != bytes([0, 255, 0]) else 'green still 
 \"
 wait" "drawn" "green gone"
 
+case_run "GL child swapped for a new one (CEF's way): what it showed stays till the new one draws, no flash of what's under it" "
+$BIN/glxchild swap > child.out 2>&1 &
+sleep 2
+cat child.out
+set -- \$($BIN/xwins | grep glxchild | $XGEO)
+python3 -I -c \"
+for name in ('gap', 'after'):
+	d = open(name + '.ppm', 'rb').read()
+	w, h = map(int, d.split(b'\\\\n')[1].split())
+	pixels = d[-(w * h * 3):]
+	at = ((\$2 + 50) * w + \$1 + 60) * 3
+	print(name, *pixels[at:at + 3])
+\"
+wait" "drawn" "gap 0 255 0" "after 255 0 255"
+
 case_run "floating: toggle, super+drag moves it, super+right drag resizes it, toggle back" "
 $BIN/xdnd target 12 > /dev/null 2>&1 &
 sleep 0.8

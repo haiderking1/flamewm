@@ -238,6 +238,9 @@ struct xlayer {
 	// Xwayland copy into a window. spare: copies nothing shows anymore
 	bool copying;
 	struct wl_list spare; // xcopy.link
+	// how its frames come, said once in the log: explicitly synced
+	// (syncobjs, what nvidia needs) or not
+	bool sync_told, synced;
 	// how long the app takes from hearing a frame made it (CompleteNotify) to
 	// its next present: quick to grow, slow to shrink. its completes are held
 	// back to just in time for the render that can show the next one
@@ -1173,10 +1176,83 @@ static void core_update(struct flame_xwindow *window);
 
 // what a layer shows goes, the app gets its buffer back: X lost the window's
 // contents. it shows nothing until it draws again
-static void layer_drop(struct xlayer *layer) {
+#define AFTERIMAGE_MS 250 // the longest an afterimage stays with nothing new
+
+static void afterimage_clear(struct flame_xwindow *window) {
+	if (window->afterimage_timer) {
+		wl_event_source_remove(window->afterimage_timer);
+		window->afterimage_timer = NULL;
+	}
+	if (window->afterimage) {
+		scene_node_destroy(&window->afterimage->node);
+		window->afterimage = NULL;
+	}
+	if (window->afterimage_copy) {
+		copy_destroy(window->afterimage_copy);
+		window->afterimage_copy = NULL;
+	}
+}
+
+static int handle_afterimage_timer(void *data) {
+	struct flame_xwindow *window = data;
+	window->afterimage_timer = NULL; // fired: it's gone already
+	afterimage_clear(window);
+	return 0;
+}
+
+static bool afterimage_accepts_input(struct flame_buffer_node *node, double x, double y) {
+	return false; // input goes by X's windows, not what's left of one
+}
+
+static const struct flame_buffer_node_impl afterimage_impl = {
+	.accepts_input = afterimage_accepts_input,
+};
+
+// what layer shows stays where it is in its window as an afterimage. a
+// copy of it, never the app's own buffer (it draws into it the moment it's
+// back): the copy shown already, else one made now, while flame still
+// holds the app's. the copy's the afterimage's, nothing draws into it again
+static void afterimage_keep(struct xlayer *layer, struct xpresent *xp) {
+	struct flame_xwindow *window = layer->window;
+	struct flame_buffer_node *was = layer->node;
+	if (!was->node.enabled || !was->texture || (!xp->copied && !copy_frame(xp)) || !xp->copy) {
+		return;
+	}
+	afterimage_clear(window);
+	struct flame_buffer_node *node = scene_buffer_create(window->content, &afterimage_impl,
+		window);
+	struct wl_event_source *timer = node ? wl_event_loop_add_timer(window->xshell->server->loop,
+		handle_afterimage_timer, window) : NULL;
+	if (!timer) {
+		if (node) {
+			scene_node_destroy(&node->node);
+		}
+		return;
+	}
+	// shown once the copy's done
+	struct flame_xshell *xshell = window->xshell;
+	scene_buffer_set(node, xp->copy->texture, xp->copy, was->width, was->height, was->opaque,
+		xp->copy_point ? xshell->copy_timeline : NULL, xp->copy_point);
+	if (!wlr_fbox_empty(&was->src)) {
+		scene_buffer_set_source(node, &was->src);
+	}
+	scene_node_set_position(&node->node, was->node.x, was->node.y);
+	wl_event_source_timer_update(timer, AFTERIMAGE_MS);
+	window->afterimage = node;
+	window->afterimage_copy = xp->copy;
+	window->afterimage_timer = timer;
+	xp->copy = NULL; // the afterimage's now, not the layer's to use again
+}
+
+// the layer stops showing what it showed. afterimage: its window stays and
+// what it showed stays too till the window draws again (an unmap)
+static void layer_drop(struct xlayer *layer, bool afterimage) {
 	struct xpresent *xp = layer->shown;
 	if (!xp) {
 		return;
+	}
+	if (afterimage) {
+		afterimage_keep(layer, xp);
 	}
 	layer->shown = NULL;
 	scene_node_set_enabled(&layer->node->node, false);
@@ -1199,8 +1275,9 @@ static void layer_place(struct xlayer *layer) {
 	if (xp && top && x && !x_viewable_in(top, x)) {
 		// unmapped: what it showed is gone, like X loses a window's contents.
 		// mapped again it shows nothing until it draws, never the old picture
-		// (a menu flashing what it showed last time)
-		layer_drop(layer);
+		// (a menu flashing what it showed last time). where it was, its last
+		// picture lingers till its window draws again
+		layer_drop(layer, true);
 		return;
 	}
 	int ox, oy;
@@ -1283,6 +1360,7 @@ static void show(struct xlayer *layer, struct xpresent *xp) {
 		copy_frame(xp);
 	}
 	layer_place(layer);
+	afterimage_clear(layer->window); // something new's drawn there
 	if (old) {
 		wl_list_remove(&old->link);
 		retire(layer, old);
@@ -1704,6 +1782,14 @@ void xshell_present(struct flame_xshell *xshell, const struct xs_present *presen
 		}
 	}
 	struct xpixmap *xpixmap = xpixmap_get(xshell, present->pixmap);
+	if (layer && (!layer->sync_told || layer->synced != !!present->acquire)) {
+		// a frame that isn't synced may be read half drawn (nvidia has no
+		// implicit sync): where a flicker comes from, when it does
+		wlr_log(WLR_DEBUG, "xshell: X window 0x%x presents %s", layer->id, present->acquire
+			? "explicitly synced" : "with no sync point (implicit sync)");
+		layer->sync_told = true;
+		layer->synced = present->acquire;
+	}
 	struct wlr_drm_syncobj_timeline *acquire = timeline_of(xshell, present->acquire);
 	struct wlr_drm_syncobj_timeline *release = timeline_of(xshell, present->release);
 	if (!layer || !xpixmap || (present->acquire && !acquire)) {
@@ -2455,7 +2541,9 @@ void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 		const pixman_region32_t *region) {
 	struct flame_xwindow *window = find_window(xshell, top->id);
 	if (window) {
-		xshell_window_show(window); // it drew: in, if it waited
+		// it drew: in, if it waited. an afterimage stays, the damage is
+		// likely where the window under it went (X exposing the parent)
+		xshell_window_show(window);
 	}
 	if (!window || self_presented(window) || !top->backing) {
 		return; // not shown here, or Present shows it
@@ -2507,6 +2595,7 @@ static void window_destroy(struct flame_xwindow *window) {
 	wl_list_for_each_safe(layer, ltmp, &window->layers, link) {
 		layer_destroy(layer);
 	}
+	afterimage_clear(window);
 	scene_buffer_set(window->core_node, NULL, NULL, 0, 0, false, NULL, 0);
 	core_drop(window);
 	scene_node_destroy(&window->content->node);
@@ -2808,7 +2897,9 @@ void xshell_window_unmapped(struct flame_xshell *xshell, struct xs_window *x) {
 			struct xs_window *lx = xserver_window(xshell->xserver, layer->id);
 			for (struct xs_window *w = lx; w; w = w->parent) {
 				if (w == x) {
-					layer_drop(layer);
+					// a window inside it went: its picture lingers. the
+					// top-level itself: it's gone, nothing lingers
+					layer_drop(layer, x->id != window->id);
 					break;
 				}
 			}

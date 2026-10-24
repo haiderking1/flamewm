@@ -90,6 +90,9 @@ struct flame_xshell {
 	} ewmh;
 };
 
+struct xcopy;
+struct flame_buffer_node;
+
 struct flame_xwindow {
 	struct wl_list link; // flame_xshell.windows
 	struct flame_xshell *xshell;
@@ -108,6 +111,14 @@ struct flame_xwindow {
 	int ext_left, ext_right, ext_top, ext_bottom;
 	struct wlr_box placed; // where flame put it last, layout coords
 	bool hidden; // on a workspace that doesn't show: X apps see it unviewable
+	// a window inside it that drew went away while it stays (steam's CEF
+	// swaps the one its page is drawn in as another window opens): that
+	// one's last picture stays where it was till a window in it shows a
+	// new one, a quarter second at most, the way X leaves the pixels on
+	// screen. a frame of nothing in between was a flicker
+	struct flame_buffer_node *afterimage;
+	struct xcopy *afterimage_copy;
+	struct wl_event_source *afterimage_timer;
 	// not in the layout yet: waiting for something to show (its first
 	// picture, a fullscreen request), the timer gives up waiting
 	bool waiting;
