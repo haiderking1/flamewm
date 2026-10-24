@@ -494,6 +494,9 @@ static void client_free(struct xs_client *client) {
 		(int)client->pid, client->comm, client->id_base, client->seq,
 		client->why ? client->why : "closed");
 	xs_client_resources_free(xserver, client);
+	while (client->screensaver_suspends > 0) {
+		xs_screensaver_suspend(client, false); // a player that's gone keeps nothing on
+	}
 	if (client->announced && xserver->hooks.disconnected) {
 		xserver->hooks.disconnected(xserver->hooks.data, client);
 	}

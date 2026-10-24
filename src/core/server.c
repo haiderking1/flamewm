@@ -31,6 +31,7 @@ bool server_init(struct flame_server *server, const struct flame_config *config)
 		&& globals_init(server)
 		&& desktop_init(&server->desktop, server)
 		&& input_init(&server->input, server)
+		&& idle_init(&server->idle, server)
 		&& xdg_init(&server->xdg, server)
 		&& layers_init(&server->layers, server)
 		&& lock_init(&server->lock, server)
@@ -188,6 +189,7 @@ void server_finish(struct flame_server *server) {
 	xdg_finish(&server->xdg);
 	lock_finish(&server->lock);
 	layers_finish(&server->layers);
+	idle_finish(&server->idle);
 	input_finish(&server->input);
 	outputs_finish(&server->outputs);
 

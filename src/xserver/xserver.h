@@ -284,6 +284,7 @@ struct xs_client {
 	// StateNotify's details
 	bool xkb, detectable_repeat;
 	int cursor_hides; // XFixes HideCursor, less ShowCursor
+	int screensaver_suspends; // MIT-SCREEN-SAVER Suspend, nested: a video playing
 	uint16_t xkb_events, xkb_state_details;
 };
 
@@ -354,6 +355,9 @@ struct xs_hooks {
 	// ConfigureWindow's (x, y, width, height, border, sibling, stack mode)
 	bool (*configure_request)(void *data, struct xs_window *window, uint16_t mask,
 		const int32_t values[7]);
+	// an X app keeps the screen on (a video playing, MIT-SCREEN-SAVER's
+	// Suspend), or the last one stopped or went
+	void (*screensaver)(void *data, bool suspended);
 	void *data;
 };
 
@@ -440,6 +444,7 @@ struct flame_xserver {
 	uint8_t keys_down[32]; // what QueryKeymap tells, a bit a keycode
 	uint16_t state; // modifiers and buttons, as the last input had them
 	uint32_t last_input; // ms, any input flame got, X windows' or not
+	int screensaver_suspends; // all the clients' together
 	// FLAME_X_TRACE: every request in the log, "1" from every client, else
 	// from the ones named that (FLAME_X_TRACE=re4.exe). NULL: off
 	const char *trace;

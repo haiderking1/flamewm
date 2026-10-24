@@ -53,6 +53,7 @@ static void handle_key(struct wl_listener *listener, void *data) {
 
 	bool handled = false;
 	struct flame_server *server = keyboard->input->server;
+	idle_activity(&server->idle);
 	// volume, brightness, play: to the bar when it takes them (locked too:
 	// only the key's name goes, nothing typed)
 	if (media_key(&keyboard->input->media, event->keycode + 8,

@@ -339,6 +339,22 @@ for i in 1 2 3 4; do $CTL pointer nudge 80 60 > /dev/null; sleep 0.1; done
 for i in 1 2 3 4; do $CTL pointer nudge -90 -70 > /dev/null; sleep 0.1; done
 wait
 cat look.out" "confined" "pointer seen from 50,50 to 149,149"
+case_run "idle (swayidle's way): nobody touching anything it's idle, the mouse moving it's back, idle again after" "
+$BIN/wlidle 2.2 > idle.out &
+sleep 1.1
+$CTL pointer nudge 5 5 > /dev/null
+wait
+cat idle.out" "idled" "resumed" "idled 2 times"
+case_run "idle kept off: a window keeping the screen on while it shows, an X player suspending the screen saver" "
+$BIN/wlidle 1.5 inhibit > inhibited.out &
+wait
+$BIN/xsuspend 3 &
+sleep 0.3
+$BIN/wlidle 1.5 > suspended.out
+wait
+$BIN/wlidle 1.2 > after.out
+echo window: \$(tail -1 inhibited.out), X player: \$(tail -1 suspended.out), gone: \$(tail -1 after.out)" \
+	"window: idled 0 times, X player: idled 0 times, gone: idled 1 times"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

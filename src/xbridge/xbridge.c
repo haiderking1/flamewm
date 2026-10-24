@@ -574,6 +574,11 @@ static void hook_client_message(void *data, uint32_t window, uint32_t type,
 	xselection_client_message(&xbridge->server->xselection, window, type, message);
 }
 
+static void hook_screensaver(void *data, bool suspended) {
+	struct flame_xbridge *xbridge = data;
+	idle_x_suspended(&xbridge->server->idle, suspended);
+}
+
 static bool hook_configure_request(void *data, struct xs_window *window, uint16_t mask,
 		const int32_t values[7]) {
 	struct flame_xbridge *xbridge = data;
@@ -678,6 +683,7 @@ bool xbridge_init(struct flame_xbridge *xbridge, struct flame_server *server) {
 		.client_message = hook_client_message,
 		.wm_message = hook_wm_message,
 		.configure_request = hook_configure_request,
+		.screensaver = hook_screensaver,
 		.pointer = hook_pointer,
 		.warp_pointer = hook_warp_pointer,
 		.cursor_changed = hook_cursor_changed,

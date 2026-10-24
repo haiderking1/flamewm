@@ -186,6 +186,7 @@ static void confine(struct flame_cursor *cursor) {
 // pointer goes along unless one has it locked or confined
 static void moved_by(struct flame_cursor *cursor, struct wlr_input_device *device,
 		uint32_t time_msec, double dx, double dy, double unaccel_dx, double unaccel_dy) {
+	idle_activity(&cursor->server->idle);
 	bool locked = lock_active(&cursor->server->lock);
 	if (!locked) {
 		xshell_pointer_raw_motion(&cursor->server->xshell, dx, dy, unaccel_dx, unaccel_dy,
@@ -212,6 +213,7 @@ static void handle_motion(struct wl_listener *listener, void *data) {
 static void handle_motion_absolute(struct wl_listener *listener, void *data) {
 	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
+	idle_activity(&cursor->server->idle);
 	wlr_cursor_warp_absolute(cursor->wlr, &event->pointer->base, event->x, event->y);
 	if (!lock_active(&cursor->server->lock)) {
 		confine(cursor);
@@ -224,6 +226,7 @@ static void button_event(struct flame_cursor *cursor,
 	struct flame_server *server = cursor->server;
 
 	bool pressed = event->state == WL_POINTER_BUTTON_STATE_PRESSED;
+	idle_activity(&server->idle);
 	if (lock_active(&server->lock)) {
 		lock_pointer(&server->lock, cursor->wlr->x, cursor->wlr->y, event->time_msec, pressed);
 		wlr_seat_pointer_notify_button(server->input.seat, event->time_msec, event->button,
@@ -305,6 +308,7 @@ static void handle_button(struct wl_listener *listener, void *data) {
 }
 
 static void axis_event(struct flame_cursor *cursor, struct wlr_pointer_axis_event *event) {
+	idle_activity(&cursor->server->idle);
 	if (drag_active(&cursor->server->input.drag) || picker_active(&cursor->server->picker)) {
 		return;
 	}

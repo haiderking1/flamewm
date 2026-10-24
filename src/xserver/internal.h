@@ -478,6 +478,8 @@ size_t xs_render_ids(struct flame_xserver *xserver, uint32_t base, uint32_t *out
 
 void xs_xinerama_request(struct xs_client *client, const struct xin *request);
 void xs_screensaver_request(struct xs_client *client, const struct xin *request);
+// a client suspends the screen saver or stops, nested (Suspend, or gone)
+void xs_screensaver_suspend(struct xs_client *client, bool suspend);
 void xs_dpms_request(struct xs_client *client, const struct xin *request);
 void xs_xtest_request(struct xs_client *client, const struct xin *request);
 

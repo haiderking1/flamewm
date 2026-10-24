@@ -4,6 +4,21 @@
 // screen. what apps get out of them is how long since the last input (chat
 // apps go "away" on it) and a yes to video players keeping the screen on
 
+void xs_screensaver_suspend(struct xs_client *client, bool suspend) {
+	struct flame_xserver *xserver = client->xserver;
+	int was = xserver->screensaver_suspends;
+	if (suspend) {
+		client->screensaver_suspends++;
+		xserver->screensaver_suspends++;
+	} else if (client->screensaver_suspends > 0) {
+		client->screensaver_suspends--;
+		xserver->screensaver_suspends--;
+	}
+	if ((was > 0) != (xserver->screensaver_suspends > 0) && xserver->hooks.screensaver) {
+		xserver->hooks.screensaver(xserver->hooks.data, xserver->screensaver_suspends > 0);
+	}
+}
+
 void xs_screensaver_request(struct xs_client *client, const struct xin *in) {
 	struct flame_xserver *xserver = client->xserver;
 	struct xout out;
@@ -24,9 +39,11 @@ void xs_screensaver_request(struct xs_client *client, const struct xin *in) {
 		xout8(&out, 0); // kind: blanked
 		xs_reply_send(client, &out);
 		break;
-	// SelectInput, SetAttributes, UnsetAttributes, Suspend: nothing ever
-	// comes on to suspend
-	case 2: case 3: case 4: case 5:
+	// SelectInput, SetAttributes, UnsetAttributes: there's no saver of X's
+	case 2: case 3: case 4:
+		break;
+	case 5: // Suspend: true and false nest, flame keeps the screen on meanwhile
+		xs_screensaver_suspend(client, xin32(in, 4) != 0);
 		break;
 	default:
 		xs_error(client, XS_ERROR_REQUEST, 0, XS_SCREENSAVER_OPCODE, minor);

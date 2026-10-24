@@ -8,6 +8,7 @@
 #include "backend/backend.h"
 #include "capture/capture.h"
 #include "eyecandy/eyecandy.h"
+#include "idle/idle.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
 #include "input/input.h"
@@ -46,6 +47,7 @@ struct flame_server {
 	struct flame_render render;
 	struct flame_desktop desktop;
 	struct flame_input input;
+	struct flame_idle idle;
 	struct flame_xdg xdg;
 	struct flame_layers layers;
 	struct flame_lock lock;
