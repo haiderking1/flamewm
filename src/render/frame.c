@@ -130,7 +130,10 @@ static void drop_queued(struct flame_frame *frame) {
 static void adopt_foreign_commit(struct flame_frame *frame) {
 	if (frame->schedule.active && !frame->schedule.pending) {
 		int64_t now = now_ns();
+		// a frame asked for (startup's first) still is: that commit isn't ours
+		bool redraw = frame->schedule.redraw;
 		schedule_submitted(&frame->schedule, &frame->foreign_ticket, now, now);
+		frame->schedule.redraw = redraw;
 	}
 }
 
@@ -265,7 +268,6 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
 	timing_late_app_frames(&frame->timing, frame->render->scene.late_app_frames);
 	frame->render->scene.late_app_frames = 0;
 	frame->present_ns = 0;
-	frame->stall_reported = false;
 
 	if (frame->has_queued) {
 		bool vrr_asked = frame->queued.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
@@ -303,7 +305,6 @@ static void handle_session_active(struct wl_listener *listener, void *data) {
 	}
 	schedule_resume(&frame->schedule);
 	frame->whole = true;
-	frame->stall_reported = false;
 	frame->scanout.suspended = false;
 	sync_reset(&frame->sync);
 	frame->tearing_logged = false;
@@ -936,6 +937,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		&& app_wants_tearing(frame, fullscreen_element(&frame->cur, *frame->area));
 	frame->sync.tearing = tearing;
 	bool drew = false;
+	bool failed = false; // it tried and didn't make it: it's asked for again
 	if (changed || cursor_only) {
 		struct wlr_output_state state;
 		wlr_output_state_init(&state);
@@ -973,6 +975,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		if (!ready) {
 			wlr_output_state_finish(&state);
 			frame->whole = true;
+			failed = true;
 		} else if (!schedule->pending) {
 			// a cursor plane change can't ride along an async flip
 			// nor a vrr switch: KMS refuses an async flip that changes it
@@ -1006,6 +1009,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 				}
 			} else {
 				frame->whole = true;
+				failed = true;
 			}
 		} else {
 			// behind the pending flip, it goes in the moment that one lands
@@ -1022,6 +1026,11 @@ static void render(struct flame_frame *frame, int64_t now) {
 	if (!drew) {
 		// nothing went anywhere: callbacks on the refresh grid, no pageflip
 		schedule_empty(schedule, now);
+		if (failed) {
+			// KMS refused it or it couldn't be drawn (no buffer free): the
+			// screen still shows the old picture, the next refresh tries again
+			schedule_request_redraw(schedule);
+		}
 	}
 	// a game tearing, or the display following the frames (vrr): the next
 	// frame goes the moment it's ready too
@@ -1036,8 +1045,9 @@ static void render(struct flame_frame *frame, int64_t now) {
 		// apps that can't draw a frame between the flip and the deadline get
 		// the next cycle's turn now: they keep their frame rate, everyone
 		// else waits for the flip and makes the next refresh
-		int64_t budget = schedule->period > 0
-			? schedule->period - schedule_lead(schedule) - schedule->margin : INT64_MAX;
+		// the lead has the margin in it already
+		int64_t budget = schedule->period - schedule_lead(schedule);
+		budget = budget > 0 ? budget : 0;
 		feedback_frame_done_early(&frame->prev, frame->callback_cycle + 1, now_ns(), budget);
 	}
 
@@ -1102,14 +1112,20 @@ static void process_once(struct flame_frame *frame) {
 		timer_arm(&frame->wake, 0);
 		return; // comes back through the commit that enables it
 	}
-	if (schedule_stalled(schedule, now) && schedule->pending == &frame->foreign_ticket) {
-		// that flip never reported back, nothing of ours is waiting on it
-		schedule_presented(schedule, 0, now);
-	}
-	if (schedule_stalled(schedule, now) && !frame->stall_reported) {
-		wlr_log(WLR_ERROR, "%s: a pageflip has been pending for over %llds",
+	if (schedule_stalled(schedule, now)) {
+		// a flip that never reported back (a connector going away mid flip,
+		// someone else's commit): it's taken as done. one held back behind it
+		// would wait for it forever: it goes, and the screen's drawn again
+		wlr_log(WLR_ERROR, "%s: a pageflip has been pending for over %llds, drawing again",
 			output->name, SCHEDULE_WATCHDOG_NS / 1000000000);
-		frame->stall_reported = true;
+		schedule_presented(schedule, 0, now);
+		if (frame->has_queued) {
+			drop_queued(frame);
+			schedule_discard_queued(schedule);
+			timing_successor(&frame->timing, false);
+		}
+		frame->whole = true;
+		schedule_request_redraw(schedule);
 	}
 	// vrr's debounce settled with nothing else changing: a frame for the switch
 	int64_t settle = sync_vrr_settles_at(&frame->sync);
@@ -1148,9 +1164,11 @@ static void process_once(struct flame_frame *frame) {
 	if (frame->jit_wake && (!deadline || frame->jit_wake < deadline)) {
 		deadline = frame->jit_wake > now ? frame->jit_wake : now + 1;
 	}
+	// a debounce still to settle wakes us for it. one settled already asked
+	// for its frame above, the schedule's deadline has it
 	settle = sync_vrr_settles_at(&frame->sync);
-	if (settle && (!deadline || settle < deadline)) {
-		deadline = settle > now ? settle : now + 1;
+	if (settle > now && (!deadline || settle < deadline)) {
+		deadline = settle;
 	}
 	timer_arm(&frame->wake, deadline);
 }

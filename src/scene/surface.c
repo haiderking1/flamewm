@@ -64,9 +64,14 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 		int64_t now = now_ns();
 		state->buffer_since = now;
 		if (state->drawing && state->callback_time) {
+			// an app idle for a while (over 50ms: a terminal waiting on a
+			// key) isn't drawing frame after frame, that's no sample. taken
+			// whole it would make it slow for good
 			int64_t took = now - state->callback_time;
-			state->draw_time = took > state->draw_time
-				? took : state->draw_time + (took - state->draw_time) / 8;
+			if (took < 50000000LL) {
+				state->draw_time = took > state->draw_time
+					? took : state->draw_time + (took - state->draw_time) / 8;
+			}
 			state->drawing = false;
 		}
 		if (state->jit_target && now > state->jit_target) {

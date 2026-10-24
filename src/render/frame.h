@@ -68,7 +68,6 @@ struct flame_frame {
 	// inside process(): requests made from in there wait for its timer, so
 	// nothing it triggers can bounce straight back into it and spin the loop
 	bool processing;
-	bool stall_reported;
 	// the latest present's kernel timestamp, for the flip that follows it
 	int64_t present_ns;
 	// frame callback cycles, see schedule_cycle

@@ -49,7 +49,14 @@ void schedule_init(struct schedule *schedule, enum schedule_policy policy, int64
 }
 
 void schedule_set_period(struct schedule *schedule, int64_t period) {
-	schedule->period = period > 0 ? period : FALLBACK_PERIOD_NS;
+	period = period > 0 ? period : FALLBACK_PERIOD_NS;
+	if (schedule->period && period != schedule->period) {
+		// another refresh rate: what was learnt at the old one (a margin
+		// grown at 60Hz is half a 165Hz refresh) starts over
+		reset_budget(schedule);
+		schedule->pending_target = 0;
+	}
+	schedule->period = period;
 	schedule->have_vblank = false;
 }
 

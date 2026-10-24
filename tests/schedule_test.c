@@ -114,6 +114,25 @@ static void test_missed_vblank_widens_margin(void) {
 	CHECK(s.margin < wide && s.margin > SCHEDULE_MARGIN_NS);
 }
 
+// another refresh rate: what was learnt at the old one starts over, the
+// same one keeps it
+static void test_new_period_starts_over(void) {
+	struct schedule s;
+	schedule_init(&s, SCHEDULE_ADAPTIVE, 16666666LL); // 60hz
+	schedule_submitted(&s, &a, 0, 0);
+	schedule_presented(&s, 16666666LL, 16666666LL);
+	schedule_submitted(&s, &a, 2 * 16666666LL - 3 * MS, 2 * 16666666LL - MS);
+	schedule_presented(&s, 3 * 16666666LL, 3 * 16666666LL); // a miss: wider
+	int64_t wide = s.margin;
+	CHECK(wide > SCHEDULE_MARGIN_NS);
+	schedule_set_period(&s, 16666666LL);
+	CHECK(s.margin == wide);
+	schedule_set_period(&s, PERIOD); // to 165hz
+	CHECK(s.margin == SCHEDULE_MARGIN_NS);
+	CHECK(s.pending_target == 0);
+	CHECK(schedule_lead(&s) < PERIOD);
+}
+
 // something came in 0.1ms before a vblank: no render makes that one, the
 // flip a refresh later is on time
 static void test_late_start_is_no_miss(void) {
@@ -388,6 +407,7 @@ int main(void) {
 	test_discarded_successor_asks_again();
 	test_repaint_window();
 	test_missed_vblank_widens_margin();
+	test_new_period_starts_over();
 	test_render_past_its_vblank_is_a_miss();
 	test_callbacks_next_cycle_without_flip();
 	test_late_start_is_no_miss();
