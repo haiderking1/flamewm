@@ -19,6 +19,20 @@
 #define FUI_KEYS 32
 #define FUI_TIMERS 32
 #define FUI_FONTS 16
+#define FUI_SCROLLS 8
+#define FUI_SCROLL_DEPTH 4
+
+// a box that scrolls (scroll.c), kept by id: where it was drawn, the app's
+// scroll, how far it's eased, how tall what's in it was last frame, when
+// it last moved (its bar shows a while after), its bar held
+struct fui_scroll_slot {
+	uint64_t id;
+	double x, y, w, h;
+	double *scroll;
+	double eased, content, moved_at, seen;
+	bool grabbed, timer;
+	double grab; // where on the bar it's held
+};
 
 struct fui_ease_slot {
 	uint64_t id;
@@ -169,6 +183,9 @@ struct fui {
 	double edit_scroll;
 	bool edit_drag;
 	bool click_used; // a control took this frame's press
+	struct fui_scroll_slot scrolls[FUI_SCROLLS];
+	struct fui_scroll_slot *scroll_stack[FUI_SCROLL_DEPTH]; // begun, not ended yet
+	int scroll_depth;
 
 	uint32_t eyecandy_version;
 	double glass_opacity, glass_opacity_sent; // all the glass faded to this

@@ -182,6 +182,16 @@ double fui_glide_from(struct fui *ui, uint64_t id, double from, double target, d
 bool fui_hover(struct fui *ui, double x, double y, double w, double h);
 bool fui_clicked(struct fui *ui, double x, double y, double w, double h);
 double fui_scrolled(struct fui *ui); // this frame's wheel, layout units down
+// a box that scrolls what's drawn in it, x, y, w x h. how far down it is
+// is the app's, *scroll (set it to go somewhere): the wheel over it moves
+// it (with ctrl it doesn't: that's an app's zoom), it eases there, and a
+// thin bar at the right shows where it is while it moves, dragged it
+// scrolls too. begin returns how far down it's drawn: what's at y in it is
+// drawn at the box's y + y - that, cut to the box till end, which is told
+// how tall all of what's in it was
+double fui_scroll_begin(struct fui *ui, uint64_t id, double x, double y, double w, double h,
+	double *scroll);
+void fui_scroll_end(struct fui *ui, double content_height);
 void fui_cursor_pointer(struct fui *ui); // a hand over what's clickable
 void fui_cursor_hide(struct fui *ui); // no cursor over the window this frame (a video playing)
 

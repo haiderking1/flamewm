@@ -50,6 +50,7 @@ void fui_frame_begin(struct fui *ui, cairo_t *cr) {
 	ui->moving = false;
 	ui->click_used = false;
 	ui->right_used = false;
+	ui->scroll_depth = 0;
 	ui->menu_press = false;
 	ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
 	// a menu open takes the press before anything under it. outside it, it
