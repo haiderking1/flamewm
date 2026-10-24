@@ -198,6 +198,7 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 
 	drag_forget(&desktop->server->input.drag, view);
 	drag_tree_changed(&desktop->server->input.drag);
+	cursor_forget_view(&desktop->server->input.cursor, view);
 	// a remap starts from whatever the client asks for next, not a stale claim
 	view->fullscreen_wanted = false;
 	view->floating = false;

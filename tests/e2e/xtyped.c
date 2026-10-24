@@ -1,8 +1,10 @@
 // an X window that says what keys it gets, a line each as they come:
 // "press 0x78 state 0x0", "release 0xffeb state 0x40" (the key's keysym,
-// unshifted). runs till it's killed
+// unshifted). runs till it's killed. usage: xtyped [NAME], its title
+// (xtyped without one)
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <xcb/xcb.h>
 
 static xcb_keysym_t *syms;
@@ -16,7 +18,8 @@ static xcb_keysym_t sym_of(uint8_t keycode) {
 	return syms[(keycode - min_keycode) * per];
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+	const char *name = argc > 1 ? argv[1] : "xtyped";
 	xcb_connection_t *c = xcb_connect(NULL, NULL);
 	if (xcb_connection_has_error(c)) {
 		return 2;
@@ -37,8 +40,8 @@ int main(void) {
 	xcb_create_window(c, XCB_COPY_FROM_PARENT, w, s->root, 0, 0, 400, 300, 0,
 		XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK,
 		values);
-	xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, 7,
-		"xtyped");
+	xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
+		(uint32_t)strlen(name), name);
 	xcb_map_window(c, w);
 	xcb_flush(c);
 	xcb_generic_event_t *e;

@@ -252,6 +252,19 @@ $BIN/xewmh fullscreen" "state: FOCUSED MAXIMIZED_VERT MAXIMIZED_HORZ" \
 	"state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "EWMH: an X window that starts fullscreen does" "
 $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
+case_run "focus follows the mouse into another window, not around the one it's in: a window that just opened keeps it" "
+title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
+$BIN/xtyped steam > /dev/null &
+sleep 1
+$CTL pointer move 300 400 > /dev/null; sleep 0.5
+$BIN/xtyped game > /dev/null &
+sleep 1.5
+title opened
+$CTL pointer move 305 402 > /dev/null; sleep 0.3
+title wiggled
+$CTL pointer move 900 400 > /dev/null; sleep 0.3
+$CTL pointer move 300 400 > /dev/null; sleep 0.3
+title crossed" "opened game" "wiggled game" "crossed steam"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

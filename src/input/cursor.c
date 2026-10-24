@@ -21,20 +21,27 @@ static uint32_t now_msec(void) {
 	return (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
 }
 
-// the mouse moved onto something, same rules as hyprland's follow_mouse = 1.
-// view is the window under it, else surface may be a layer (bar, launcher).
-// the background leaves focus where it is
-static void follow_mouse(struct flame_server *server, struct flame_view *view,
-		struct wlr_surface *surface) {
+// the pointer's over view now (NULL: a layer, surface, or the background),
+// moved there or something moved under it. focus follows the mouse into
+// another window, like sway and hyprland's mouse_refocus = 0: not as it
+// moves around inside the one it was over, and never by itself. a window
+// that opened (a game started from steam's play button) keeps the focus
+// it got while the mouse wiggles where it was
+static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
+		struct wlr_surface *surface, bool moved) {
+	struct flame_server *server = cursor->server;
 	struct flame_desktop *desktop = &server->desktop;
-	if (!server->config->focus_follows_mouse) {
-		return;
-	}
 	// selecting text and dragging out of the window keeps typing where it
 	// was, an X window's buttons too (they never reach the seat). an X
-	// app's open menu keeps it too, until it closes
+	// app's open menu keeps it too, until it closes. what it's let go over
+	// it's still to cross into
 	if (server->input.seat->pointer_state.button_count > 0
 			|| xshell_buttons_held(&server->xshell) || xshell_menu_open(&server->xshell)) {
+		return;
+	}
+	bool entered = view != cursor->over;
+	cursor->over = view;
+	if (!moved || !server->config->focus_follows_mouse || (view && !entered)) {
 		return;
 	}
 	if (!view) {
@@ -140,8 +147,8 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 	struct flame_view *xview;
 	if (xshell_pointer_motion(&server->xshell, cursor->wlr->x, cursor->wlr->y, time_msec,
 			&xview)) {
-		if (moved && xview) {
-			follow_mouse(server, xview, NULL);
+		if (xview) {
+			follow_mouse(cursor, xview, NULL, moved);
 		}
 		wlr_seat_pointer_clear_focus(seat);
 		return;
@@ -151,9 +158,7 @@ static void process_motion(struct flame_cursor *cursor, uint32_t time_msec, bool
 	struct wlr_surface *surface = NULL;
 	struct flame_view *view = desktop_view_at(&server->desktop,
 		cursor->wlr->x, cursor->wlr->y, &surface, &sx, &sy);
-	if (moved) {
-		follow_mouse(server, view, surface);
-	}
+	follow_mouse(cursor, view, surface, moved);
 
 	// an X11 app's menu is open: like its pointer grab, the app's other
 	// windows don't see the pointer go by
@@ -411,6 +416,12 @@ void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *
 
 void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
+}
+
+void cursor_forget_view(struct flame_cursor *cursor, struct flame_view *view) {
+	if (cursor->over == view) {
+		cursor->over = NULL;
+	}
 }
 
 void cursor_warp(struct flame_cursor *cursor, double x, double y) {
