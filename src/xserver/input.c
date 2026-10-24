@@ -592,6 +592,14 @@ static void button(struct flame_xserver *xserver, uint8_t button, bool pressed,
 	struct xs_window *got = pointer_event(xserver, source,
 		pressed ? MASK_BUTTON_PRESS : MASK_BUTTON_RELEASE,
 		pressed ? EVENT_BUTTON_PRESS : EVENT_BUTTON_RELEASE, &input);
+	if (pressed && button <= 3) {
+		// where a click went: a lost one (a page that doesn't take it) is
+		// here, held by a grab, or nobody's
+		wlr_log(WLR_DEBUG, "xserver: button %u over 0x%x%s went to 0x%x%s", button,
+			xserver->pointer_window, source && source->id != xserver->pointer_window
+			? " (an earlier press still holds it)" : "", got ? got->id : 0,
+			taken ? ", a grab took it" : "");
+	}
 	if (pressed && got && !xserver->grab && !taken) {
 		xserver->grab = got->id; // the implicit grab, until the last button lets go
 	}
