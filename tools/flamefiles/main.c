@@ -139,6 +139,20 @@ static const struct file *file_at(struct app *app, size_t shown_index) {
 	return &app->folder.files[app->shown[shown_index]];
 }
 
+// a name about to be typed over: picked but for its extension (.tar.gz's
+// whole), a folder's all of it. what's typed keeps what kind it is
+static void pick_name(struct fui *ui, uint64_t field, const char *name, bool folder) {
+	size_t len = strlen(name), end = len;
+	const char *dot = folder ? NULL : strrchr(name, '.');
+	if (dot && dot != name) {
+		end = (size_t)(dot - name);
+		if (end > 4 && !strncmp(name + end - 4, ".tar", 4)) {
+			end -= 4;
+		}
+	}
+	fui_select(ui, field, 0, end);
+}
+
 static void path_of(struct app *app, const char *name, char *out, size_t size) {
 	snprintf(out, size, "%s%s%s", app->folder.path, strcmp(app->folder.path, "/") ? "/" : "",
 		name);
@@ -389,6 +403,7 @@ static void relist(struct app *app) {
 		snprintf(app->rename_from, sizeof(app->rename_from), "%s", app->select_next);
 		snprintf(app->rename_text, sizeof(app->rename_text), "%s", app->select_next);
 		fui_focus(app->ui, fui_id("rename", 0), app->rename_text);
+		pick_name(app->ui, fui_id("rename", 0), app->rename_text, true);
 	}
 	app->select_next[0] = '\0';
 	app->rename_next = false;
@@ -743,6 +758,8 @@ static void start_rename(struct app *app) {
 			snprintf(app->rename_from, sizeof(app->rename_from), "%s", name);
 			snprintf(app->rename_text, sizeof(app->rename_text), "%s", name);
 			fui_focus(app->ui, fui_id("rename", 0), app->rename_text);
+			pick_name(app->ui, fui_id("rename", 0), app->rename_text,
+				file_at(app, i)->kind == KIND_FOLDER);
 			app->cursor = i;
 			app->has_cursor = true;
 		}
@@ -2235,6 +2252,7 @@ int main(int argc, char **argv) {
 	}
 	if (app.save) {
 		fui_focus(app.ui, fui_id("save name", 0), app.save_name); // ready to type
+		pick_name(app.ui, fui_id("save name", 0), app.save_name, false);
 	}
 	int status = fui_run(app.ui);
 	prefs_save(&app);

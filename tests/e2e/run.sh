@@ -513,6 +513,22 @@ sleep 2
 key b; sleep 0.3; key Return; sleep 0.5; key Return
 wait" "SaveFile 0 /box/new.txt" "asked first" "SaveFile 0 /box/a.txt" \
 	"SaveFiles 0 /box/x.png /box/y.png"
+case_run "portal: the save dialog's name picked but for its extension, then moved through, selected, cut and pasted with the keys" "
+key() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done; sleep 0.2; }
+combo() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; done; for k in \"\$@\"; do $CTL key \$k release > /dev/null; done; sleep 0.2; }
+mkdir box
+$ASK SaveFile /r/1 'Save the song' current_folder=\$PWD/box current_name=song.tar.gz &
+sleep 2
+key b End BackSpace BackSpace x z Home Delete n o t e s
+combo Shift_L End
+key period t x t
+combo Control_L Left
+key Left minus 1
+combo Control_L a; combo Control_L x
+echo cut \$(wl-paste -n)
+combo Control_L v; sleep 0.5
+key Return
+wait" "cut notes-1.txt" "SaveFile 0 /box/notes-1.txt"
 case_run "portal: a file half under the dialog's bottom bar doesn't take a click on cancel" "
 mkdir box; for i in \$(seq -w 1 20); do echo \$i > box/v\$i.mp4; done
 $ASK SaveFile /r/1 'Save a video' current_folder=\$PWD/box current_name=x.mp4 &
@@ -895,7 +911,7 @@ for p in '900 380' '700 420' '500 460' '300 500'; do $CTL pointer move \$p > /de
 $CTL pointer button left release > /dev/null; sleep 1.2
 echo moved \$(ls box | grep -c src.txt) \$(ls | grep -c src.txt)" "docs a.txt top b.txt docs" \
 	"box/b.txt" "moved 1 0"
-case_run "flamefiles: the clipboard: copied out the way file managers do, pasted in, a cut moved, a field pastes" "
+case_run "flamefiles: the clipboard: copied out the way file managers do, pasted in, a cut moved, a field pastes over the name it picked" "
 mkdir -p box/docs elsewhere config/flame; echo a > box/a.txt; echo x > elsewhere/x.txt; echo y > elsewhere/y.txt
 printf 'view=list\n' > config/flame/files.conf
 export XDG_DATA_HOME=\$PWD/data XDG_CONFIG_HOME=\$PWD/config XDG_CACHE_HOME=\$PWD/cache
@@ -918,11 +934,10 @@ combo Control_L v; sleep 1
 echo docs \$(ls box/docs | tr '\n' ' ') elsewhere \$(ls elsewhere | tr '\n' ' ') clipboard \$(wl-paste -l 2>/dev/null | wc -l)
 wl-copy renamed; sleep 0.3
 click 300 126; key F2; sleep 0.3
-for i in \$(seq 8); do key BackSpace; done
 combo Control_L v; sleep 0.5; key Return; sleep 0.8
 echo docs \$(ls box/docs | tr '\n' ' ')" \
 	"gnome copy a.txt" "text a.txt" "docs a.txt" "docs a.txt x.txt elsewhere x.txt y.txt" \
-	"docs a.txt x.txt y.txt elsewhere x.txt clipboard 0" "docs a.txt renamed y.txt"
+	"docs a.txt x.txt y.txt elsewhere x.txt clipboard 0" "docs a.txt renamed.txt y.txt"
 case_run "flamefiles: a video's frame and a song's cover for previews, kept in the thumbnail cache" "
 mkdir media; grim -t jpeg cover.jpg
 ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=30:duration=3 -c:v libx264 -pix_fmt yuv420p media/clip.mp4
