@@ -1251,6 +1251,26 @@ $CTL state | python3 -I -c \"import json, sys; print('opened', json.load(sys.std
 echo running \$(kill -0 \$pid 2>/dev/null && echo still)
 cat search.log" \
 	"sum 14" "running still" "told 0" "opened flamefiles"
+case_run "flamesearch over an X app: the keys are the launcher's, super comes up in the app, the app types again once it's gone" "
+key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
+shifted() { $CTL key Shift_L press > /dev/null; key \$1; $CTL key Shift_L release > /dev/null; }
+mkdir -p home
+$BIN/xtyped > typed.out 2>&1 &
+sleep 1.5
+$CTL state | python3 -I -c \"import json, sys; print('in', json.load(sys.stdin)['window']['title'])\"
+$CTL key Super_L press > /dev/null
+HOME=\$PWD/home $(dirname $CTL)/flamesearch > search.log 2>&1 &
+sleep 1.5
+$CTL key Super_L release > /dev/null
+key 2; shifted equal; key 3
+sleep 0.3
+key Return
+sleep 0.8
+echo sum \$(wl-paste -n)
+key x
+sleep 0.5
+echo the app got 2: \$(grep -c 'press 0x32' typed.out)
+cat typed.out" "in xtyped" "sum 5" "the app got 2: 0" "release 0xffeb" "press 0x78 state 0x0"
 case_run "lock: only the locker shows and gets keys, a second one's turned away, one that dies leaves it locked, a new one unlocks" "
 # the middle of the screen: the locker's red, the cover's black, else the window
 center() { grim -t ppm c.ppm; python3 -I -c \"

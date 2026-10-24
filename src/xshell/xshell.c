@@ -3012,12 +3012,26 @@ static void repeat_update(struct flame_xshell *xshell, uint8_t keycode, bool pre
 
 bool xshell_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard, uint32_t keycode,
 		bool pressed, uint32_t time) {
+	uint8_t x = (uint8_t)(keycode + 8);
+	bool in_app = xshell->app_down[x / 8] >> (x % 8) & 1;
+	if (!pressed) {
+		xshell->app_down[x / 8] &= (uint8_t)~(1u << (x % 8)); // up, wherever it went
+	}
 	if (!is_xview(xshell->server->desktop.focused)) {
 		return false;
 	}
+	// a launcher or the like over it has the keyboard (super+space): the
+	// keys are its, not the app's under it. one that went down in the app
+	// still comes up in it (super), nothing's left held there
+	if (xshell->server->layers.focused && (pressed || !in_app)) {
+		return false;
+	}
+	if (pressed) {
+		xshell->app_down[x / 8] |= (uint8_t)(1u << (x % 8));
+	}
 	xshell_keyboard(xshell, keyboard);
-	xserver_key(xshell->xserver, (uint8_t)(keycode + 8), pressed, x_state(xshell), time);
-	repeat_update(xshell, (uint8_t)(keycode + 8), pressed);
+	xserver_key(xshell->xserver, x, pressed, x_state(xshell), time);
+	repeat_update(xshell, x, pressed);
 	return true;
 }
 

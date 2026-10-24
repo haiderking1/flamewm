@@ -43,6 +43,9 @@ struct flame_xshell {
 	// the key held down that repeats (X keycode, 0 for none) and when it
 	// repeats next. X apps get their repeats from the server
 	uint8_t repeat_key;
+	// keys that went down in the focused X app and haven't come up there
+	// yet, a bit a keycode: they still do with a launcher over it
+	uint8_t app_down[32];
 	struct flame_timer repeat_timer;
 	// what copies of X apps' presents are done on, see xlayer.copying
 	struct wlr_drm_syncobj_timeline *copy_timeline;

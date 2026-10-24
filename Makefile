@@ -385,7 +385,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall \
 		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 
