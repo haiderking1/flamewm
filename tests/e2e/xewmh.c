@@ -1,7 +1,8 @@
 // flame as X's window manager, the EWMH way an app sees it
 // usage: xewmh check | fullscreen | startfull | activate | steal | wayland CMD | close | dpi |
 //   configure | subpixel | wmstate | warp | confine FLAMECTL | takefocus FLAMECTL |
-//   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL | latefull SECONDS
+//   grabaway FLAMECTL | away FLAMECTL | iconify | keepfull FLAMECTL | latefull SECONDS |
+//   mapfull
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,6 +313,28 @@ int main(int argc, char **argv) {
 		settle();
 		print_state(w);
 		print_geometry(w);
+	} else if (!strcmp(mode, "mapfull")) {
+		// a game's way (unity's sdl): it maps, asks for fullscreen a moment
+		// after, draws later still. the sizes it's told, in order: the
+		// screen's, never a tile's first
+		xcb_window_t w = window(false);
+		nanosleep(&(struct timespec){0, 50000000}, NULL);
+		wm_message(w, "_NET_WM_STATE", 1, atom("_NET_WM_STATE_FULLSCREEN"), 0);
+		settle();
+		print_state(w);
+		int last_w = 0, last_h = 0;
+		xcb_generic_event_t *e;
+		while ((e = xcb_poll_for_event(c))) {
+			if ((e->response_type & 0x7f) == XCB_CONFIGURE_NOTIFY) {
+				xcb_configure_notify_event_t *cn = (xcb_configure_notify_event_t *)e;
+				if (cn->window == w && (cn->width != last_w || cn->height != last_h)) {
+					last_w = cn->width;
+					last_h = cn->height;
+					printf("told %dx%d\n", last_w, last_h);
+				}
+			}
+			free(e);
+		}
 	} else if (!strcmp(mode, "iconify")) {
 		// ICCCM's minimize, wine's way (XIconifyWindow): flame has none, the
 		// app hears WM_STATE is still Normal, it's never left waiting

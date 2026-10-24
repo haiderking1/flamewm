@@ -105,6 +105,10 @@ struct flame_xwindow {
 	int ext_left, ext_right, ext_top, ext_bottom;
 	struct wlr_box placed; // where flame put it last, layout coords
 	bool hidden; // on a workspace that doesn't show: X apps see it unviewable
+	// not in the layout yet: waiting for something to show (its first
+	// picture, a fullscreen request), the timer gives up waiting
+	bool waiting;
+	struct flame_timer wait_timer;
 
 	// drawn with the cpu: its backing as a texture, updated where it changed,
 	// and the key telling frames it's a new picture. the top-level's own
@@ -149,6 +153,9 @@ void xshell_rescale(struct flame_xshell *xshell);
 bool xshell_configure_request(struct flame_xshell *xshell, struct xs_window *window,
 	uint16_t mask, const int32_t values[7]);
 // a client message for the window manager (EWMH)
+// a tiled one waiting for something to show has it now (ewmh.c: it asked
+// for fullscreen): into the layout
+void xshell_window_show(struct flame_xwindow *window);
 void xshell_wm_message(struct flame_xshell *xshell, uint32_t window, uint32_t type,
 	const uint32_t data[5]);
 

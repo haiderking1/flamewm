@@ -1290,6 +1290,7 @@ static void show(struct xlayer *layer, struct xpresent *xp) {
 		wlr_log(WLR_DEBUG, "xshell: 0x%x in 0x%x shows a picture at %d,%d", layer->id,
 			layer->window->id, layer->node->node.x, layer->node->node.y);
 		core_update(layer->window);
+		xshell_window_show(layer->window); // its first frame: in, if it waited
 	}
 }
 
@@ -2302,6 +2303,31 @@ static bool x_wants_float(struct flame_xshell *xshell, struct xs_window *x) {
 	return false;
 }
 
+// how long a new tiled one may keep out of the layout with nothing to show
+#define WAIT_NS (200 * 1000000LL)
+
+// a tiled one into the layout: shown, focused, the others making room
+static void window_map(struct flame_xwindow *window) {
+	if (window->waiting) {
+		window->waiting = false;
+		timer_finish(&window->wait_timer);
+	}
+	desktop_map_view(&window->xshell->server->desktop, &window->view);
+}
+
+void xshell_window_show(struct flame_xwindow *window) {
+	if (window->waiting) {
+		window_map(window);
+	}
+}
+
+static void handle_wait(void *data) {
+	struct flame_xwindow *window = data;
+	wlr_log(WLR_DEBUG, "xshell: X window 0x%x drew nothing yet: shown anyway",
+		window->id);
+	window_map(window);
+}
+
 static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct xs_window *x) {
 	struct flame_server *server = xshell->server;
 	struct flame_xwindow *window = calloc(1, sizeof(*window));
@@ -2350,10 +2376,24 @@ static struct flame_xwindow *window_create(struct flame_xshell *xshell, struct x
 	read_extents(xshell, window, x);
 	if (!window->floating) {
 		window->view.float_wanted = x_wants_float(xshell, x);
-		desktop_map_view(&server->desktop, &window->view);
+		// into the layout once there's something to show. a game maps a
+		// window, asks for fullscreen right after and draws a while later:
+		// tiled first, it'd shove the others aside for a moment and then
+		// take the screen. a fifth of a second at most: games ask within
+		// a few ms, apps that wait to be sized before they draw aren't
+		// kept waiting. one that asked already, or has drawn (a
+		// background), goes in now
+		window->waiting = !window->view.fullscreen_wanted && !(x->backing && x->painted)
+			&& timer_init(&window->wait_timer, server->loop, handle_wait, window);
+		if (window->waiting) {
+			timer_arm(&window->wait_timer, now_ns() + WAIT_NS);
+		} else {
+			desktop_map_view(&server->desktop, &window->view);
+		}
 	}
-	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s at %d,%d %dx%d", x->id,
-		window->floating ? "floats" : "is a window", x->x, x->y, x->width, x->height);
+	wlr_log(WLR_DEBUG, "xshell: X window 0x%x %s at %d,%d %dx%d%s", x->id,
+		window->floating ? "floats" : "is a window", x->x, x->y, x->width, x->height,
+		window->waiting ? ", in once it draws" : "");
 	// drawn into before flame got to it: what's there already shows
 	if (x->backing && x->painted) {
 		pixman_region32_t all;
@@ -2414,6 +2454,9 @@ static void core_drop(struct flame_xwindow *window) {
 void xshell_damaged(struct flame_xshell *xshell, struct xs_window *top,
 		const pixman_region32_t *region) {
 	struct flame_xwindow *window = find_window(xshell, top->id);
+	if (window) {
+		xshell_window_show(window); // it drew: in, if it waited
+	}
 	if (!window || self_presented(window) || !top->backing) {
 		return; // not shown here, or Present shows it
 	}
@@ -2454,7 +2497,10 @@ static void window_destroy(struct flame_xwindow *window) {
 	if (xshell->pointer_window == window->id) {
 		xshell->pointer_window = 0;
 	}
-	if (!window->floating) {
+	if (window->waiting) {
+		window->waiting = false; // gone before it was ever shown
+		timer_finish(&window->wait_timer);
+	} else if (!window->floating) {
 		window_anim_snapshot(&window->view); // the close plays from its last picture
 	}
 	struct xlayer *layer, *ltmp;

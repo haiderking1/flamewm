@@ -333,6 +333,10 @@ void ewmh_message(struct flame_xshell *xshell, uint32_t id, uint32_t type,
 				fullscreen_request(desktop, view, on);
 			}
 		}
+		// one not in the layout yet goes in now, straight to fullscreen
+		if (view->fullscreen_wanted) {
+			xshell_window_show(window);
+		}
 		// what it is now, whatever was asked: an app asking to be maximized
 		// hears it still is or isn't
 		window->ewmh_state_set = false;

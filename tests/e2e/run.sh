@@ -282,6 +282,11 @@ click
 wait \$!
 echo long open, fullscreen: \$(grep -c FULLSCREEN late.out)" \
 	"just opened: state: FULLSCREEN FOCUSED geometry 0,0 1280x720" "long open, fullscreen: 0"
+case_run "an X window asking for fullscreen right after it maps, drawn nothing yet, is never tiled first" "
+$BIN/xewmh mapfull > mapfull.out
+cat mapfull.out
+echo told a tile first: \$(grep told mapfull.out | grep -vc 1280x720)" "state: FULLSCREEN FOCUSED" \
+	"told 1280x720" "told a tile first: 0"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "
