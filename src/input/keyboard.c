@@ -35,6 +35,20 @@ static bool handle_press(struct flame_keyboard *keyboard, xkb_keycode_t keycode)
 
 	// binds match the unshifted level so mod+shift+1 stays "1", not "!"
 	uint32_t mods = wlr_keyboard_get_modifiers(keyboard->wlr);
+	struct flame_shortcuts *shortcuts = &keyboard->input->shortcuts;
+	if (shortcuts_inhibited(shortcuts)) {
+		// an app has the shortcuts (a virtual machine): super+escape takes
+		// them back, every other key is the app's
+		bool escape = false;
+		for (int i = 0; i < count; i++) {
+			escape |= syms[i] == XKB_KEY_Escape;
+		}
+		if (escape && (mods & ~(WLR_MODIFIER_CAPS | WLR_MODIFIER_MOD2)) == WLR_MODIFIER_LOGO) {
+			shortcuts_escape(shortcuts);
+			return true;
+		}
+		return false;
+	}
 	xkb_layout_index_t layout = xkb_state_key_get_layout(state, keycode);
 	count = xkb_keymap_key_get_syms_by_level(keyboard->wlr->keymap, keycode,
 		layout, 0, &syms);

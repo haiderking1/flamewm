@@ -7,6 +7,7 @@
 
 #include "input/constraints.h"
 #include "input/cursor.h"
+#include "input/shortcuts.h"
 #include "input/dnd.h"
 #include "input/fake.h"
 #include "input/drag.h"
@@ -24,6 +25,7 @@ struct flame_input {
 	struct flame_fake_keyboard *fake; // FLAME_TEST_INPUT=1 only
 	struct flame_media_keys media; // to the bar, see media.h
 	struct flame_constraints constraints; // games' pointer lock, see constraints.h
+	struct flame_shortcuts shortcuts; // an app taking every key, see shortcuts.h
 
 	struct wl_listener new_input;
 	struct wl_listener request_set_selection;

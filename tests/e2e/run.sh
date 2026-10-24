@@ -355,6 +355,18 @@ wait
 $BIN/wlidle 1.2 > after.out
 echo window: \$(tail -1 inhibited.out), X player: \$(tail -1 suspended.out), gone: \$(tail -1 after.out)" \
 	"window: idled 0 times, X player: idled 0 times, gone: idled 1 times"
+case_run "a virtual machine taking flame's shortcuts: super+2 is its, super+escape gets them back, super+2 is flame's again" "
+ws() { $CTL state | python3 -I -c \"import json, sys; print('workspace', json.load(sys.stdin)['workspace'])\"; }
+combo() { for k in \"\$@\"; do $CTL key \$k press > /dev/null; done; for k in \"\$@\"; do $CTL key \$k release > /dev/null; done; sleep 0.3; }
+$BIN/wlshortcuts 3 > vm.out &
+sleep 1
+combo Super_L 2
+ws
+combo Super_L Escape
+combo Super_L 2
+ws
+wait
+cat vm.out" "has the shortcuts, 0 keys so far" "workspace 1" "flame has them back, 3 keys so far" "workspace 2"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "
