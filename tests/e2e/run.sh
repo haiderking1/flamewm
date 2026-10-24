@@ -301,6 +301,26 @@ st again
 wait" "tiled False 6 6 1268 708" "fixed True 338 158 604 404" "again False 6 6 1268 708"
 case_run "a window asking for XI2 Enter/Leave and the core ones (chrome) hears both: its menus hear the pointer leave" "
 $BIN/xcross $CTL" "in: core enter 1 leave 0, xi2 enter 1 leave 0" "out: core enter 0 leave 1, xi2 enter 0 leave 1"
+case_run "a screenshot right after slurp: nothing of slurp's in it (no closing ghost, its box or dim)" "
+grim -t ppm before.ppm
+slurp > picked.txt &
+sleep 0.8
+$CTL pointer move 100 100 > /dev/null
+$CTL pointer button left press > /dev/null
+for x in 150 200 250 300; do $CTL pointer move \$x \$x > /dev/null; sleep 0.05; done
+$CTL pointer button left release > /dev/null
+wait
+grim -t ppm after.ppm
+cat picked.txt
+python3 -I -c \"
+def px(name, x, y):
+	d = open(name, 'rb').read()
+	w, h = map(int, d.split(b'\\\\n')[1].split())
+	at = (y * w + x) * 3
+	return tuple(d[-(w * h * 3):][at:at + 3])
+for x, y in ((600, 500), (420, 150), (150, 420)):
+	print('at', x, y, 'as before' if px('before.ppm', x, y) == px('after.ppm', x, y) else 'changed', px('after.ppm', x, y))
+\"" "100,100 201x201" "at 600 500 as before" "at 420 150 as before" "at 150 420 as before"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

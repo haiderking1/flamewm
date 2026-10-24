@@ -86,6 +86,7 @@ not linked, flame works without them, these features don't.
 | libGL, libX11 (libglvnd) | `gl`, `x11` | `make e2e`: X GL apps, multisampled, swapping frames, a fullscreen one scanned out |
 | gtk3 | `gtk+-3.0` | `make e2e`: client side decorations, on X and wayland: shadows, headerbar drags |
 | foot, grim | - | `make e2e`: a terminal that has to keep drawing across a vt switch, and screenshots to tell |
+| slurp | - | `make e2e`: a part of the screen picked for a screenshot, the shot taken right after has nothing of slurp's in it |
 | dbus (`dbus-run-session`), libsystemd, libpipewire, libEGL, GLESv2 | `libsystemd` `libpipewire-0.3` `egl` `glesv2` | `make e2e`: flame's portal on a bus of its own, called like xdg-desktop-portal calls it, its streams taken from pipewire like apps take them (gpu buffers imported with EGL). uses the running pipewire |
 
 ## data

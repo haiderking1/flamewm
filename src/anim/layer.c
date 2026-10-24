@@ -1,6 +1,7 @@
 #include "anim/layer.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
@@ -29,6 +30,21 @@ static struct flame_server *server_of(struct flame_layer_surface *surface) {
 
 static const struct flame_anim_config *config_of(struct flame_layer_surface *surface) {
 	return &server_of(surface)->config->anim;
+}
+
+// what picks a part of the screen for a screenshot (slurp's "selection")
+// comes and goes as it is: the screenshot's taken the moment it's gone, a
+// close playing from its last picture is in the shot (its box's edge, a
+// dimmed strip)
+static bool animates(struct flame_layer_surface *surface) {
+	static const char *const pickers[] = {"selection", "hyprpicker"};
+	const char *namespace = surface->wlr->namespace;
+	for (size_t i = 0; namespace && i < sizeof(pickers) / sizeof(pickers[0]); i++) {
+		if (!strcmp(namespace, pickers[i])) {
+			return false;
+		}
+	}
+	return config_of(surface)->layers;
 }
 
 static struct wlr_box box_of(struct flame_layer_surface *surface) {
@@ -113,7 +129,7 @@ static void done(struct flame_anim *anim, bool finished) {
 
 void layer_anim_mapped(struct flame_layer_surface *surface) {
 	const struct flame_anim_config *config = config_of(surface);
-	if (!config->layers || config->layer_open == FLAME_ANIM_NONE) {
+	if (!animates(surface) || config->layer_open == FLAME_ANIM_NONE) {
 		return;
 	}
 	struct flame_layer_anim *state = state_of(surface);
@@ -134,7 +150,7 @@ void layer_anim_mapped(struct flame_layer_surface *surface) {
 
 void layer_anim_snapshot(struct flame_layer_surface *surface) {
 	const struct flame_anim_config *config = config_of(surface);
-	if (!config->layers || config->layer_close == FLAME_ANIM_NONE || !surface->output) {
+	if (!animates(surface) || config->layer_close == FLAME_ANIM_NONE || !surface->output) {
 		return;
 	}
 	struct flame_layer_anim *state = state_of(surface);
