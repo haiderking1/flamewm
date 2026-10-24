@@ -36,6 +36,7 @@
 #define TEXT_DIM 0xffffff99
 #define PICKED 0x0a84ffe6 // the row enter opens
 #define F_FIELD "Inter 17"
+#define QUERY 1 // the query's line, its caret
 #define F_ROW "Inter Medium 11"
 #define F_SUB "Inter 10"
 #define F_HEAD "Inter Semi-Bold 9"
@@ -315,41 +316,7 @@ static void open_result(struct search *s, int i, bool reveal) {
 
 // ---- the keys ----
 
-static void backspace(char *text, bool word) {
-	size_t len = strlen(text);
-	if (word) {
-		// back over spaces, then the word
-		while (len && text[len - 1] == ' ') {
-			len--;
-		}
-		while (len && text[len - 1] != ' ') {
-			len--;
-		}
-	} else {
-		while (len && ((unsigned char)text[len - 1] & 0xc0) == 0x80) {
-			len--; // the rest of a character that's more than a byte
-		}
-		len -= len > 0;
-	}
-	text[len] = '\0';
-}
-
-static void append(struct search *s, const char *text) {
-	for (const char *c = text; *c; c++) {
-		size_t len = strlen(s->query);
-		if ((unsigned char)*c < 0x20 || len + 1 >= sizeof(s->query)) {
-			continue; // no tabs, newlines from a paste
-		}
-		s->query[len] = *c;
-		s->query[len + 1] = '\0';
-	}
-}
-
 static void keys(struct fui *ui, struct search *s) {
-	char *pasted = fui_pasted_text(ui, 1);
-	if (pasted) {
-		append(s, pasted);
-	}
 	// one by one as they went down: a b backspace c, fast, is "ac"
 	uint32_t sym;
 	unsigned mods;
@@ -358,12 +325,8 @@ static void keys(struct fui *ui, struct search *s) {
 		bool plain = !(mods & (FUI_CTRL | FUI_ALT | FUI_SUPER));
 		bool ctrl = mods == FUI_CTRL;
 		bool edited = true;
-		if (sym == XKB_KEY_BackSpace && (plain || ctrl)) {
-			backspace(s->query, ctrl);
-		} else if (ctrl && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
+		if (ctrl && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
 			s->query[0] = '\0';
-		} else if (ctrl && (sym == XKB_KEY_v || sym == XKB_KEY_V)) {
-			fui_paste_text(ui, 1);
 		} else if (sym == XKB_KEY_Escape) {
 			if (*s->query) {
 				s->query[0] = '\0';
@@ -371,9 +334,7 @@ static void keys(struct fui *ui, struct search *s) {
 				close_search(s);
 				return;
 			}
-		} else if (plain && *text) {
-			append(s, text);
-		} else {
+		} else if (!fui_edit_key(ui, QUERY, i, s->query, sizeof(s->query))) {
 			edited = false;
 		}
 		if (edited) {
@@ -511,17 +472,16 @@ static void frame(struct fui *ui, void *data) {
 	// the field
 	fui_color(ui, TEXT_DIM);
 	magnifier(cr, 28, FIELD_H / 2.0, 22);
-	double tx = 52, ty = FIELD_H / 2.0 - 12;
-	if (*s->query) {
-		double tw = fui_text(ui, tx, ty, s->query, F_FIELD, TEXT, FUI_LEFT, W - tx - 24);
-		// the caret: lit while typing, blinking after
-		double now = fui_time(ui);
-		if (now - s->typed_at < 0.6 || fmod(now - s->typed_at, 1.0) < 0.5) {
-			fui_fill_rounded(ui, tx + fmin(tw, W - tx - 24) + 1, ty + 1, 2, 24, 1, 0x0a84ffff);
-		}
-	} else {
-		fui_text(ui, tx, ty, "Search", F_FIELD, TEXT_DIM, FUI_LEFT, 0);
-		fui_fill_rounded(ui, tx, ty + 1, 2, 24, 1, 0x0a84ffff);
+	double tx = 52;
+	if (!*s->query) {
+		fui_text(ui, tx + 4, FIELD_H / 2.0 - 12, "Search", F_FIELD, TEXT_DIM, FUI_LEFT, 0);
+	}
+	// the caret: lit while typing, blinking after
+	double now = fui_time(ui);
+	bool caret_on = now - s->typed_at < 0.6 || fmod(now - s->typed_at, 1.0) < 0.5;
+	if (fui_edit_line(ui, QUERY, tx, 0, W - tx - 24, FIELD_H, s->query, sizeof(s->query),
+			F_FIELD, TEXT, 0x0a84ffff, caret_on || !*s->query)) {
+		s->typed_at = now;
 	}
 	fui_after(ui, 500, caret_blink, s);
 
