@@ -419,6 +419,10 @@ static void *vdecoder(void *data) {
 	AVRational tb = p->fmt->streams[p->vstream]->time_base;
 	int serial = 0;
 	double target = 0, last = 0;
+	// after a seek: nothing's shown before a keyframe. how many broken
+	// frames went by unshown, a second's worth at most
+	bool need_key = false;
+	int skipped = 0;
 	if (p->cover) {
 		// a song's cover: one picture, shown for all of it
 		// its one packet, then the end: a threaded decoder holds the frame
@@ -443,6 +447,7 @@ static void *vdecoder(void *data) {
 			pthread_mutex_lock(&p->lock);
 			target = p->seek_to;
 			pthread_mutex_unlock(&p->lock);
+			need_key = true;
 			item_free(it);
 			continue;
 		}
@@ -454,6 +459,27 @@ static void *vdecoder(void *data) {
 		while (avcodec_receive_frame(p->vctx, frame) >= 0) {
 			double pts = frame_pts(p, frame, tb, last + p->frame_time);
 			last = pts;
+			// after a seek, a frame from before the next keyframe is made of
+			// pictures never decoded: on the gpu that's memory nobody wrote,
+			// a yellow and green net over the video. one the decoder says is
+			// broken is no better. they're not shown, a second of them at
+			// most (a stream that never says keyframe still plays)
+			if (frame->flags & AV_FRAME_FLAG_KEY) {
+				need_key = false;
+			}
+			bool broken = need_key || (frame->flags & AV_FRAME_FLAG_CORRUPT)
+				|| frame->decode_error_flags;
+			int skip_most = p->frame_time > 0 ? (int)(1 / p->frame_time) : 60;
+			if (broken && skipped < (skip_most > 24 ? skip_most : 24)) {
+				skipped++;
+				av_frame_unref(frame);
+				continue;
+			}
+			if (skipped) {
+				fprintf(stderr, "flameplay: %d broken frames not shown\n", skipped);
+			}
+			skipped = 0;
+			need_key = false;
 			// an exact seek: the frames on the way from the keyframe aren't shown
 			if (pts + p->frame_time / 2 >= target) {
 				picture_put(p, frame, pts, serial, &sws);
