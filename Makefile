@@ -155,8 +155,8 @@ $(SEARCH): $(SEARCH_SRCS) $(SEARCH_HDRS) $(FLAMEUI_DEPS)
 	$(UI_CC) -o $@ $(SEARCH_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
 		$(shell pkg-config --cflags --libs gio-unix-2.0)
 
-LOCK_SRCS := tools/flamelock/main.c tools/flamelock/auth.c
-LOCK_HDRS := tools/flamelock/auth.h
+LOCK_SRCS := tools/flamelock/main.c tools/flamelock/auth.c tools/flamelock/look.c
+LOCK_HDRS := tools/flamelock/auth.h tools/flamelock/look.h
 $(LOCK): $(LOCK_SRCS) $(LOCK_HDRS) $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -o $@ $(LOCK_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) -lpam
