@@ -367,6 +367,16 @@ combo Super_L 2
 ws
 wait
 cat vm.out" "has the shortcuts, 0 keys so far" "workspace 1" "flame has them back, 3 keys so far" "workspace 2"
+case_run "a window asking to come up: not on its own, yes with the user's click behind it (a link clicked)" "
+title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
+$BIN/wlactivate 3.5 &
+sleep 2.2
+title alone
+$CTL pointer move 960 360 > /dev/null; sleep 0.2
+$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
+sleep 0.8
+title clicked
+wait" "alone second" "clicked first"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

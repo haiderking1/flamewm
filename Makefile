@@ -369,6 +369,23 @@ $(E2E)/wlshortcuts: tests/e2e/wlshortcuts.c $(SHORTCUTS_CODE) $(E2E)/xdg-shell-c
 	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlshortcuts.c $(SHORTCUTS_CODE) \
 		$(shell pkg-config --cflags --libs wayland-client)
 
+ACTIVATION_XML := $(STAGING_XML)/xdg-activation/xdg-activation-v1.xml
+
+$(E2E)/xdg-activation-v1-client-protocol.h: $(ACTIVATION_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/xdg-activation-v1-protocol.c: $(ACTIVATION_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/wlactivate: tests/e2e/wlactivate.c $(E2E)/xdg-shell-protocol.c \
+		$(E2E)/xdg-activation-v1-protocol.c $(E2E)/xdg-shell-client-protocol.h \
+		$(E2E)/xdg-activation-v1-client-protocol.h
+	$(CC) -std=c17 -O1 -g -D_DEFAULT_SOURCE -I$(E2E) -o $@ tests/e2e/wlactivate.c \
+		$(E2E)/xdg-shell-protocol.c $(E2E)/xdg-activation-v1-protocol.c \
+		$(shell pkg-config --cflags --libs wayland-client)
+
 MOUSELOOK_CODE := $(E2E)/xdg-shell-protocol.c $(E2E)/pointer-constraints-unstable-v1-protocol.c \
 	$(E2E)/relative-pointer-unstable-v1-protocol.c
 
@@ -470,7 +487,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xcross $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed $(E2E)/wlmouselook $(E2E)/wlidle $(E2E)/xsuspend $(E2E)/wlshortcuts \
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xcross $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed $(E2E)/wlmouselook $(E2E)/wlidle $(E2E)/xsuspend $(E2E)/wlshortcuts $(E2E)/wlactivate \
 		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 

@@ -35,7 +35,8 @@ bool xdg_init(struct flame_xdg *xdg, struct flame_server *server) {
 		return false;
 	}
 
-	if (!decorations_init(&xdg->decorations, server->display)) {
+	if (!decorations_init(&xdg->decorations, server->display)
+			|| !activation_init(&xdg->activation, server)) {
 		return false;
 	}
 
@@ -49,4 +50,5 @@ void xdg_finish(struct flame_xdg *xdg) {
 	listener_disconnect(&xdg->new_toplevel);
 	listener_disconnect(&xdg->new_popup);
 	decorations_finish(&xdg->decorations);
+	activation_finish(&xdg->activation);
 }
