@@ -157,9 +157,17 @@ struct fui {
 	struct fui_ease_slot eases[FUI_EASES];
 	uint64_t active; // the control the button went down on, 0 for none
 	uint64_t focus; // the field being typed into, 0 for none
-	char focus_before[256]; // what it said when it got focus
+	char *focus_before; // what it said when it got focus
 	uint64_t entered; // the field enter was pressed in this frame, 0 for none
 	char typed[64]; // fui_typed's
+	// the line of text being edited (edit.c): which, where the caret is and
+	// where what's selected starts (bytes into it, the same for nothing
+	// selected), how far it's scrolled to keep the caret in, and a press on
+	// it held (selecting)
+	uint64_t edit;
+	size_t caret, anchor;
+	double edit_scroll;
+	bool edit_drag;
 	bool click_used; // a control took this frame's press
 
 	uint32_t eyecandy_version;
@@ -239,6 +247,25 @@ double fui_now(void);
 void fui_frame_begin(struct fui *ui, cairo_t *cr);
 void fui_frame_end(struct fui *ui);
 void fui_fonts_free(struct fui *ui);
+// a font by its pango description, kept
+const PangoFontDescription *fui_font(struct fui *ui, const char *name);
+// edit.c, under the fields: a line's editing starts (focus came to it),
+// the caret at text's end
+void fui_edit_start(struct fui *ui, uint64_t id, const char *text);
+// a key typable: not a control character (tab, ctrl+f...)
+bool fui_key_types(const struct fui_key *k);
+// key k edited into line id's text: what it did
+enum { FUI_EDIT_NOT_MINE, FUI_EDIT_MOVED, FUI_EDIT_CHANGED };
+int fui_edit_do(struct fui *ui, uint64_t id, const struct fui_key *k, char *text, int size);
+// the clipboard's text, there for line id now, in at the caret: true when
+// it changed text
+bool fui_edit_paste(struct fui *ui, uint64_t id, char *text, int size);
+// line id drawn in x, y, w x h (text in rgba, upright in the middle), the
+// caret (shown or not, a blink) and what's selected in accent while it's
+// active, a press on it this frame (clicked) placing the caret
+void fui_edit_draw(struct fui *ui, uint64_t id, double x, double y, double w, double h,
+	const char *text, const char *font_name, uint32_t rgba, uint32_t accent, bool caret,
+	bool active, bool clicked);
 void fui_thumbs_free(struct fui *ui);
 void fui_icons_free(struct fui *ui);
 // window.c's shared memory buffers, the drag icon's too

@@ -278,6 +278,24 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 // taking the keys types into it. escape clears it
 bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 	int size, bool grab);
+// field id's caret at end, what's selected from start (bytes into its
+// text, the same for nothing): a name picked but for its extension
+void fui_select(struct fui *ui, uint64_t id, size_t start, size_t end);
+
+// a line of text an app edits with its own keys (one that's always typed
+// into, a launcher's), the way the fields do: its caret and what's
+// selected kept by id. key i of this frame (fui_key_at's) edited into
+// text: typed in at the caret (over what's selected), backspace and
+// delete (ctrl: a word), left and right (shift: selecting, ctrl: by words),
+// home, end, ctrl+a, c, x and v. true when it was one of those
+bool fui_edit_key(struct fui *ui, uint64_t id, int i, char *text, int size);
+// it drawn in x, y, w x h, in font (upright in the middle), scrolled to
+// keep the caret in: the caret (caret false: a blink's off) and what's
+// selected in accent. a press on it puts the caret there, a drag selects,
+// a double click a word, three all of it. true when a paste came in
+bool fui_edit_line(struct fui *ui, uint64_t id, double x, double y, double w, double h,
+	char *text, int size, const char *font, uint32_t rgba, uint32_t accent, bool caret);
+
 // a picture file's thumbnail (jpeg, png, webp), width x height pixels cut to
 // cover that. worker threads make it, the window redraws when it's there:
 // NULL till then, or when it can't be read (failed, NULL when that's not

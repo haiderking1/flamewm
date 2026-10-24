@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cursor-shape-v1-client-protocol.h"
@@ -237,43 +238,6 @@ bool fui_clicked(struct fui *ui, double x, double y, double w, double h) {
 	return false;
 }
 
-// a focused field's clipboard keys: ctrl+v asks for the clipboard's text
-// (it comes a frame or so later), ctrl+c copies what it says. true when k
-// was one of them
-static bool clipboard_key(struct fui *ui, uint64_t id, const struct fui_key *k,
-		const char *text) {
-	if (k->mods != FUI_CTRL) {
-		return false;
-	}
-	if (xkb_keysym_to_lower(k->sym) == XKB_KEY_v) {
-		fui_paste_text(ui, id);
-		return true;
-	}
-	if (xkb_keysym_to_lower(k->sym) == XKB_KEY_c) {
-		fui_copy_text(ui, text);
-		return true;
-	}
-	return false;
-}
-
-// the clipboard's text, there for field id now: it goes in once
-static void take_paste(struct fui *ui, uint64_t id, char *text, int size) {
-	char *pasted = fui_pasted_text(ui, id);
-	if (!pasted) {
-		return;
-	}
-	size_t len = strlen(text);
-	snprintf(text + len, (size_t)size - len, "%s", pasted);
-	free(ui->pasted_text);
-	ui->pasted_text = NULL;
-}
-
-// a key that types something: not a control character (tab, ctrl+f...)
-static bool typable(const struct fui_key *k) {
-	unsigned char c = (unsigned char)k->text[0];
-	return c >= 0x20 && c != 0x7f && !(k->mods & (FUI_CTRL | FUI_ALT | FUI_SUPER));
-}
-
 int fui_click_count(const struct fui *ui) {
 	return ui->click_count;
 }
@@ -326,7 +290,7 @@ const char *fui_typed(struct fui *ui) {
 	ui->typed[0] = '\0';
 	for (int i = 0; !ui->focus && i < ui->keys_len; i++) {
 		size_t len = strlen(ui->typed);
-		if (typable(&ui->keys[i]) && len + strlen(ui->keys[i].text) < sizeof(ui->typed)) {
+		if (fui_key_types(&ui->keys[i]) && len + strlen(ui->keys[i].text) < sizeof(ui->typed)) {
 			strcat(ui->typed, ui->keys[i].text);
 		}
 	}
@@ -337,9 +301,16 @@ bool fui_entered(const struct fui *ui, uint64_t id) {
 	return ui->entered == id;
 }
 
-void fui_focus(struct fui *ui, uint64_t id, const char *text) {
+// field id has the keys, what it said kept for escape to go back to
+static void focus_on(struct fui *ui, uint64_t id, const char *text) {
 	ui->focus = id;
-	snprintf(ui->focus_before, sizeof(ui->focus_before), "%s", text ? text : "");
+	free(ui->focus_before);
+	ui->focus_before = strdup(text ? text : "");
+	fui_edit_start(ui, id, text);
+}
+
+void fui_focus(struct fui *ui, uint64_t id, const char *text) {
+	focus_on(ui, id, text);
 	fui_redraw(ui);
 }
 
@@ -380,7 +351,7 @@ void fui_fill_rounded(struct fui *ui, double x, double y, double w, double h, do
 	cairo_fill(ui->cr);
 }
 
-static const PangoFontDescription *font(struct fui *ui, const char *name) {
+const PangoFontDescription *fui_font(struct fui *ui, const char *name) {
 	for (int i = 0; i < ui->fonts_len; i++) {
 		if (!strcmp(ui->fonts[i].name, name)) {
 			return ui->fonts[i].desc;
@@ -403,7 +374,7 @@ void fui_fonts_free(struct fui *ui) {
 
 static PangoLayout *layout(struct fui *ui, const char *text, const char *font_name) {
 	PangoLayout *l = pango_cairo_create_layout(ui->cr);
-	pango_layout_set_font_description(l, font(ui, font_name));
+	pango_layout_set_font_description(l, fui_font(ui, font_name));
 	pango_layout_set_text(l, text, -1);
 	return l;
 }
@@ -635,19 +606,6 @@ bool fui_swatches(struct fui *ui, uint64_t id, double right, double y, const uin
 	return changed;
 }
 
-// the last utf-8 character off
-static void backspace(char *text) {
-	size_t len = strlen(text);
-	while (len > 0) {
-		len--;
-		if (((unsigned char)text[len] & 0xc0) != 0x80) {
-			break;
-		}
-	}
-	text[len] = '\0';
-}
-
-
 bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 		int size, const char *placeholder, bool enabled) {
 	const double h = 28;
@@ -657,30 +615,26 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 	if (hover) {
 		ui->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
 	}
-	if (enabled && !focused && fui_clicked(ui, x, y, w, h)) {
-		ui->focus = id;
-		snprintf(ui->focus_before, sizeof(ui->focus_before), "%s", text);
+	bool clicked = enabled && fui_clicked(ui, x, y, w, h);
+	if (clicked && !focused) {
+		focus_on(ui, id, text);
 		focused = true;
 	} else if (focused && ui->pressed && !hover) {
 		committed = true; // clicked away: kept
 	}
 	if (focused) {
-		take_paste(ui, id, text, size);
-		for (int i = 0; i < ui->keys_len && !committed; i++) {
+		fui_edit_paste(ui, id, text, size);
+		for (int i = 0; i < ui->keys_len && !committed && focused; i++) {
 			const struct fui_key *k = &ui->keys[i];
-			if (clipboard_key(ui, id, k, text)) {
-				continue;
-			} else if (k->sym == XKB_KEY_Return || k->sym == XKB_KEY_KP_Enter) {
+			if (k->sym == XKB_KEY_Return || k->sym == XKB_KEY_KP_Enter) {
 				committed = true;
 				ui->entered = id;
 			} else if (k->sym == XKB_KEY_Escape) {
-				snprintf(text, (size_t)size, "%s", ui->focus_before);
+				snprintf(text, (size_t)size, "%s", ui->focus_before ? ui->focus_before : "");
 				ui->focus = 0;
 				focused = false;
-			} else if (k->sym == XKB_KEY_BackSpace) {
-				backspace(text);
-			} else if (typable(k) && strlen(text) + strlen(k->text) < (size_t)size) {
-				strcat(text, k->text);
+			} else {
+				fui_edit_do(ui, id, k, text, size);
 			}
 		}
 	}
@@ -688,7 +642,7 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 	if (committed) {
 		ui->focus = 0;
 		focused = false;
-		changed = strcmp(ui->focus_before, text) != 0;
+		changed = strcmp(ui->focus_before ? ui->focus_before : "", text) != 0;
 	}
 	double fade = enabled ? 1 : 0.4;
 	double lit = fui_ease(ui, id, focused ? 1 : 0, 18);
@@ -697,28 +651,27 @@ bool fui_field(struct fui *ui, uint64_t id, double x, double y, double w, char *
 	fui_color(ui, with_alpha(mix(0xffffff24, ACCENT, lit), fade));
 	cairo_set_line_width(ui->cr, 1 + lit);
 	cairo_stroke(ui->cr);
-	cairo_save(ui->cr);
-	cairo_rectangle(ui->cr, x + 8, y, w - 16, h);
-	cairo_clip(ui->cr);
-	bool empty = !*text;
-	double tw = fui_text(ui, x + 10, y + 6, empty ? placeholder : text, FONT,
-		with_alpha(empty ? TEXT_DIM : TEXT, fade * (empty ? 0.7 : 1)), FUI_LEFT, 0);
-	if (focused) {
-		double cx = x + 10 + (empty ? 0 : tw) + 1;
-		fui_fill_rounded(ui, cx, y + 6, 1.6, h - 12, 0.8, ACCENT);
+	if (!*text) {
+		cairo_save(ui->cr);
+		cairo_rectangle(ui->cr, x + 8, y, w - 16, h);
+		cairo_clip(ui->cr);
+		fui_text(ui, x + 10, y + 6, placeholder, FONT, with_alpha(TEXT_DIM, fade * 0.7),
+			FUI_LEFT, 0);
+		cairo_restore(ui->cr);
 	}
-	cairo_restore(ui->cr);
+	fui_edit_draw(ui, id, x + 10, y, w - 20, h, text, FONT, with_alpha(TEXT, fade), ACCENT,
+		true, focused, clicked);
 	return changed;
 }
 
 bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char *text,
 		int size, bool grab) {
 	const double h = 28;
-	char before[256];
-	snprintf(before, sizeof(before), "%s", text);
+	bool changed = false;
 	bool hover = fui_hover(ui, x, y, w, h);
 	bool over_clear = *text && fui_hover(ui, x + w - 26, y, 26, h);
 	bool focused = ui->focus == id;
+	bool clicked = false;
 	if (over_clear) {
 		fui_cursor_pointer(ui);
 	} else if (hover) {
@@ -726,39 +679,39 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 	}
 	if (*text && fui_clicked(ui, x + w - 26, y, 26, h)) {
 		text[0] = '\0';
-	} else if (!focused && fui_clicked(ui, x, y, w, h)) {
-		ui->focus = id;
-		focused = true;
+		changed = true;
+	} else if ((clicked = fui_clicked(ui, x, y, w, h))) {
+		if (!focused) {
+			focus_on(ui, id, text);
+			focused = true;
+		}
 	} else if (focused && ui->pressed && !hover) {
 		ui->focus = 0;
 		focused = false;
 	}
 	// typing with nothing else taking the keys: that's a search
 	for (int i = 0; grab && i < ui->keys_len && !focused && !ui->focus; i++) {
-		if (typable(&ui->keys[i])) {
-			ui->focus = id;
+		if (fui_key_types(&ui->keys[i])) {
+			focus_on(ui, id, text);
 			focused = true;
 		}
 	}
 	if (focused) {
-		take_paste(ui, id, text, size);
+		changed |= fui_edit_paste(ui, id, text, size);
 	}
 	for (int i = 0; focused && i < ui->keys_len; i++) {
 		const struct fui_key *k = &ui->keys[i];
-		if (clipboard_key(ui, id, k, text)) {
-			continue;
-		} else if (k->sym == XKB_KEY_Escape) {
+		if (k->sym == XKB_KEY_Escape) {
 			// the search first, then the field
 			if (*text) {
 				text[0] = '\0';
+				changed = true;
 			} else {
 				ui->focus = 0;
 				focused = false;
 			}
-		} else if (k->sym == XKB_KEY_BackSpace) {
-			backspace(text);
-		} else if (typable(k) && strlen(text) + strlen(k->text) < (size_t)size) {
-			strcat(text, k->text);
+		} else {
+			changed |= fui_edit_do(ui, id, k, text, size) == FUI_EDIT_CHANGED;
 		}
 	}
 
@@ -777,18 +730,17 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 	cairo_move_to(ui->cr, x + 17.3, y + 16.3);
 	cairo_line_to(ui->cr, x + 20.5, y + 19.5);
 	cairo_stroke(ui->cr);
-	cairo_save(ui->cr);
-	cairo_rectangle(ui->cr, x + 26, y, w - 26 - (*text ? 26 : 8), h);
-	cairo_clip(ui->cr);
-	bool empty = !*text;
-	// focused and empty: the caret first, the placeholder after it
-	double tx = x + 27 + (focused && empty ? 4 : 0);
-	double tw = fui_text(ui, tx, y + 6, empty ? "Search" : text, FONT,
-		empty ? with_alpha(TEXT_DIM, 0.8) : TEXT, FUI_LEFT, 0);
-	if (focused) {
-		fui_fill_rounded(ui, x + 27 + (empty ? 0 : tw + 1), y + 6, 1.6, h - 12, 0.8, ACCENT);
+	double room = w - 28 - (*text ? 26 : 8);
+	if (!*text) {
+		// focused and empty: the caret first, the placeholder after it
+		cairo_save(ui->cr);
+		cairo_rectangle(ui->cr, x + 26, y, room + 2, h);
+		cairo_clip(ui->cr);
+		fui_text(ui, x + 27 + (focused ? 4 : 0), y + 6, "Search", FONT,
+			with_alpha(TEXT_DIM, 0.8), FUI_LEFT, 0);
+		cairo_restore(ui->cr);
 	}
-	cairo_restore(ui->cr);
+	fui_edit_draw(ui, id, x + 27, y, room, h, text, FONT, TEXT, ACCENT, true, focused, clicked);
 	// clearing it
 	if (*text) {
 		double cx = x + w - 14, cy = y + h / 2;
@@ -803,7 +755,7 @@ bool fui_search(struct fui *ui, uint64_t id, double x, double y, double w, char 
 		cairo_line_to(ui->cr, cx - 2.6, cy + 2.6);
 		cairo_stroke(ui->cr);
 	}
-	return strcmp(before, text) != 0;
+	return changed;
 }
 
 bool fui_button(struct fui *ui, uint64_t id, double x, double y, const char *label) {

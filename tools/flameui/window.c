@@ -1083,6 +1083,7 @@ void fui_destroy(struct fui *ui) {
 		fui_buffer_free(&ui->buffers[i]);
 	}
 	fui_fonts_free(ui);
+	free(ui->focus_before);
 	if (ui->xkb_state) {
 		xkb_state_unref(ui->xkb_state);
 	}

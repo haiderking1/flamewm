@@ -93,8 +93,8 @@ endef
 $(foreach p,$(UI_PROTOCOLS),$(eval $(call ui_protocol,$(p))))
 
 # flame's own apps: flameui, the pictures it reads, its protocols
-FLAMEUI_SRCS := tools/flameui/window.c tools/flameui/ui.c tools/flameui/thumbs.c \
-	tools/flameui/video.c tools/flameui/thumbcache.c tools/flameui/data.c tools/flameui/layer.c tools/flameui/icons.c \
+FLAMEUI_SRCS := tools/flameui/window.c tools/flameui/ui.c tools/flameui/edit.c \
+	tools/flameui/thumbs.c tools/flameui/video.c tools/flameui/thumbcache.c tools/flameui/data.c tools/flameui/layer.c tools/flameui/icons.c \
 	src/image/image.c
 FLAMEUI_DEPS := $(FLAMEUI_SRCS) tools/flameui/flameui.h tools/flameui/internal.h \
 	src/image/image.h $(UI_PROTO_HEADERS) $(UI_PROTO_CODE)
