@@ -321,6 +321,24 @@ def px(name, x, y):
 for x, y in ((600, 500), (420, 150), (150, 420)):
 	print('at', x, y, 'as before' if px('before.ppm', x, y) == px('after.ppm', x, y) else 'changed', px('after.ppm', x, y))
 \"" "100,100 201x201" "at 600 500 as before" "at 420 150 as before" "at 150 420 as before"
+case_run "a wayland game's mouse look: the pointer locked while it has the keys, the mouse heard raw, let go when another window takes them" "
+$CTL pointer move 640 360 > /dev/null
+$BIN/wlmouselook 4 > look.out &
+sleep 1.2
+for i in 1 2 3; do $CTL pointer nudge 30 10 > /dev/null; sleep 0.1; done
+sleep 0.3
+$BIN/xtyped other > /dev/null &
+sleep 0.8
+wait %1
+cat look.out" "locked" "unlocked" "relative 90,30, moved while locked 0"
+case_run "a wayland game confining the pointer to a box: it's brought into it and stays inside however far the mouse goes" "
+$CTL pointer move 640 360 > /dev/null
+$BIN/wlmouselook 3 confine > look.out &
+sleep 1.2
+for i in 1 2 3 4; do $CTL pointer nudge 80 60 > /dev/null; sleep 0.1; done
+for i in 1 2 3 4; do $CTL pointer nudge -90 -70 > /dev/null; sleep 0.1; done
+wait
+cat look.out" "confined" "pointer seen from 50,50 to 149,149"
 case_run "a tile asking to move: kept where it is, told the ICCCM way" "
 $BIN/xewmh configure" "kept: yes" "told: yes"
 case_run "an X app moving the pointer moves flame's, only when it's theirs to move" "

@@ -182,19 +182,31 @@ static void confine(struct flame_cursor *cursor) {
 	}
 }
 
-static void handle_motion(struct wl_listener *listener, void *data) {
-	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
-	struct wlr_pointer_motion_event *event = data;
+// the mouse moved by dx, dy: games hear it raw (X ones, wayland ones), the
+// pointer goes along unless one has it locked or confined
+static void moved_by(struct flame_cursor *cursor, struct wlr_input_device *device,
+		uint32_t time_msec, double dx, double dy, double unaccel_dx, double unaccel_dy) {
 	bool locked = lock_active(&cursor->server->lock);
 	if (!locked) {
-		xshell_pointer_raw_motion(&cursor->server->xshell, event->delta_x, event->delta_y,
-			event->unaccel_dx, event->unaccel_dy, event->time_msec);
+		xshell_pointer_raw_motion(&cursor->server->xshell, dx, dy, unaccel_dx, unaccel_dy,
+			time_msec);
+		if (constraints_motion(&cursor->server->input.constraints, time_msec, &dx, &dy,
+				unaccel_dx, unaccel_dy)) {
+			return; // locked in place: the game heard how far it went, that's all
+		}
 	}
-	wlr_cursor_move(cursor->wlr, &event->pointer->base, event->delta_x, event->delta_y);
+	wlr_cursor_move(cursor->wlr, device, dx, dy);
 	if (!locked) {
 		confine(cursor); // an X app's grab doesn't hold the pointer on the lock
 	}
-	process_motion(cursor, event->time_msec, true);
+	process_motion(cursor, time_msec, true);
+}
+
+static void handle_motion(struct wl_listener *listener, void *data) {
+	struct flame_cursor *cursor = wl_container_of(listener, cursor, motion);
+	struct wlr_pointer_motion_event *event = data;
+	moved_by(cursor, &event->pointer->base, event->time_msec, event->delta_x, event->delta_y,
+		event->unaccel_dx, event->unaccel_dy);
 }
 
 static void handle_motion_absolute(struct wl_listener *listener, void *data) {
@@ -436,6 +448,11 @@ void cursor_test_move(struct flame_cursor *cursor, double x, double y) {
 	wlr_cursor_warp_closest(cursor->wlr, NULL, x, y);
 	confine(cursor);
 	process_motion(cursor, now_msec(), true);
+	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
+}
+
+void cursor_test_nudge(struct flame_cursor *cursor, double dx, double dy) {
+	moved_by(cursor, NULL, now_msec(), dx, dy, dx, dy);
 	wlr_seat_pointer_notify_frame(cursor->server->input.seat);
 }
 

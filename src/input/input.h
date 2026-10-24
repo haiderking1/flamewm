@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <wayland-server-core.h>
 
+#include "input/constraints.h"
 #include "input/cursor.h"
 #include "input/dnd.h"
 #include "input/fake.h"
@@ -22,6 +23,7 @@ struct flame_input {
 	struct wl_list keyboards; // flame_keyboard.link
 	struct flame_fake_keyboard *fake; // FLAME_TEST_INPUT=1 only
 	struct flame_media_keys media; // to the bar, see media.h
+	struct flame_constraints constraints; // games' pointer lock, see constraints.h
 
 	struct wl_listener new_input;
 	struct wl_listener request_set_selection;

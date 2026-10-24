@@ -45,6 +45,8 @@ void cursor_warp(struct flame_cursor *cursor, double x, double y);
 // input that didn't come from a device, for tests (flamectl pointer with
 // FLAME_TEST_INPUT=1): to a layout point, a button (linux code)
 void cursor_test_move(struct flame_cursor *cursor, double x, double y);
+// the mouse moved by dx, dy, the way a real one moves (games hear it raw)
+void cursor_test_nudge(struct flame_cursor *cursor, double dx, double dy);
 void cursor_test_button(struct flame_cursor *cursor, uint32_t button, bool pressed);
 // a vertical wheel scroll, 15 a notch
 void cursor_test_scroll(struct flame_cursor *cursor, double delta);

@@ -95,8 +95,9 @@ static bool parse_arg(enum command_arg kind, const char *word, union flame_arg *
 	return true;
 }
 
-// pointer move X Y, pointer button left|middle|right press|release, pointer
-// scroll DELTA (15 a wheel notch, down positive): tests
+// pointer move X Y, pointer nudge DX DY (a mouse moving by that much),
+// pointer button left|middle|right press|release, pointer scroll DELTA (15
+// a wheel notch, down positive): tests
 // drive flame with these, and only when it was started for that
 static void pointer_command(struct flame_ipc_client *client, char **save) {
 	if (!getenv("FLAME_TEST_INPUT")) {
@@ -117,6 +118,11 @@ static void pointer_command(struct flame_ipc_client *client, char **save) {
 		cursor_test_move(cursor, strtod(a, NULL), strtod(b, NULL));
 		return;
 	}
+	if (what && a && b && !strcmp(what, "nudge")) {
+		reply_ok(client);
+		cursor_test_nudge(cursor, strtod(a, NULL), strtod(b, NULL));
+		return;
+	}
 	if (what && a && b && !strcmp(what, "button")) {
 		uint32_t button = !strcmp(a, "left") ? BTN_LEFT : !strcmp(a, "right") ? BTN_RIGHT
 			: !strcmp(a, "middle") ? BTN_MIDDLE : 0;
@@ -126,8 +132,8 @@ static void pointer_command(struct flame_ipc_client *client, char **save) {
 			return;
 		}
 	}
-	reply_error(client, "pointer move X Y, pointer button left|middle|right press|release, "
-		"or pointer scroll DELTA");
+	reply_error(client, "pointer move X Y, pointer nudge DX DY, "
+		"pointer button left|middle|right press|release, or pointer scroll DELTA");
 }
 
 void ipc_command(struct flame_ipc_client *client, char *line) {

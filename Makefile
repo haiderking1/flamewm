@@ -301,6 +301,35 @@ $(E2E)/wlcapture: tests/e2e/wlcapture.c $(CAPTURE_HEADERS) $(CAPTURE_CODE) \
 		$(E2E)/linux-dmabuf-v1-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client xcb gbm libdrm)
 
+UNSTABLE_XML := $(shell pkg-config --variable=pkgdatadir wayland-protocols)/unstable
+CONSTRAINTS_XML := $(UNSTABLE_XML)/pointer-constraints/pointer-constraints-unstable-v1.xml
+RELATIVE_XML := $(UNSTABLE_XML)/relative-pointer/relative-pointer-unstable-v1.xml
+
+$(E2E)/pointer-constraints-unstable-v1-client-protocol.h: $(CONSTRAINTS_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/pointer-constraints-unstable-v1-protocol.c: $(CONSTRAINTS_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+$(E2E)/relative-pointer-unstable-v1-client-protocol.h: $(RELATIVE_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) client-header $< $@
+
+$(E2E)/relative-pointer-unstable-v1-protocol.c: $(RELATIVE_XML)
+	@mkdir -p $(dir $@)
+	$(WAYLAND_SCANNER) private-code $< $@
+
+MOUSELOOK_CODE := $(E2E)/xdg-shell-protocol.c $(E2E)/pointer-constraints-unstable-v1-protocol.c \
+	$(E2E)/relative-pointer-unstable-v1-protocol.c
+
+$(E2E)/wlmouselook: tests/e2e/wlmouselook.c $(MOUSELOOK_CODE) $(E2E)/xdg-shell-client-protocol.h \
+		$(E2E)/pointer-constraints-unstable-v1-client-protocol.h \
+		$(E2E)/relative-pointer-unstable-v1-client-protocol.h
+	$(CC) -std=c17 -O1 -g -I$(E2E) -o $@ tests/e2e/wlmouselook.c $(MOUSELOOK_CODE) \
+		$(shell pkg-config --cflags --libs wayland-client)
+
 TEARING_XML := $(STAGING_XML)/tearing-control/tearing-control-v1.xml
 
 $(E2E)/tearing-control-v1-client-protocol.h: $(TEARING_XML)
@@ -393,7 +422,7 @@ $(E2E)/%: tests/e2e/%.c
 	$(CC) -std=c17 -O1 -g -D_POSIX_C_SOURCE=200809L -o $@ $< $(shell pkg-config --cflags --libs xcb)
 
 e2e: $(TARGET) $(CTL) $(E2E)/wldnd $(E2E)/xdnd $(E2E)/xclip $(E2E)/xwins $(E2E)/glx \
-		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xcross $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed \
+		$(E2E)/glxchild $(E2E)/xewmh $(E2E)/gtkcsd $(E2E)/xcursor $(E2E)/xkeys $(E2E)/xcross $(E2E)/xtyped $(E2E)/wlcapture $(E2E)/glxfull $(E2E)/wlgame $(E2E)/wlstall $(E2E)/wlfixed $(E2E)/wlmouselook \
 		$(E2E)/portalcast $(E2E)/wlglass $(E2E)/wllock $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK)
 	@sh tests/e2e/run.sh $(TARGET) $(CTL) $(E2E)
 

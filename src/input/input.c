@@ -86,6 +86,9 @@ bool input_init(struct flame_input *input, struct flame_server *server) {
 	if (!media_keys_init(&input->media, server)) {
 		return false;
 	}
+	if (!constraints_init(&input->constraints, server)) {
+		return false;
+	}
 
 	listener_connect(&input->new_input, &server->backend.wlr->events.new_input,
 		handle_new_input);
@@ -103,6 +106,7 @@ bool input_init(struct flame_input *input, struct flame_server *server) {
 }
 
 void input_finish(struct flame_input *input) {
+	constraints_finish(&input->constraints);
 	media_keys_finish(&input->media);
 	listener_disconnect(&input->new_input);
 	listener_disconnect(&input->request_set_selection);
