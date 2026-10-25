@@ -1,5 +1,5 @@
 #!/bin/sh
-# flame alone, no apps: bring your own bar, launcher and locker. on arch:
+# only the compositor, barebones (none of the apps). on arch:
 #   curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
 # to update flame to the newest version later: flame-update
 set -eu

@@ -14,7 +14,7 @@ flame with all its apps:
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install.sh | sh
 ```
 
-just flame, bring your own bar and locker:
+only the compositor, barebones:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
