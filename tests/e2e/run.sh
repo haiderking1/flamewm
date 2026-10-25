@@ -803,6 +803,29 @@ case_run "a workspace switch logs nothing unless frame timing is on" "
 $CTL workspace 2 > /dev/null; sleep 0.5; $CTL workspace 1 > /dev/null; sleep 0.5
 echo switch lines: \$(grep -ac 'frames in' flame.log)
 " "switch lines: 0"
+case_run "flame.lua by blocks: flame.look, flame.keyboard, flame.mouse and the rest set what flame.set does, a wrong name says where" "
+cat > \$XDG_CONFIG_HOME/flame/flame.lua <<'EOL'
+flame.look { gap = 13, border_width = 3 }
+flame.keyboard { repeat_rate = 40 }
+flame.mouse { focus_follows = false, cursor_size = 32 }
+flame.lockscreen { command = \"swaylock\" }
+flame.games { tearing = false, pace_fps = 90 }
+flame.x11 { zero_scaling = true }
+flame.blur { size = 10 }
+flame.animations { enabled = false }
+flame.wallpaper { mode = \"fit\" }
+EOL
+sleep 0.6
+$CTL settings | python3 -I -c \"
+import json, sys
+v = json.load(sys.stdin)['values']
+print('set', [v[k] for k in ['gap', 'border_width', 'repeat_rate', 'focus_follows_mouse', 'cursor_size', 'lock', 'allow_tearing', 'pace_fps', 'x_zero_scaling', 'blur.size', 'animations.enabled', 'wallpaper_mode']])
+\"
+$CTL set gap 4 | grep -o 'flame.lua sets it'
+echo 'flame.mouse { cursor_sise = 3 }' > \$XDG_CONFIG_HOME/flame/flame.lua
+sleep 0.6
+grep -ao 'flame.lua:1: flame.mouse: there.s no cursor_sise' flame.log | tail -1
+" "set [13, 3, 40, False, 32, 'swaylock', False, 90, True, 10, False, 'fit']" "flame.lua sets it" "flame.lua:1: flame.mouse: there's no cursor_sise"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-timing on > /dev/null
 $CTL frame-pipeline sideways 2>&1 | head -1

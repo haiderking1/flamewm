@@ -16,7 +16,18 @@
 #include "util/spawn.h"
 
 // flame.lua: flame's config is lua. it starts from the compiled in defaults
-// and changes what it says. the api, all under the global `flame`:
+// and changes what it says. by block, each its own function (the prelude
+// below, all flame.set underneath):
+//   flame.look{ gap, border_width, border_color, border_focused_color,
+//     background }
+//   flame.wallpaper{ path, mode }, flame.lockscreen{ command }
+//   flame.keyboard{ layout, variant, model, options, rules, repeat_rate,
+//     repeat_delay }
+//   flame.mouse{ focus_follows, drag_modifier, cursor_size, cursor_theme }
+//   flame.games{ tearing, vrr, pace, pace_fps }
+//   flame.x11{ zero_scaling, global_keys }
+//   flame.blur{ noise, size }, flame.animations{ ... } (or false)
+// the api, all under the global `flame`:
 //   flame.set{ gap = 6, border_width = 2, border_color = "#2a2a2a",
 //     border_focused_color = "#ff6a00", background = "#111111",
 //     repeat_rate = 30, repeat_delay = 250, focus_follows_mouse = true,
@@ -124,7 +135,41 @@ static const char prelude[] =
 	"    if fits then for k, v in pairs(rule.props) do out[k] = v end end\n"
 	"  end\n"
 	"  return out\n"
-	"end\n";
+	"end\n"
+	// the config by what it's about: each block's own function, its own
+	// names, all of them flame.set underneath (pins, settings.lua and errors
+	// the same). a name maps to flame.set's, "keyboard.layout" into a table
+	"local function section(name, names)\n"
+	"  flame[name] = function(t)\n"
+	"    if type(t) ~= 'table' then error('flame.' .. name .. ' { ... }', 2) end\n"
+	"    local out = {}\n"
+	"    for k, v in pairs(t) do\n"
+	"      local to = names[k]\n"
+	"      if not to then error('flame.' .. name .. ': there\\'s no ' .. tostring(k), 2) end\n"
+	"      local outer, inner = string.match(to, '^([^.]+)%.(.+)$')\n"
+	"      if outer then out[outer] = out[outer] or {}; out[outer][inner] = v\n"
+	"      else out[to] = v end\n"
+	"    end\n"
+	"    flame.set(out)\n"
+	"  end\n"
+	"end\n"
+	"section('look', { gap = 'gap', border_width = 'border_width',\n"
+	"  border_color = 'border_color', border_focused_color = 'border_focused_color',\n"
+	"  background = 'background' })\n"
+	"section('wallpaper', { path = 'wallpaper', mode = 'wallpaper_mode' })\n"
+	"section('lockscreen', { command = 'lock' })\n"
+	"section('keyboard', { layout = 'keyboard.layout', variant = 'keyboard.variant',\n"
+	"  model = 'keyboard.model', options = 'keyboard.options', rules = 'keyboard.rules',\n"
+	"  repeat_rate = 'repeat_rate', repeat_delay = 'repeat_delay' })\n"
+	"section('mouse', { focus_follows = 'focus_follows_mouse',\n"
+	"  drag_modifier = 'drag_modifier', cursor_size = 'cursor_size',\n"
+	"  cursor_theme = 'cursor_theme' })\n"
+	"section('games', { tearing = 'allow_tearing', vrr = 'vrr', pace = 'pace',\n"
+	"  pace_fps = 'pace_fps' })\n"
+	"section('x11', { zero_scaling = 'x_zero_scaling', global_keys = 'x_global_keys' })\n"
+	// these two are tables of their own in flame.set already
+	"function flame.blur(t) flame.set({ blur = t }) end\n"
+	"function flame.animations(t) flame.set({ animations = t }) end\n";
 
 static struct flame_lua *self(lua_State *L) {
 	return lua_touserdata(L, lua_upvalueindex(1));

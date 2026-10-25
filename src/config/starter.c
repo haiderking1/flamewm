@@ -30,14 +30,14 @@ static const char starter_no_bar[] =
 	"\n";
 
 static const char starter_rest[] =
-	"-- the things people change first: the gaps, the borders, the keyboard\n"
-	"-- layout, what locks the screen\n"
-	"-- flame.set {\n"
-	"--   gap = 8,\n"
-	"--   border_width = 2,\n"
-	"--   keyboard = { layout = \"us\" },\n"
-	"--   lock = \"flamelock\",   -- what super+l runs: \"swaylock\", \"\" for nothing\n"
-	"-- }\n"
+	"-- how it looks\n"
+	"-- flame.look { gap = 8, border_width = 2 }\n"
+	"\n"
+	"-- the keyboard\n"
+	"-- flame.keyboard { layout = \"us\" }\n"
+	"\n"
+	"-- what super+l runs: \"swaylock\", \"\" for nothing\n"
+	"-- flame.lockscreen { command = \"flamelock\" }\n"
 	"\n"
 	"-- your own binds: keys, and what they run\n"
 	"-- flame.bind(\"super\", \"b\", \"firefox\")\n";

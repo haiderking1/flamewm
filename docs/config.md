@@ -12,14 +12,21 @@ settings.lua. save it and flame reloads it right away (`super+shift+r`
 does too).
 
 ```lua
-flame.set {
-  allow_tearing = true, -- games with vsync off tear
-  vrr = "fullscreen",   -- "off", "fullscreen", "always"
-  pace = "vrr",         -- "off", "vrr", "always"
-  pace_fps = 0,         -- a cap, 0 for none
-  lock = "flamelock",   -- what super+l and sleep run, "" for nothing
+flame.look { gap = 8, border_width = 2 }
+flame.keyboard { layout = "us,ara", options = "grp:alt_shift_toggle" }
+flame.mouse { focus_follows = true }
+flame.games {
+  tearing = true,      -- games with vsync off tear
+  vrr = "fullscreen",  -- "off", "fullscreen", "always"
+  pace = "vrr",        -- "off", "vrr", "always"
 }
+flame.lockscreen { command = "flamelock" }  -- what super+l runs, "" for nothing
 ```
+
+every block is its own function: `flame.look`, `flame.wallpaper`,
+`flame.lockscreen`, `flame.keyboard`, `flame.mouse`, `flame.games`,
+`flame.x11`, `flame.blur`, `flame.animations`. all of them with every option
+in [examples/flame.lua](../examples/flame.lua).
 
 ## binds
 

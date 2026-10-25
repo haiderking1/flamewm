@@ -6,7 +6,7 @@
 
 -- how it looks: the gaps between windows, their borders, and the color
 -- behind everything
-flame.set {
+flame.look {
 	gap = 6,
 	border_width = 2,
 	border_color = "#2a2a2a",
@@ -15,74 +15,88 @@ flame.set {
 }
 
 -- the wallpaper: a jpeg, png or webp, flame draws it itself
--- flame.set {
--- 	wallpaper = "~/walls/sea.jpg",
--- 	wallpaper_mode = "fill", -- "fit", "center", "stretch"
+-- flame.wallpaper {
+-- 	path = "~/walls/sea.jpg",
+-- 	mode = "fill", -- "fit", "center", "stretch"
 -- }
 
 -- what locks the screen: super+l, and before the computer sleeps.
 -- "swaylock" or any other locker, "" for nothing
-flame.set {
-	lock = "flamelock",
+flame.lockscreen {
+	command = "flamelock",
 }
 
 -- the keyboard: layouts, and how fast a held key repeats
-flame.set {
+flame.keyboard {
+	-- layout = "us,ara",
+	-- options = "grp:alt_shift_toggle",
 	repeat_rate = 30, -- keys a second
 	repeat_delay = 250, -- ms
-	keyboard = {
-		-- layout = "us,ara",
-		-- options = "grp:alt_shift_toggle",
-	},
 }
 
 -- the mouse: focus follows it, a held key to move and resize windows with,
 -- the cursor
-flame.set {
-	focus_follows_mouse = true,
+flame.mouse {
+	focus_follows = true,
 	drag_modifier = "super", -- held: left drag moves, right drag resizes
 	cursor_size = 24,
 	-- cursor_theme = "Adwaita",
 }
 
--- X apps on a scaled screen: drawn at its real pixels and scaling
--- themselves (sharp, told the dpi), instead of being stretched (blurry).
--- apps that ignore dpi look small
-flame.set {
-	x_zero_scaling = false,
+-- games: tearing when a fullscreen game turns vsync off, adaptive sync,
+-- and its frames at an even pace (pace_fps: a cap, 0 for none)
+flame.games {
+	tearing = true,
+	vrr = "fullscreen", -- "off", "fullscreen", "always"
+	pace = "vrr", -- "off", "vrr", "always"
+	pace_fps = 0,
+}
+
+-- X apps: on a scaled screen drawn at its real pixels and scaling
+-- themselves (sharp, told the dpi) instead of stretched (blurry), apps that
+-- ignore dpi look small. global_keys: which keys X apps see while a wayland
+-- window has focus (push to talk): "always", "never", "modifiers", "combos"
+flame.x11 {
+	zero_scaling = false,
+	global_keys = "always",
+}
+
+-- glass: how far apps' blur reaches, and a fine grain over it so dark blur
+-- doesn't band (0 for none)
+flame.blur {
+	size = 18,
+	noise = 0.004,
 }
 
 -- animations: windows opening, closing and moving around, the
 -- workspace sliding over, bars and notifications coming and going.
--- `animations = false` turns them all off
-flame.set {
-	animations = {
-		enabled = true,
-		layers = true, -- bars, notifications, launchers
-		open = "slide", -- slide, zoom, fade or none
-		close = "slide",
-		layer_open = "slide",
-		layer_close = "slide",
-		fade_in = true, -- on top of a slide or zoom
-		fade_out = true,
-		fade_in_from = 0.5,
-		fade_out_from = 0.5,
-		zoom_from = 0.4, -- a zoom opens from 40%
-		zoom_to = 0.8, -- and closes to 80%
-		workspace_vertical = false,
-		focused_opacity = 1.0,
-		unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
-		duration = { open = 400, close = 300, move = 500, workspace = 300, focus = 0 },
-		-- css cubic-bezier curves: {x1, y1, x2, y2}
-		curve = {
-			open = { 0.46, 1.0, 0.29, 0.99 },
-			close = { 0.46, 1.0, 0.29, 0.99 },
-			move = { 0.46, 1.0, 0.29, 0.99 },
-			workspace = { 0.46, 1.0, 0.29, 0.99 },
-			focus = { 0.46, 1.0, 0.29, 0.99 },
-			fade_in = { 0.46, 1.0, 0.29, 0.99 },
-			fade_out = { 0.5, 0.5, 0.5, 0.5 },
-		},
+-- `flame.animations(false)` turns them all off
+flame.animations {
+	enabled = true,
+	layers = true, -- bars, notifications, launchers
+	open = "slide", -- slide, zoom, fade or none
+	close = "slide",
+	layer_open = "slide",
+	layer_close = "slide",
+	fade_in = true, -- on top of a slide or zoom
+	fade_out = true,
+	fade_in_from = 0.5,
+	fade_out_from = 0.5,
+	zoom_from = 0.4, -- a zoom opens from 40%
+	zoom_to = 0.8, -- and closes to 80%
+	workspace_vertical = false,
+	focused_opacity = 1.0,
+	unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
+	duration = { open = 400, close = 300, move = 500, workspace = 300, focus = 0 },
+	-- css cubic-bezier curves: {x1, y1, x2, y2}
+	curve = {
+		open = { 0.46, 1.0, 0.29, 0.99 },
+		close = { 0.46, 1.0, 0.29, 0.99 },
+		move = { 0.46, 1.0, 0.29, 0.99 },
+		workspace = { 0.46, 1.0, 0.29, 0.99 },
+		focus = { 0.46, 1.0, 0.29, 0.99 },
+		fade_in = { 0.46, 1.0, 0.29, 0.99 },
+		fade_out = { 0.5, 0.5, 0.5, 0.5 },
 	},
 }
 

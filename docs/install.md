@@ -71,7 +71,7 @@ moment someone logs in.
 everyone picks their own login look in settings (wallpaper, login screen):
 a wallpaper (a copy goes to `/var/lib/flamegreet`, no root needed) and blur
 on or off. for the default look, give the greeter a config:
-`-c /etc/greetd/flame.lua` with `flame.set{ wallpaper = ... }` in it. it
+`-c /etc/greetd/flame.lua` with `flame.wallpaper { path = ... }` in it. it
 remembers who logged in last and into what.
 
 ## barebones
@@ -81,7 +81,7 @@ differently. tell flame what locks the screen (`super+l`, and before the
 computer sleeps), or `""` for nothing:
 
 ```lua
-flame.set { lock = "swaylock" }
+flame.lockscreen { command = "swaylock" }
 ```
 
 and apps' open and save dialogs are gtk's instead of flamefiles.
