@@ -3,22 +3,27 @@
 ## arch
 
 ```sh
-git clone https://github.com/haiderking1/flamewm
-flamewm/dist/flame-update           # flame with all its apps
-flamewm/dist/flame-update --core    # or flame alone, bring your own bar and locker
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh
 ```
 
-it builds real packages (`flamewm-git`, `flame-apps-git`) and installs
-them with pacman. it installs itself too, so after that updating is just:
+flame with all its apps. for flame alone, bring your own bar and locker:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh -s -- --core
+```
+
+it builds real packages (`flamewm-git`, `flame-apps-git`) and installs them
+with pacman, and it installs itself too. after that, for the newest flame:
 
 ```sh
 flame-update
 ```
 
 it updates what you have (just flame, or flame and the apps) and does
-nothing when there's nothing new. `--all` and `--core` switch between the
-two. the PKGBUILD it builds is in [dist/aur](../dist/aur/flamewm-git/PKGBUILD),
-the aur package is coming once the aur takes new accounts again.
+nothing when there's nothing new. `flame-update --all` / `--core` switch
+between the two. the PKGBUILD it builds is in
+[dist/aur](../dist/aur/flamewm-git/PKGBUILD), the aur package is coming once
+the aur takes new accounts again.
 
 ## from source
 

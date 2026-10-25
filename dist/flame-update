@@ -1,8 +1,11 @@
 #!/bin/sh
-# flame-update: installs flame on arch, or brings it up to date. builds the
-# packages from dist/aur (makepkg) and installs them with pacman, so pacman
-# knows every file. the first time: flame with its apps, or --core for flame
-# alone. after that it updates what's installed, nothing more
+# flame-update: installs flame on arch, or brings it up to date. it builds
+# the packages from dist/aur (makepkg) and installs them with pacman, so
+# pacman knows every file. after the first time it updates what's in
+#
+# the first time, straight from the web:
+#   curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh
+#   (... | sh -s -- --core for flame alone)
 #
 #   flame-update           update (the first time: flame and its apps)
 #   flame-update --core    flame alone, no apps (removes them if they're in)
@@ -16,6 +19,16 @@ repo=${FLAME_REPO:-https://github.com/haiderking1/flamewm.git}
 src=${XDG_CACHE_HOME:-$HOME/.cache}/flame-update/flamewm
 
 say() { printf '\033[1;33m::\033[0m %s\n' "$*"; }
+# pacman's questions answered from the keyboard, also when this script came
+# down a pipe (curl ... | sh): stdin is the script then
+answer() {
+	# a subshell: a failed redirection would end sh itself
+	if [ ! -t 0 ] && (: < /dev/tty) 2> /dev/null; then
+		"$@" < /dev/tty
+	else
+		"$@"
+	fi
+}
 die() { printf '\033[1;31m::\033[0m %s\n' "$*" >&2; exit 1; }
 
 want= force=
@@ -24,7 +37,7 @@ for arg in "$@"; do
 	--core) want=core ;;
 	--all) want=all ;;
 	--force) force=1 ;;
-	-h|--help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
+	-h|--help) [ -f "$0" ] && sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 0 ;;
 	*) die "what's $arg? see flame-update --help" ;;
 	esac
 done
@@ -85,12 +98,13 @@ sed -i "s|^source=.*|source=(\"\$pkgbase::git+file://$src\")|" "$build/PKGBUILD"
 
 say "installing"
 if [ "$want" = all ]; then
-	sudo pacman -U --needed "$build"/flamewm-git-*.pkg.tar.zst "$build"/flame-apps-git-*.pkg.tar.zst
+	answer sudo pacman -U --needed "$build"/flamewm-git-*.pkg.tar.zst \
+		"$build"/flame-apps-git-*.pkg.tar.zst
 else
-	sudo pacman -U --needed "$build"/flamewm-git-*.pkg.tar.zst
+	answer sudo pacman -U --needed "$build"/flamewm-git-*.pkg.tar.zst
 	if [ -n "$apps" ]; then
 		say "taking flame's apps out (--core)"
-		sudo pacman -R flame-apps-git
+		answer sudo pacman -R flame-apps-git
 	fi
 fi
 

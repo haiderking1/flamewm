@@ -6,6 +6,15 @@ written from scratch and built right in. no Xwayland anywhere.
 
 **[install](docs/install.md)** · **[configure](docs/config.md)** · **[deps](deps.md)**
 
+## install (arch)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh
+```
+
+that's flame with all its apps. just flame: `... | sh -s -- --core`. later,
+`flame-update` gets you the newest.
+
 ## features
 
 - its own X server, written from scratch: Steam, Proton and X11 apps without Xwayland
