@@ -39,6 +39,16 @@ struct gl_blur {
 	int copy_width, copy_height;
 };
 
+// pixels drawn, by what for: the work a frame asks of the gpu as it is, not
+// as fast as the gpu's clocked right now. only ever grows, callers diff it
+struct gl_draw_stats {
+	uint64_t texture; // windows, the wallpaper, anything with a picture
+	uint64_t rect; // plain colour
+	uint64_t glass; // glass panes drawn over the buffer
+	uint64_t blur; // the blur's levels, down and up
+	uint64_t copy; // what's behind glass copied out of the buffer
+};
+
 struct flame_gl {
 	bool usable;
 	struct wlr_renderer *renderer;
@@ -48,6 +58,7 @@ struct flame_gl {
 	struct gl_program quad, tex_rgba, tex_rgbx, tex_ext;
 	struct gl_program blur_down, blur_up, glass;
 	struct gl_blur blur;
+	struct gl_draw_stats stats;
 };
 
 // false (and unusable) when renderer isn't GLES2 or its GL lacks what

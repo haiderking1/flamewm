@@ -11,6 +11,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/box.h>
 
+#include "gl/gl.h"
 #include "render/cursor.h"
 #include "render/elements.h"
 #include "render/gpu_time.h"
@@ -150,6 +151,8 @@ struct flame_frame {
 		int frames, missed;
 		int64_t worst_gap, worst_gpu;
 		double worst_own_ms; // flame's own gpu work of a frame, at most
+		struct gl_draw_stats drawn; // the gl's counts when it started
+		int composited; // frames drawn (not scanned out or cursor only)
 		struct wl_event_source *done; // the line once it's over, flips or not
 	} watch;
 	// apps' dmabufs this frame's gpu work reads that have no explicit sync to

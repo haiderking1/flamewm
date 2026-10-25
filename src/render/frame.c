@@ -174,6 +174,8 @@ void frame_watch(struct flame_frame *frame, const char *what, int64_t ns) {
 	frame->watch.frames = frame->watch.missed = 0;
 	frame->watch.worst_gap = frame->watch.worst_gpu = 0;
 	frame->watch.worst_own_ms = 0;
+	frame->watch.drawn = frame->render->gl.stats;
+	frame->watch.composited = 0;
 }
 
 // the watch is over: its line, the wall clock in it to line up with what
@@ -199,6 +201,21 @@ static void watch_report(struct flame_frame *frame) {
 		refresh * span / 1000, refresh, frame->watch.missed, frame->watch.worst_gap / 1e6,
 		frame->watch.worst_gpu / 1e6, frame->watch.worst_own_ms, tm.tm_hour, tm.tm_min,
 		tm.tm_sec, wall.tv_nsec / 1000000);
+	// what a drawn frame asked of the gpu, in thousands of pixels: the same
+	// whatever its clocks
+	const struct gl_draw_stats *now = &frame->render->gl.stats, *then = &frame->watch.drawn;
+	int n = frame->watch.composited > 0 ? frame->watch.composited : 1;
+	wlr_log(WLR_INFO, "%s: %s: a drawn frame was %.0fk pixels: windows and pictures %.0fk, "
+		"plain %.0fk, glass %.0fk, its blur %.0fk, copied for it %.0fk (%d frames drawn)",
+		frame->output->name, frame->watch.what,
+		(double)((now->texture - then->texture) + (now->rect - then->rect)
+			+ (now->glass - then->glass) + (now->blur - then->blur)
+			+ (now->copy - then->copy)) / n / 1000,
+		(double)(now->texture - then->texture) / n / 1000,
+		(double)(now->rect - then->rect) / n / 1000,
+		(double)(now->glass - then->glass) / n / 1000,
+		(double)(now->blur - then->blur) / n / 1000,
+		(double)(now->copy - then->copy) / n / 1000, frame->watch.composited);
 }
 
 static int handle_watch_done(void *data) {
@@ -1131,6 +1148,9 @@ static void render(struct flame_frame *frame, int64_t now) {
 		} else {
 			ready = prepare(frame, &target, &damage, candidate, &state, &kind);
 			drew_gl = kind == TIMING_COMPOSITED;
+			if (drew_gl && ready && frame->watch.on) {
+				frame->watch.composited++;
+			}
 			if (drew_gl && ready) {
 				watch_gpu_done(frame);
 			}

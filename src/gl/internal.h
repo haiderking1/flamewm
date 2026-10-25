@@ -89,6 +89,7 @@ void gl_target_proj(float proj[9], int width, int height);
 void gl_box_proj(const float proj[9], int location, struct wlr_box box);
 void gl_tex_proj(int location, enum wl_output_transform transform, struct wlr_fbox src);
 // the parts of box in clip (NULL: all of it), as quads
-void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos);
+// box drawn where it's in clip (NULL: all of it): the pixels it covered
+uint64_t gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos);
 
 #endif

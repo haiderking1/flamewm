@@ -134,7 +134,8 @@ static void set_bounds(const struct gl_program *program, struct level level) {
 }
 
 // one level into the next, down (bigger to smaller) or up
-static void blur_step(const struct gl_program *program, struct level from, unsigned to_fbo,
+static void blur_step(struct flame_gl *gl, const struct gl_program *program, struct level from,
+		unsigned to_fbo,
 		int to_w, int to_h, float offset) {
 	fglBindFramebuffer(GL_FRAMEBUFFER, to_fbo);
 	fglViewport(0, 0, to_w, to_h);
@@ -150,7 +151,7 @@ static void blur_step(const struct gl_program *program, struct level from, unsig
 	gl_tex_proj(program->tex_proj, WL_OUTPUT_TRANSFORM_NORMAL, (struct wlr_fbox){
 		(double)from.x / from.alloc_width, (double)from.y / from.alloc_height,
 		(double)from.width / from.alloc_width, (double)from.height / from.alloc_height});
-	gl_draw_box((struct wlr_box){0, 0, to_w, to_h}, NULL, program->pos);
+	gl->stats.blur += gl_draw_box((struct wlr_box){0, 0, to_w, to_h}, NULL, program->pos);
 }
 
 void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options) {
@@ -210,6 +211,7 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 		fglBindTexture(GL_TEXTURE_2D, blur->copy);
 		fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, reach.x, reach.y, reach.width,
 			reach.height);
+		gl->stats.copy += (uint64_t)reach.width * (uint64_t)reach.height;
 	}
 	behind.alloc_width = blur->copy_width;
 	behind.alloc_height = blur->copy_height;
@@ -218,10 +220,10 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	fglDisable(GL_BLEND);
 	for (int i = 0; i < passes; i++) {
 		struct level from = i == 0 ? behind : level_of(blur, i, w[i], h[i]);
-		blur_step(&gl->blur_down, from, blur->fbo[i + 1], w[i + 1], h[i + 1], offset);
+		blur_step(gl, &gl->blur_down, from, blur->fbo[i + 1], w[i + 1], h[i + 1], offset);
 	}
 	for (int i = passes; i > 0; i--) {
-		blur_step(&gl->blur_up, level_of(blur, i, w[i], h[i]), blur->fbo[i - 1], w[i - 1],
+		blur_step(gl, &gl->blur_up, level_of(blur, i, w[i], h[i]), blur->fbo[i - 1], w[i - 1],
 			h[i - 1], offset);
 	}
 	struct level blurred = passes ? level_of(blur, 0, w[0], h[0]) : behind;
@@ -250,7 +252,7 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	// v_texcoord comes out as the buffer pixel
 	gl_tex_proj(program->tex_proj, WL_OUTPUT_TRANSFORM_NORMAL,
 		(struct wlr_fbox){box.x, box.y, box.width, box.height});
-	gl_draw_box(box, options->clip, program->pos);
+	gl->stats.glass += gl_draw_box(box, options->clip, program->pos);
 	fglBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -266,6 +268,7 @@ void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area) {
 	fglActiveTexture(GL_TEXTURE0);
 	fglBindTexture(GL_TEXTURE_2D, blur->copy);
 	fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, area.x, area.y, area.width, area.height);
+	pass->gl->stats.copy += (uint64_t)area.width * (uint64_t)area.height;
 	fglBindTexture(GL_TEXTURE_2D, 0);
 	pass->backdrop = area;
 }

@@ -92,7 +92,7 @@ void gl_tex_proj(int location, enum wl_output_transform transform, struct wlr_fb
 #define MAX_QUADS 86 // a batch of quads, 6 vertices of 2 floats each
 
 // the parts of box inside clip, as quads in box's unit square
-void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
+uint64_t gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
 	pixman_region32_t region;
 	pixman_region32_init_rect(&region, box.x, box.y, box.width, box.height);
 	if (clip) {
@@ -102,7 +102,11 @@ void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
 	const pixman_box32_t *rects = pixman_region32_rectangles(&region, &len);
 	if (len == 0) {
 		pixman_region32_fini(&region);
-		return;
+		return 0;
+	}
+	uint64_t area = 0;
+	for (int i = 0; i < len; i++) {
+		area += (uint64_t)(rects[i].x2 - rects[i].x1) * (uint64_t)(rects[i].y2 - rects[i].y1);
 	}
 	fglEnableVertexAttribArray(pos);
 	for (int i = 0; i < len;) {
@@ -123,6 +127,7 @@ void gl_draw_box(struct wlr_box box, const pixman_region32_t *clip, int pos) {
 	}
 	fglDisableVertexAttribArray(pos);
 	pixman_region32_fini(&region);
+	return area;
 }
 
 static void set_blend(bool blend) {
@@ -175,7 +180,7 @@ void gl_pass_rect(struct gl_pass *pass, struct wlr_box box, const float color[4]
 	fglUseProgram(program->program);
 	set_proj(pass, program->proj, box);
 	fglUniform4f(program->color, color[0], color[1], color[2], color[3]);
-	gl_draw_box(box, clip, program->pos);
+	pass->gl->stats.rect += gl_draw_box(box, clip, program->pos);
 }
 
 // the gpu waits (not us) for point on timeline before what comes after
@@ -244,7 +249,7 @@ void gl_pass_texture(struct gl_pass *pass, const struct gl_texture_options *opti
 	fglUniform1f(program->alpha, options->alpha);
 	set_proj(pass, program->proj, options->dst);
 	gl_tex_proj(program->tex_proj, options->transform, src);
-	gl_draw_box(options->dst, options->clip, program->pos);
+	pass->gl->stats.texture += gl_draw_box(options->dst, options->clip, program->pos);
 	fglBindTexture(attribs.target, 0);
 }
 
