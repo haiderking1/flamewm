@@ -34,8 +34,10 @@ struct gl_program {
 struct gl_blur {
 	unsigned texture[GL_BLUR_LEVELS], fbo[GL_BLUR_LEVELS];
 	int width[GL_BLUR_LEVELS], height[GL_BLUR_LEVELS]; // allocated
-	// the copy itself: rgb, an output's buffer often has no alpha to copy
-	unsigned copy;
+	// the copy itself: rgb, an output's buffer often has no alpha to copy.
+	// full size, or half (blitted down, see gl.blit): then it's level 1 as it
+	// is, and its framebuffer is what the blit writes
+	unsigned copy, copy_fbo;
 	int copy_width, copy_height;
 };
 
@@ -47,6 +49,7 @@ struct gl_draw_stats {
 	uint64_t glass; // glass panes drawn over the buffer
 	uint64_t blur; // the blur's levels, down and up
 	uint64_t copy; // what's behind glass copied out of the buffer
+	uint64_t chains, steps; // blurs run (a pane each), and their passes between levels
 };
 
 struct flame_gl {
@@ -55,6 +58,9 @@ struct flame_gl {
 	void *display, *context; // EGLDisplay, EGLContext
 	bool external; // GL_OES_EGL_image_external: dmabufs as external textures
 	bool fences; // EGL_ANDROID_native_fence_sync + EGL_KHR_wait_sync
+	// glBlitFramebuffer (GLES 3, GL_NV_framebuffer_blit): what's behind glass
+	// copied straight down to half size, filtered, one step instead of two
+	bool blit;
 	struct gl_program quad, tex_rgba, tex_rgbx, tex_ext;
 	struct gl_program blur_down, blur_up, glass;
 	struct gl_blur blur;
@@ -75,8 +81,9 @@ struct gl_pass {
 	struct wlr_drm_syncobj_timeline *signal;
 	uint64_t signal_point;
 	// glass reads this instead of what's drawn now, see gl_pass_backdrop.
-	// empty for none
+	// empty for none. half: kept at half size (every pane over it blurs)
 	struct wlr_box backdrop;
+	bool backdrop_half;
 };
 
 // signal: reaches point once the gpu is done with everything drawn, NULL
@@ -127,8 +134,9 @@ int gl_glass_reach(float blur, float refraction);
 // what's in area now is kept, and glass reads that from here on instead of
 // what's drawn over it since: a window's panes all frost what's behind the
 // window, not each other. area: every pane's box and reach. an empty area
-// (gl_pass_backdrop_end) goes back to reading what's drawn
-void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area);
+// (gl_pass_backdrop_end) goes back to reading what's drawn. blurred: every
+// pane over it blurs, it can be kept at half size
+void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area, bool blurred);
 void gl_pass_backdrop_end(struct gl_pass *pass);
 // false: the gpu can't be trusted with what it drew
 bool gl_pass_submit(struct gl_pass *pass);

@@ -206,7 +206,8 @@ static void watch_report(struct flame_frame *frame) {
 	const struct gl_draw_stats *now = &frame->render->gl.stats, *then = &frame->watch.drawn;
 	int n = frame->watch.composited > 0 ? frame->watch.composited : 1;
 	wlr_log(WLR_INFO, "%s: %s: a drawn frame was %.0fk pixels: windows and pictures %.0fk, "
-		"plain %.0fk, glass %.0fk, its blur %.0fk, copied for it %.0fk (%d frames drawn)",
+		"plain %.0fk, glass %.0fk, its blur %.0fk, copied for it %.0fk, %.1f blurs of %.1f "
+		"passes (%d frames drawn)",
 		frame->output->name, frame->watch.what,
 		(double)((now->texture - then->texture) + (now->rect - then->rect)
 			+ (now->glass - then->glass) + (now->blur - then->blur)
@@ -215,7 +216,9 @@ static void watch_report(struct flame_frame *frame) {
 		(double)(now->rect - then->rect) / n / 1000,
 		(double)(now->glass - then->glass) / n / 1000,
 		(double)(now->blur - then->blur) / n / 1000,
-		(double)(now->copy - then->copy) / n / 1000, frame->watch.composited);
+		(double)(now->copy - then->copy) / n / 1000,
+		(double)(now->chains - then->chains) / n, (double)(now->steps - then->steps) / n,
+		frame->watch.composited);
 }
 
 static int handle_watch_done(void *data) {

@@ -70,6 +70,8 @@
 #define FLAME_GL_DECLARE(type, name) extern type fgl##name;
 FLAME_GL_PROCS(FLAME_GL_DECLARE)
 #undef FLAME_GL_DECLARE
+// optional: NULL without it (gl.blit says)
+extern PFNGLBLITFRAMEBUFFERNVPROC fglBlitFramebuffer;
 
 #define FLAME_EGL_DECLARE(type, name) extern type f##name;
 FLAME_EGL_PROCS(FLAME_EGL_DECLARE)

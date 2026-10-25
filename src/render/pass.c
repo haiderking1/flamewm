@@ -92,8 +92,10 @@ void pass_glass_group(struct flame_pass *pass, const struct flame_render_target 
 	// everything its panes read: their boxes and around them, as
 	// gl_pass_glass works it out
 	int x1 = INT32_MAX, y1 = INT32_MAX, x2 = INT32_MIN, y2 = INT32_MIN;
+	bool blurred = true; // every pane blurs: the backdrop can be kept at half size
 	for (size_t j = i; j < list->len && group_of(list, j) == group; j++) {
 		const struct flame_element *element = &list->data[j];
+		blurred = blurred && element->glass.blur * target->scale >= 1;
 		struct wlr_box box = element->box;
 		target_box_to_buffer(target, &box);
 		int grow = gl_glass_reach((float)element->glass.blur * target->scale,
@@ -103,7 +105,7 @@ void pass_glass_group(struct flame_pass *pass, const struct flame_render_target 
 		x2 = box.x + box.width + grow > x2 ? box.x + box.width + grow : x2;
 		y2 = box.y + box.height + grow > y2 ? box.y + box.height + grow : y2;
 	}
-	gl_pass_backdrop(&pass->gl, (struct wlr_box){x1, y1, x2 - x1, y2 - y1});
+	gl_pass_backdrop(&pass->gl, (struct wlr_box){x1, y1, x2 - x1, y2 - y1}, blurred);
 }
 
 void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,

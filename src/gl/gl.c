@@ -1,5 +1,6 @@
 #include "gl/gl.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
@@ -10,6 +11,7 @@
 #define FLAME_GL_DEFINE(type, name) type fgl##name;
 FLAME_GL_PROCS(FLAME_GL_DEFINE)
 #undef FLAME_GL_DEFINE
+PFNGLBLITFRAMEBUFFERNVPROC fglBlitFramebuffer;
 
 #define FLAME_EGL_DEFINE(type, name) type f##name;
 FLAME_EGL_PROCS(FLAME_EGL_DEFINE)
@@ -350,6 +352,15 @@ bool gl_init(struct flame_gl *gl, struct wlr_renderer *renderer) {
 	gl->fences = load_fences(gl->display);
 	const char *exts = (const char *)fglGetString(GL_EXTENSIONS);
 	gl->external = exts && strstr(exts, "GL_OES_EGL_image_external");
+	// the blit: core in GLES 3, else nvidia's extension of the same call
+	const char *version = (const char *)fglGetString(GL_VERSION);
+	if (version && strstr(version, "OpenGL ES 3")) {
+		fglBlitFramebuffer = (PFNGLBLITFRAMEBUFFERNVPROC)eglGetProcAddress("glBlitFramebuffer");
+	} else if (exts && strstr(exts, "GL_NV_framebuffer_blit")) {
+		fglBlitFramebuffer = (PFNGLBLITFRAMEBUFFERNVPROC)eglGetProcAddress(
+			"glBlitFramebufferNV");
+	}
+	gl->blit = fglBlitFramebuffer != NULL && !getenv("FLAME_GLASS_FULL_COPY");
 	if (!link_program(&gl->quad, quad_src) || !link_program(&gl->tex_rgba, tex_rgba_src)
 			|| !link_program(&gl->tex_rgbx, tex_rgbx_src)
 			|| (gl->external && !link_program(&gl->tex_ext, tex_ext_src))
