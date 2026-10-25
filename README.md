@@ -20,7 +20,7 @@ just the window manager, barebones:
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
 ```
 
-to update flame to the newest version later, run `flame-update`.
+to update flame to the newest version, run `flame-update`.
 
 ## features
 
