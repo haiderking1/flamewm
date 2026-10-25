@@ -27,12 +27,12 @@ flame.lockscreen {
 }
 
 -- the keyboard: layouts, and how fast a held key repeats
-flame.keyboard {
-	-- layout = "us,ara",
-	-- options = "grp:alt_shift_toggle",
-	repeat_rate = 30, -- keys a second
-	repeat_delay = 250, -- ms
-}
+-- flame.keyboard {
+-- 	layout = "us,ara",
+-- 	options = "grp:alt_shift_toggle",
+-- 	repeat_rate = 30, -- keys a second
+-- 	repeat_delay = 250, -- ms
+-- }
 
 -- the mouse: focus follows it, a held key to move and resize windows with,
 -- the cursor
