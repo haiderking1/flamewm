@@ -1568,6 +1568,19 @@ chmod 777 store/\$first
 greet strangers
 cat seen.txt" \
 	"none dark" "sharp red" "blurred mixed" "strangers dark"
+# sdl3, the library itself: the mouse moves 20 times by 10 across, 5 down
+for driver in x11 wayland; do
+case_run "a game on sdl3 ($driver) gets its mouse look: relative mode, every move there" "
+$BIN/sdlmouse $driver 4 > out.txt 2>&1 &
+sleep 1.5
+# over the game, as a player's mouse is (it floats in the middle): on
+# wayland the pointer's locked only over the window that wants it
+$CTL pointer move 640 360 > /dev/null
+sleep 0.5
+for i in \$(seq 20); do $CTL pointer nudge 10 5 > /dev/null; sleep 0.03; done
+wait
+cat out.txt" "relative mode: on" "moved: yes, 200 across 100 down"
+done
 case_run "media keys: to whoever takes them, volume again and again while it's held, play once" "
 cat > keys.py <<'PY'
 import json, os, socket, subprocess, sys, time
