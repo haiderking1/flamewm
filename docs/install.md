@@ -15,7 +15,8 @@ curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/insta
 ```
 
 it builds real packages (`flamewm-git`, `flame-apps-git`) and installs them
-with pacman, and it installs itself too. after that, for the newest flame:
+with pacman, and installs `flame-update` too. to update flame to the newest
+version later:
 
 ```sh
 flame-update

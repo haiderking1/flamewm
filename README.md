@@ -20,7 +20,7 @@ just flame, bring your own bar and locker:
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
 ```
 
-later, `flame-update` gets you the newest.
+to update flame to the newest version later, run `flame-update`.
 
 ## features
 
