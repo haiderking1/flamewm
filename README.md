@@ -40,8 +40,6 @@ to update flame to the newest version later, run `flame-update`.
 ## special thanks
 
 - wlroots - for doing the basic boring stuff
-- greetd - for handling the login part
-- foot - for being the terminal every test runs in
 
 ## license
 
