@@ -4,14 +4,13 @@
 -- reloads right away. a mistake only shows in the log, flame keeps going on
 -- whatever loaded before it
 
--- how it looks: the gaps between windows, their borders, and the color
--- behind everything
+-- how it looks: the gaps between windows, their borders, and how much
+-- windows without focus fade
 flame.look {
 	gap = 6,
 	border_width = 2,
 	border_color = "#2a2a2a",
 	border_focused_color = "#ff6a00",
-	background = "#111111",
 	unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
 }
 
