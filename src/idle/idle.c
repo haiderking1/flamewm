@@ -12,7 +12,6 @@
 
 #define RECHECK_MS 1000 // how often inhibitors are looked at while there are any
 #define SETTLE_MS 100 // after a change: once the frame showing it is out
-#define RECENT_FRAMES 8 // a surface in one of the last few frames is on screen
 
 struct idle_inhibitor {
 	struct wl_list link; // flame_idle.inhibitors
@@ -21,12 +20,13 @@ struct idle_inhibitor {
 	struct wl_listener destroy;
 };
 
-// on screen: in one of the last frames flame drew. one on a workspace that
-// isn't showing, or minimized under a fullscreen one, keeps nothing on
+// on screen: in the last frame flame drew. one on a workspace that isn't
+// showing, or minimized under a fullscreen one, keeps nothing on. a still
+// screen draws no new frames: one that went to a hidden workspace isn't in
+// the last one, however long ago that was
 static bool on_screen(struct flame_idle *idle, struct wlr_surface *surface) {
 	struct flame_surface_state *state = scene_surface_state(surface);
-	uint64_t seq = idle->server->render.scene.frame_seq;
-	return surface->mapped && state && state->drawn_seq && seq - state->drawn_seq < RECENT_FRAMES;
+	return surface->mapped && state && scene_surface_drawn(state);
 }
 
 static void update(struct flame_idle *idle, int next_ms) {
