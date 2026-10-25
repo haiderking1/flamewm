@@ -87,6 +87,8 @@ const char *schedule_policy_name(enum schedule_policy policy);
 
 void schedule_init(struct schedule *schedule, enum schedule_policy policy, int64_t period);
 // a new mode, the grid starts over
+// another policy from now on, what was learnt stays
+void schedule_set_policy(struct schedule *schedule, enum schedule_policy policy);
 void schedule_set_period(struct schedule *schedule, int64_t period);
 
 void schedule_request_redraw(struct schedule *schedule);

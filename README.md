@@ -140,9 +140,13 @@ for waybar the built in workspace module just works:
 
 ## debugging frames
 
-`FLAME_FRAME_TIMING=1` logs a timing line per output every 2 seconds:
-flips, scanout, tearing, vrr, the game's pace and its hitches.
-`grep frame-timing /tmp/flamewm.log`
+`FLAME_FRAME_TIMING=1` (or `flamectl frame-timing on` live) logs a timing
+line per output every 2 seconds: flips, scanout, tearing, vrr, the game's
+pace and its hitches. `grep frame-timing $XDG_RUNTIME_DIR/flamewm.log`
+
+every workspace switch logs how its frames went (`grep workspace` in the
+same log). `flamectl frame-pipeline adaptive|immediate|deadline` changes
+when frames start drawing, live, to compare.
 
 ## license
 

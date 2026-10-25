@@ -30,6 +30,8 @@ const char *schedule_policy_name(enum schedule_policy policy) {
 	return names[policy];
 }
 
+static void update_overlap(struct schedule *schedule);
+
 static void reset_budget(struct schedule *schedule) {
 	schedule->cpu = START_ESTIMATE_NS;
 	schedule->gpu = START_ESTIMATE_NS;
@@ -46,6 +48,11 @@ void schedule_init(struct schedule *schedule, enum schedule_policy policy, int64
 	schedule->redraw = true;
 	schedule_set_period(schedule, period);
 	reset_budget(schedule);
+}
+
+void schedule_set_policy(struct schedule *schedule, enum schedule_policy policy) {
+	schedule->policy = policy;
+	update_overlap(schedule);
 }
 
 void schedule_set_period(struct schedule *schedule, int64_t period) {

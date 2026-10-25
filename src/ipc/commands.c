@@ -248,6 +248,25 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 		reply_ok(client);
 		return;
 	}
+	if (!strcmp(name, "frame-pipeline")) {
+		// frame-pipeline adaptive|immediate|deadline: when every screen
+		// starts drawing a frame, live (FLAME_FRAME_PIPELINE from the start)
+		const char *how = strtok_r(NULL, " \t\r", &save);
+		struct flame_server *server = client->ipc->server;
+		enum schedule_policy policy;
+		if (!how || !schedule_policy_parse(how, &policy)) {
+			reply_error(client, "frame-pipeline adaptive|immediate|deadline");
+			return;
+		}
+		server->render.pipeline = policy; // screens that come later too
+		struct flame_output *output;
+		wl_list_for_each(output, &server->outputs.list, link) {
+			schedule_set_policy(&output->frames.schedule, policy);
+		}
+		wlr_log(WLR_INFO, "frame pipeline: %s", schedule_policy_name(policy));
+		reply_ok(client);
+		return;
+	}
 	if (!strcmp(name, "key")) {
 		const char *key = strtok_r(NULL, " \t\r", &save);
 		const char *how = strtok_r(NULL, " \t\r", &save);

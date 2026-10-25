@@ -735,6 +735,14 @@ import re, sys
 drawn = [float(re.search(r'was (\d+)k', l).group(1)) for l in sys.stdin]
 print('slides', len(drawn), 'pixels drawn per frame', 'about the screen' if drawn and max(drawn) <= 1014 else 'more: %s' % drawn)
 \"" "slides 4 pixels drawn per frame about the screen"
+case_run "the frame pipeline changes live and a switch says which one it ran with" "
+$CTL frame-pipeline sideways 2>&1 | head -1
+$CTL frame-pipeline immediate > /dev/null && echo switched
+$CTL workspace 2 > /dev/null
+sleep 0.6
+grep -a 'the first frame started' flame.log | tail -1 | grep -o '(immediate pipeline)'
+$CTL frame-pipeline adaptive > /dev/null
+" "frame-pipeline adaptive|immediate|deadline" "switched" "(immediate pipeline)"
 case_run "sharing a window paces to the screen: a still one sends the keepalive, a hidden game a steady stream" "
 foot --title still sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 $BIN/wlgame 14 > game.txt 2>&1 &
