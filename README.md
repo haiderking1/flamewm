@@ -33,9 +33,8 @@ to update flame to the newest version later, run `flame-update`.
 - bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
 - screen sharing with its own portal and picker: point at a window, click, done
 - its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications, a lock screen and a login screen. or bring your own bar and config
-- every setting live: a lua config at `~/.config/flame/flame.lua`, reloaded the moment you save it, or an optional settings app if you want them graphical
+- every setting live: a lua config at `~/.config/flame/flame.lua`, reloaded the moment you save it, or an optional settings app (`super+,`) if you want them graphical
 - ext-workspace for waybar
-- explicit sync, and windows on hidden workspaces told to stop drawing
 - frame logs that show where a slow frame's time went
 - and more...
 
