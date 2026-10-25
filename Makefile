@@ -53,7 +53,11 @@ FLAME_LIBS   = $(PKG_LIBS) $(LDLIBS)
 SRCS := $(shell find src -name '*.c' | sort)
 OBJS := $(SRCS:src/%.c=$(BUILD)/obj/%.o)
 
-all: $(TARGET) $(CTL) $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK) $(GREET)
+all: core apps
+
+# flame itself, and the apps that come with it (none of them needed)
+core: $(TARGET) $(CTL)
+apps: $(SETTINGS) $(FILES) $(PLAY) $(BAR) $(SEARCH) $(LOCK) $(GREET)
 
 $(TARGET): $(OBJS) $(OWN_PROTO_OBJS)
 	$(CC) $(SAN) $(LDFLAGS) -o $@ $^ $(FLAME_LIBS)
@@ -526,8 +530,10 @@ asan:
 		OPT="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
 		SAN="-fsanitize=address,undefined"
 
+# GOALS: what of it, everything unless said (core, apps)
 release:
-	@$(MAKE) --no-print-directory BUILD=build-release OPT="-O2 -flto -DNDEBUG" SAN="-flto"
+	@$(MAKE) --no-print-directory BUILD=build-release OPT="-O2 -flto -DNDEBUG" SAN="-flto" \
+		$(GOALS)
 
 # nested inside whatever compositor you're in right now
 run: $(TARGET)
@@ -542,9 +548,22 @@ clangd: $(PROTO_HEADERS)
 # PREFIX is
 PORTALDIR ?= /usr/share/xdg-desktop-portal
 
-install: release
+# everything: flame and its apps. install-core is flame alone (open and save
+# dialogs gtk's), install-apps the apps over it (dialogs flamefiles')
+install: install-core install-apps
+
+install-core:
+	@$(MAKE) --no-print-directory release GOALS=core
 	install -Dm755 build-release/flamewm $(DESTDIR)$(PREFIX)/bin/flamewm
 	install -Dm755 build-release/flamectl $(DESTDIR)$(PREFIX)/bin/flamectl
+	install -Dm644 data/flamewm.desktop $(DESTDIR)$(PREFIX)/share/wayland-sessions/flamewm.desktop
+	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
+	install -Dm644 data/flamewm-portals-core.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
+
+# the dialogs' choice goes in /etc/xdg, read before the core's in PORTALDIR:
+# no file of flame's own replaced, one apps of their own can remove
+install-apps:
+	@$(MAKE) --no-print-directory release GOALS=apps
 	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
 	install -Dm755 build-release/flamefiles $(DESTDIR)$(PREFIX)/bin/flamefiles
 	install -Dm755 build-release/flameplay $(DESTDIR)$(PREFIX)/bin/flameplay
@@ -555,19 +574,18 @@ install: release
 	install -Dm755 build-release/flamegreet $(DESTDIR)$(PREFIX)/bin/flamegreet
 	# everyone's login screen look, a folder each made as themselves (like /tmp)
 	install -dm1777 $(DESTDIR)/var/lib/flamegreet
-	install -Dm644 data/flamewm.desktop $(DESTDIR)$(PREFIX)/share/wayland-sessions/flamewm.desktop
 	install -Dm644 data/flamesettings.desktop \
 		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop
 	install -Dm644 data/flameplay.desktop $(DESTDIR)$(PREFIX)/share/applications/flameplay.desktop
 	install -Dm644 data/flamewm-mimeapps.list \
 		$(DESTDIR)$(PREFIX)/share/applications/flamewm-mimeapps.list
-	install -Dm644 data/flamewm.portal $(DESTDIR)$(PORTALDIR)/portals/flamewm.portal
-	install -Dm644 data/flamewm-portals.conf $(DESTDIR)$(PORTALDIR)/flamewm-portals.conf
+	install -Dm644 data/flamewm-portals.conf \
+		$(DESTDIR)/etc/xdg/xdg-desktop-portal/flamewm-portals.conf
 
 clean:
 	rm -rf build build-asan build-release
 
-.PHONY: all asan release run clangd install clean test e2e
+.PHONY: all core apps asan release run clangd install install-core install-apps clean test e2e
 
 -include $(OBJS:.o=.d)
