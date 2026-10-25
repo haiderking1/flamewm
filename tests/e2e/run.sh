@@ -36,7 +36,7 @@ wait_below() {
 # the case in dir $1, named $2, flame's args $3, what flame runs inside $4
 # (CASE_WRAP: dbus-run-session for a bus of its own), the case's env $5. its
 # flame has its own settings, config and login screen looks (never the
-# user's init.lua: what that starts would be in every case). its result
+# user's flame.lua: what that starts would be in every case). its result
 # printed in one go, a block the others running don't tear up
 run_case() {
 	dir=$1
@@ -73,6 +73,10 @@ case_run() {
 	n=$((n + 1))
 	dir="$WORK/case.$n"
 	mkdir "$dir"
+	# a config of its own, empty: flame on its defaults, not writing a first
+	# one (with the bar in it) for every case
+	mkdir -p "$dir/config/flame"
+	echo "-- e2e" > "$dir/config/flame/flame.lua"
 	# $WORK's files as they are now, paths into it pointing at the copies.
 	# big ones just linked, nothing points into them
 	for f in "$WORK"/*; do
@@ -765,21 +769,35 @@ sleep 0.5
 [ -e locked ] || echo nothing ran
 $CTL settings | python3 -I -c \"import json, sys; print('lock is', repr(json.load(sys.stdin)['values']['lock']))\"
 " "ran it" "nothing ran" "lock is ''"
-case_run "init.lua saved: flame reloads by itself, once, and not for a save that changes nothing" "
+case_run "flame.lua saved: flame reloads by itself, once, and not for a save that changes nothing" "
 mkdir -p \$XDG_CONFIG_HOME/flame
 # the way an editor saves: a new file renamed over the old one
-echo 'flame.set{ gap = 17 }' > \$XDG_CONFIG_HOME/flame/init.lua.tmp
-mv \$XDG_CONFIG_HOME/flame/init.lua.tmp \$XDG_CONFIG_HOME/flame/init.lua
+echo 'flame.set{ gap = 17 }' > \$XDG_CONFIG_HOME/flame/flame.lua.tmp
+mv \$XDG_CONFIG_HOME/flame/flame.lua.tmp \$XDG_CONFIG_HOME/flame/flame.lua
 sleep 0.6
 $CTL settings | python3 -I -c \"import json, sys; print('gap', json.load(sys.stdin)['values']['gap'])\"
 n=\$(grep -ac 'config: reloaded' flame.log)
-touch \$XDG_CONFIG_HOME/flame/init.lua
+touch \$XDG_CONFIG_HOME/flame/flame.lua
 sleep 0.6
 [ \$(grep -ac 'config: reloaded' flame.log) = \$n ] && echo touched, not reloaded
 $CTL set border_width 5 > /dev/null
 sleep 0.6
 echo reloads for a set: \$(( \$(grep -ac 'config: reloaded' flame.log) - n ))
 " "gap 17" "touched, not reloaded" "reloads for a set: 1"
+case_run "the first start writes flame.lua (the bar in it when flamebar's there), an old init.lua moves to flame.lua" "
+fresh() {
+	mkdir -p \$1
+	XDG_CONFIG_HOME=\$PWD/\$1 FLAME_SETTINGS=\$PWD/\$1/settings.lua WLR_BACKENDS=headless \\
+		timeout 3 $FLAME > \$1.log 2>&1
+}
+fresh new
+grep -c 'flame.autostart(\\\"flamebar\\\")' new/flame/flame.lua | sed 's/^/bar lines: /'
+mkdir -p old/flame
+echo 'flame.set{ gap = 19 }' > old/flame/init.lua
+fresh old
+[ -e old/flame/init.lua ] || echo init.lua gone
+cat old/flame/flame.lua
+" "bar lines: 1" "init.lua gone" "flame.set{ gap = 19 }"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched
@@ -1014,14 +1032,14 @@ $CTL state | grep -o '\"floating\":[a-z]*,\"x\":[0-9]*,\"y\":[0-9]*,\"width\":[0
 	'"floating":true' "moved by 60,40 size 0,0" "resized by 50,30 moved 0,0" \
 	'"floating":false,"x":6,"y":6,"width":1268'
 
-cat > "$WORK/init.lua" <<LUA
+cat > "$WORK/flame.lua" <<LUA
 flame.set { gap = 20, border_width = 4, border_focused_color = "#00ff00" }
 flame.bind("super", "t", function() flame.workspace(3) end)
 flame.rule({ title = "^target\$" }, { floating = true })
 flame.autostart("echo autostarted > $WORK/auto.txt")
 LUA
-CASE_ARGS="-c $WORK/init.lua"
-case_run "config: init.lua sets things, binds keys, floats by rule, autostarts, reloads" "
+CASE_ARGS="-c $WORK/flame.lua"
+case_run "config: flame.lua sets things, binds keys, floats by rule, autostarts, reloads" "
 $BIN/xdnd source x 10 > /dev/null 2>&1 &
 sleep 0.5
 $BIN/xdnd target 10 > /dev/null 2>&1 &
@@ -1034,15 +1052,15 @@ $CTL key super press > /dev/null; $CTL key t press > /dev/null
 $CTL key t release > /dev/null; $CTL key super release > /dev/null
 $CTL state | grep -o '\"workspace\":[0-9]*' | head -1
 $CTL workspace 1 > /dev/null
-sed -i 's/gap = 20/gap = 50/' init.lua
+sed -i 's/gap = 20/gap = 50/' flame.lua
 $CTL reload > /dev/null
 sleep 0.3
 $CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" \
 	autostarted '"floating":true' '"floating":false,"x":20,"y":20' '"workspace":3' \
 	'"floating":false,"x":50'
 
-printf 'flame.set { gap = 9 }\nthis is not lua\n' > "$WORK/init.lua"
-case_run "config: a broken init.lua still gets a working flame" "
+printf 'flame.set { gap = 9 }\nthis is not lua\n' > "$WORK/flame.lua"
+case_run "config: a broken flame.lua still gets a working flame" "
 $BIN/xdnd target 6 > /dev/null 2>&1 &
 sleep 0.8
 $CTL state | grep -o '\"floating\":false,\"x\":[0-9]*'" '"floating":false,"x":6'
@@ -1153,7 +1171,9 @@ grim -t ppm c.ppm; $CENTER c.ppm none" '{"ok":true}' "png red" "jpeg red" \
 # XDG_DATA_HOME, thumbnails in XDG_CACHE_HOME: never the user's. their
 # temporary files in a TMPDIR of their own: the cases' files (under /tmp)
 # aren't temporary to them
-mkdir -p "$WORK/apps/tmp"
+mkdir -p "$WORK/apps/tmp" "$WORK/apps/config/flame"
+# flame's config there too, empty: no first one with the bar in it
+echo "-- e2e" > "$WORK/apps/config/flame/flame.lua"
 CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache XDG_STATE_HOME=$WORK/apps/state TMPDIR=$WORK/apps/tmp"
 case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
 mkdir walls
@@ -1851,7 +1871,7 @@ echo still \$(cat \$XDG_STATE_HOME/flame/flameplay-volume)
 play over" \
 	"first red" "loud 0.900 1.000" "again blue" "kept 1" "still 0.900 1.000" "over red"
 CASE_ENV=
-case_run "settings: changed live into settings.lua, init.lua's win, unset goes back, bad values refused" "
+case_run "settings: changed live into settings.lua, flame.lua's win, unset goes back, bad values refused" "
 $CTL set border_width 5 > /dev/null
 $CTL set keyboard.layout us,ara > /dev/null
 $CTL set output.HEADLESS-1.scale 1.5 > /dev/null
@@ -1871,7 +1891,7 @@ $CTL unset border_width > /dev/null
 sleep 0.3
 $CTL settings | python3 -I -c \"import json, sys; print('unset', json.load(sys.stdin)['values']['border_width'])\"" \
 	"border 5 layout us,ara gap 4" "pinned ['gap'] scale 1.5" "unset 2" \
-	'pinned: {"ok":false,"error":"init.lua sets it, it wins"}' \
+	'pinned: {"ok":false,"error":"flame.lua sets it, it wins"}' \
 	'too big: {"ok":false,"error":"not a whole number in range"}' \
 	'no such: {"ok":false,"error":"no such setting"}'
 CASE_ARGS=

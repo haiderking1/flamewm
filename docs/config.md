@@ -5,8 +5,9 @@ and so does `flamectl set gap 8` (`flamectl settings` lists them all). they
 end up in `~/.config/flame/settings.lua`. the wallpaper too, flame draws it
 itself: pick one in settings or `flamectl set wallpaper ~/walls/x.jpg`.
 
-for more, there's lua at `~/.config/flame/init.lua` (see
-[examples/init.lua](../examples/init.lua)). what you set there wins over
+for more, there's lua at `~/.config/flame/flame.lua` (flame writes a first one the
+first time it starts) (see
+[examples/flame.lua](../examples/flame.lua)). what you set there wins over
 settings.lua. save it and flame reloads it right away (`super+shift+r`
 does too).
 

@@ -374,7 +374,7 @@ static bool rewrite(const char *key, const char *line, const char **error) {
 		free(text);
 		fclose(in);
 	} else {
-		strbuf_printf(&out, "-- what flamesettings (or flamectl set) changed. init.lua next to it\n"
+		strbuf_printf(&out, "-- what flamesettings (or flamectl set) changed. flame.lua next to it\n"
 			"-- wins over anything here\n");
 	}
 	if (line && !done) {
@@ -411,7 +411,7 @@ bool settings_set(struct flame_server *server, const char *key, const char *valu
 		return false;
 	}
 	if (pinned(server->config, key)) {
-		*error = "init.lua sets it, it wins";
+		*error = "flame.lua sets it, it wins";
 		return false;
 	}
 	struct strbuf lit, line;

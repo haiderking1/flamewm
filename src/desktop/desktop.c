@@ -171,7 +171,7 @@ void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
 	view->mapped_at = now_ns();
 	drag_tree_changed(&desktop->server->input.drag);
-	// the user's rules for it (init.lua): float or not, which workspace,
+	// the user's rules for it (flame.lua): float or not, which workspace,
 	// fullscreen
 	struct flame_window_rule rule;
 	config_window_rules(desktop->server->config, view_app_id(view), view_title(view), &rule);

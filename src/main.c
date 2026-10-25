@@ -4,6 +4,7 @@
 #include <wlr/util/log.h>
 
 #include "config/config.h"
+#include "config/starter.h"
 #include "core/console.h"
 #include "core/priority.h"
 #include "core/server.h"
@@ -11,7 +12,7 @@
 static void usage(FILE *out, const char *name) {
 	fprintf(out,
 		"usage: %s [-c config] [-s command] [-g greeter] [-d] [-v]\n"
-		"  -c config   the lua config, instead of ~/.config/flame/init.lua\n"
+		"  -c config   the lua config, instead of ~/.config/flame/flame.lua\n"
 		"  -s command  run command once the compositor is up\n"
 		"  -g greeter  the login screen: just greeter (flamegreet under greetd),\n"
 		"              flame quits once it does\n"
@@ -65,6 +66,11 @@ int main(int argc, char *argv[]) {
 	// unwinding a half built server would
 	struct flame_server server = {0};
 	char *error = NULL;
+	// someone's own session, on the usual config: theirs made if it isn't
+	// there. the login screen's isn't anyone's
+	if (!config_path && !greeter_cmd) {
+		config_first_start();
+	}
 	struct flame_config *config = config_load(&server, config_path, &error);
 	if (!config) {
 		return 1;

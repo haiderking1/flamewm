@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <wayland-server-core.h>
 
-// init.lua and settings.lua watched: saved with something new in them, flame
+// flame.lua and settings.lua watched: saved with something new in them, flame
 // reloads by itself. their folders are what's watched, not the files: an
 // editor saves by writing a new file and renaming it over the old one
 

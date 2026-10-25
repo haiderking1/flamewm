@@ -75,7 +75,7 @@ bool server_start(struct flame_server *server, const char *startup_cmd,
 void server_run(struct flame_server *server);
 void server_terminate(struct flame_server *server);
 void server_finish(struct flame_server *server);
-// init.lua again, soon: not from inside the lua that asked for it
+// flame.lua again, soon: not from inside the lua that asked for it
 void server_reload_config(struct flame_server *server);
 
 #endif

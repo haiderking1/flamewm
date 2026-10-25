@@ -1252,7 +1252,7 @@ static void render(struct flame_frame *frame, int64_t now) {
 		changed = true; // nothing to send again yet
 		cursor_only = false;
 	}
-	// vrr: the display waits for frames where it can and init.lua wants it.
+	// vrr: the display waits for frames where it can and flame.lua wants it.
 	// the switch rides on a frame, a still screen gets one for it
 	const struct flame_config *config = frame->render->server->config;
 	bool fullscreen = frame->hooks.fullscreen && frame->hooks.fullscreen(frame->hooks.data);

@@ -1,4 +1,4 @@
--- flame's config. copy it to ~/.config/flame/init.lua and change what you
+-- flame's config. copy it to ~/.config/flame/flame.lua and change what you
 -- like: everything here is what flame does without one. super+shift+r (or
 -- `flamectl reload`) loads it again, a mistake only shows in the log and
 -- flame keeps going on whatever loaded before it

@@ -66,6 +66,28 @@ static void path_near_flame(void) {
 	setenv("PATH", joined, 1);
 }
 
+bool spawn_findable(const char *name) {
+	char path[PATH_MAX];
+	if (flame_dir(path, sizeof(path)) && strlen(path) + 2 + strlen(name) <= sizeof(path)) {
+		strcat(path, "/");
+		strcat(path, name);
+		if (access(path, X_OK) == 0) {
+			return true;
+		}
+	}
+	const char *dirs = getenv("PATH");
+	for (const char *at = dirs; at && *at;) {
+		const char *end = strchr(at, ':');
+		int n = end ? (int)(end - at) : (int)strlen(at);
+		snprintf(path, sizeof(path), "%.*s/%s", n, at, name);
+		if (n > 0 && access(path, X_OK) == 0) {
+			return true;
+		}
+		at = end ? end + 1 : at + n;
+	}
+	return false;
+}
+
 void spawn(const char *const argv[]) {
 	pid_t pid = fork();
 	if (pid < 0) {

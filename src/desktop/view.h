@@ -110,7 +110,7 @@ struct flame_view {
 	bool placed_by_hand;
 	// shrinking back from fullscreen: still over the bars till it's in place
 	bool leaving_fullscreen;
-	// what init.lua's rules said when it opened, and its animations
+	// what flame.lua's rules said when it opened, and its animations
 	struct flame_window_rule rule;
 	struct flame_view_anim *anim;
 

@@ -74,7 +74,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	free(output);
 }
 
-// the scale init.lua asks for, 1 when it says nothing
+// the scale flame.lua asks for, 1 when it says nothing
 static float configured_scale(const struct flame_config *config, const char *name) {
 	const struct flame_output_config *oc = config_output(config, name);
 	return oc && oc->scale > 0 ? oc->scale : 1;

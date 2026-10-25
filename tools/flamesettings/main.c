@@ -1,7 +1,7 @@
 // flamesettings: flame's settings, on flame's glass. what it shows comes
 // from `flamectl settings` (flame's ipc), a change goes back as `set KEY
 // VALUE` and flame applies it live and keeps it in settings.lua. what
-// init.lua sets shows locked: init.lua wins
+// flame.lua sets shows locked: flame.lua wins
 
 #include <ctype.h>
 #include <pwd.h>
@@ -242,9 +242,9 @@ static double row(struct page *p, const char *label, const char *detail, bool lo
 	}
 	if (locked) {
 		double x = CONTENT_X + CARD_PAD + lw + 8;
-		double tw = fui_text_width(p->ui, "init.lua", F_SMALL);
+		double tw = fui_text_width(p->ui, "flame.lua", F_SMALL);
 		fui_fill_rounded(p->ui, x, label_y + 1, tw + 12, 16, 8, 0xffffff17);
-		fui_text(p->ui, x + 6, label_y + 2, "init.lua", F_SMALL, TEXT_DIM, FUI_LEFT, 0);
+		fui_text(p->ui, x + 6, label_y + 2, "flame.lua", F_SMALL, TEXT_DIM, FUI_LEFT, 0);
 	}
 	p->y += h;
 	return top;
@@ -590,7 +590,7 @@ static void page_about(struct page *p) {
 		return; // searching: only the rows
 	}
 	fui_paragraph(p->ui, CONTENT_X + 4, p->y, CONTENT_W - 8, "Every change here applies right "
-		"away and is kept in settings.lua. Anything init.lua sets wins and shows locked.",
+		"away and is kept in settings.lua. Anything flame.lua sets wins and shows locked.",
 		F_SMALL, TEXT_FAINT);
 	p->y += 40;
 }
@@ -682,7 +682,7 @@ static void wallpaper_current(struct page *p) {
 		fui_text(ui, tx, top + 42, shown_folder, F_SMALL, TEXT_FAINT, FUI_LEFT, room);
 	}
 	if (locked) {
-		fui_text(ui, tx, top + 62, "init.lua sets it", F_SMALL, TEXT_DIM, FUI_LEFT, room);
+		fui_text(ui, tx, top + 62, "flame.lua sets it", F_SMALL, TEXT_DIM, FUI_LEFT, room);
 	}
 	static const char *const labels[] = {"Fill", "Fit", "Center", "Stretch"};
 	static const char *const modes[] = {"fill", "fit", "center", "stretch"};

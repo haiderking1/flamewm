@@ -69,7 +69,7 @@ remembers who logged in last and into what.
 ## no apps
 
 every app is its own program, flamewm doesn't need any of them. the bar
-only runs because of one line in `~/.config/flame/init.lua`:
+only runs because of one line in `~/.config/flame/flame.lua`:
 
 ```lua
 flame.autostart("flamebar")

@@ -15,7 +15,7 @@
 #include "core/server.h"
 #include "util/spawn.h"
 
-// init.lua: flame's config is lua. it starts from the compiled in defaults
+// flame.lua: flame's config is lua. it starts from the compiled in defaults
 // and changes what it says. the api, all under the global `flame`:
 //   flame.set{ gap = 6, border_width = 2, border_color = "#2a2a2a",
 //     border_focused_color = "#ff6a00", background = "#111111",
@@ -64,12 +64,12 @@ struct flame_lua {
 	// spawn binds' command lines, freed with it
 	char ***argvs;
 	size_t argvs_len, argvs_cap;
-	// init.lua running: what it sets is pinned, settings (flamesettings)
+	// flame.lua running: what it sets is pinned, settings (flamesettings)
 	// can't change it, see config->pinned
 	bool pinning;
 };
 
-// key ("gap", "keyboard.layout", "output.DP-1.scale") pinned by init.lua
+// key ("gap", "keyboard.layout", "output.DP-1.scale") pinned by flame.lua
 static void pin(struct flame_lua *lua, const char *key) {
 	struct flame_config *config = lua->config;
 	if (!lua->pinning) {
@@ -732,7 +732,7 @@ static void config_file(char *path, size_t size, const char *name) {
 
 const char *config_default_path(void) {
 	static char path[512];
-	config_file(path, sizeof(path), "init.lua");
+	config_file(path, sizeof(path), "flame.lua");
 	return path;
 }
 
@@ -837,7 +837,7 @@ struct flame_config *config_load(struct flame_server *server, const char *path, 
 	lua->config = config;
 	config->lua = lua;
 
-	// settings.lua (what flamesettings saves) first, init.lua over it. no
+	// settings.lua (what flamesettings saves) first, flame.lua over it. no
 	// files: the defaults, nothing to complain about
 	path = path ? path : config_default_path();
 	const char *settings = config_settings_path();
@@ -883,7 +883,7 @@ void config_window_rules(const struct flame_config *config, const char *app_id,
 		const char *title, struct flame_window_rule *out) {
 	*out = (struct flame_window_rule){.open = -1, .close = -1};
 	// flame's own settings, file chooser and player float, they can be any
-	// size: init.lua's rules can still say otherwise
+	// size: flame.lua's rules can still say otherwise
 	if (app_id && (!strcmp(app_id, "flamesettings") || !strcmp(app_id, "flamefiles-chooser")
 			|| !strcmp(app_id, "flameplay"))) {
 		out->floating_set = out->floating = true;
@@ -893,7 +893,7 @@ void config_window_rules(const struct flame_config *config, const char *app_id,
 		return;
 	}
 	int top = lua_gettop(L);
-	// init.lua may have done anything to these: nothing unprotected touches
+	// flame.lua may have done anything to these: nothing unprotected touches
 	// a value that isn't what it should be
 	if (lua_getglobal(L, "flame") != LUA_TTABLE
 			|| lua_rawget(L, (lua_pushstring(L, "_rules"), -2)) != LUA_TFUNCTION) {
