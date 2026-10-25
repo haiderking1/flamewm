@@ -1055,6 +1055,26 @@ flat default
 $CTL set blur.noise 0 > /dev/null
 sleep 0.4
 flat off" "default grain" "off flat"
+case_run "glass over just the wallpaper reads it blurred once: a workspace sliding by blurs nothing, a new background blurs again" "
+hue() { grim -t ppm \$1.ppm; python3 -I -c \"
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+i = ((h // 2) * w + w // 2) * 3
+print('\$1', 'reddish' if px[i] > px[i + 2] + 40 else 'bluish' if px[i + 2] > px[i] + 40 else tuple(px[i:i + 3]))
+\"; }
+$CTL set background '#ff0000' > /dev/null
+$CTL workspace 2 > /dev/null
+$BIN/wlglass blur 8 &
+sleep 1.2
+hue red
+$CTL set background '#0000ff' > /dev/null
+sleep 0.5
+hue blue
+for i in 1 2; do $CTL workspace 1 > /dev/null; sleep 0.5; $CTL workspace 2 > /dev/null; sleep 0.5; done
+sleep 0.3
+grep -a 'a drawn frame was' flame.log | tail -2 | grep -o '0.0 blurs of 0.0 passes' | sort -u
+" "red reddish" "blue bluish" "0.0 blurs of 0.0 passes"
 # the color in the middle of a ppm screenshot, by name
 CENTER="python3 -I -c \"
 import sys

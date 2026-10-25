@@ -148,6 +148,8 @@ bool render_init(struct flame_render *render, struct flame_server *server) {
 			wlr_log(WLR_ERROR, "out of memory");
 			return false;
 		}
+		render->layers[i]->under_windows = i == FLAME_LAYER_BACKGROUND
+			|| i == FLAME_LAYER_BOTTOM;
 	}
 	return true;
 }

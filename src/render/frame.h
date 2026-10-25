@@ -112,6 +112,11 @@ struct flame_frame {
 	// output sized buffers for close animations, see render/snapshot.c
 	struct wlr_swapchain *snapshots;
 
+	// the blur of what's under the windows, and what that looked like
+	// (elements_look) when it was made. see from_kept in frame.c
+	struct gl_kept_blur kept;
+	uint64_t kept_look;
+
 	// explicit sync: our drawing finished / KMS let go of a buffer
 	struct wlr_drm_syncobj_timeline *in_timeline, *out_timeline;
 	uint64_t in_point, out_point;

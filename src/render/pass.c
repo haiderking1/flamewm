@@ -95,6 +95,11 @@ void pass_glass_group(struct flame_pass *pass, const struct flame_render_target 
 	if (i > 0 && group_of(list, i - 1) == group) {
 		return; // the same surface's, already kept
 	}
+	if (list->data[i].from_kept) {
+		// its panes read the kept blur of what's under the windows
+		gl_pass_backdrop_end(&pass->gl);
+		return;
+	}
 	// everything its panes read: their boxes and around them, as
 	// gl_pass_glass works it out
 	int x1 = INT32_MAX, y1 = INT32_MAX, x2 = INT32_MIN, y2 = INT32_MIN;
@@ -115,7 +120,8 @@ void pass_glass_group(struct flame_pass *pass, const struct flame_render_target 
 }
 
 void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,
-		struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha) {
+		struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha,
+		const struct gl_kept_blur *kept) {
 	pass_glass(pass, &(struct gl_glass_options){
 		.box = box,
 		.clip = clip,
@@ -127,6 +133,7 @@ void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *s
 		.edge = style->edge,
 		.rim = 1.5f * scale,
 		.alpha = alpha,
+		.kept = kept,
 	});
 }
 

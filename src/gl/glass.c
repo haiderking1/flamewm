@@ -203,33 +203,24 @@ static void blur_step(struct flame_gl *gl, const struct gl_program *program, str
 	gl->stats.blur += gl_draw_box((struct wlr_box){0, 0, to_w, to_h}, NULL, program->pos);
 }
 
-void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options) {
-	struct flame_gl *gl = pass->gl;
-	struct wlr_box box = options->box;
-	if (wlr_box_empty(&box) || options->alpha <= 0) {
-		return;
-	}
-	pixman_region32_t shown;
-	pixman_region32_init_rect(&shown, box.x, box.y, box.width, box.height);
-	if (options->clip) {
-		pixman_region32_intersect(&shown, &shown, options->clip);
-	}
-	bool any = pixman_region32_not_empty(&shown);
-	pixman_region32_fini(&shown);
-	if (!any) {
-		return;
-	}
-
-	// what it reads, cut to the buffer
-	int grow = gl_glass_reach(options->blur, options->refraction);
-	struct wlr_box reach = {box.x - grow, box.y - grow, box.width + 2 * grow,
-		box.height + 2 * grow};
-	struct wlr_box buffer = {0, 0, pass->width, pass->height};
-	if (!wlr_box_intersection(&reach, &reach, &buffer)) {
-		return;
-	}
+// what's behind reach blurred: down and back up to level 1, the last step
+// up is the pane's own. sizes: w[i], h[i] each level's. reach comes out grown
+// to even coords when what's behind comes in at half size. false: no room
+// to blur in, nothing to draw from
+struct blurred {
+	struct wlr_box reach;
+	int passes;
 	float offset;
-	int passes = blur_passes(options->blur, &offset);
+	int w[GL_BLUR_LEVELS], h[GL_BLUR_LEVELS];
+	struct level level; // level 1 (what's behind as it is with no blur)
+	unsigned fbo; // level's framebuffer, 0 for the full size copy's
+};
+
+static bool blur_behind(struct gl_pass *pass, struct wlr_box reach, float blur_px,
+		struct blurred *out) {
+	struct flame_gl *gl = pass->gl;
+	float offset;
+	int passes = blur_passes(blur_px, &offset);
 	struct gl_blur *blur = &gl->blur;
 	// half: what's behind comes in at half size, already level 1 (a blit,
 	// filtered), when it blurs at all and nothing's kept at full size for it
@@ -239,10 +230,10 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	if (half) {
 		reach = even(reach, pass->width, pass->height);
 		if (wlr_box_empty(&reach)) {
-			return;
+			return false;
 		}
 	}
-	int w[GL_BLUR_LEVELS], h[GL_BLUR_LEVELS];
+	int *w = out->w, *h = out->h;
 	w[0] = reach.width;
 	h[0] = reach.height;
 	for (int i = 1; i <= passes; i++) {
@@ -254,12 +245,12 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	for (int i = half ? 2 : 1; i <= passes; i++) {
 		if (!level_ready(blur, i, w[i], h[i])) {
 			fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
-			return;
+			return false;
 		}
 	}
 	if (half && passes > 1 && !level_ready(blur, 1, w[1], h[1])) {
 		fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
-		return;
+		return false;
 	}
 	// what's behind it, the top row of reach as row 0: the backdrop kept, or
 	// as drawn so far copied out. half size: that's level 1 already
@@ -272,7 +263,7 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	} else if (half) {
 		pass->backdrop = (struct wlr_box){0};
 		if (!blit_half(pass, reach)) {
-			return; // next frame copies full size
+			return false; // next frame copies full size
 		}
 	} else {
 		// it reads past what's kept: the copy's about to be another one
@@ -285,11 +276,12 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 			reach.height);
 		gl->stats.copy += (uint64_t)reach.width * (uint64_t)reach.height;
 	}
+	// only now: the copy may have just been made
+	behind.texture = blur->copy;
 	behind.alloc_width = blur->copy_width;
 	behind.alloc_height = blur->copy_height;
 
-	// down from what's behind, back up to level 1: the last step up the pane
-	// does itself as it's drawn, no full size picture written and read again
+	// down from what's behind, back up to level 1
 	fglDisable(GL_BLEND);
 	int first = half ? 1 : 0; // the level behind is
 	if (passes) {
@@ -305,28 +297,41 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 			h[i - 1], offset);
 	}
 	// level 1: written by the way up, or (one level, half size) the copy as is
-	struct level blurred = !passes ? behind
-		: half && passes == 1 ? behind : level_of(blur, 1, w[1], h[1]);
+	bool as_is = !passes || (half && passes == 1);
+	out->level = as_is ? behind : level_of(blur, 1, w[1], h[1]);
+	out->fbo = !as_is ? blur->fbo[1] : half ? blur->copy_fbo : 0;
+	out->reach = reach;
+	out->passes = passes;
+	out->offset = offset;
+	return true;
+}
 
-	// the pane over the buffer again
+// the pane over the buffer, from what's behind it blurred
+static void draw_pane(struct gl_pass *pass, const struct gl_glass_options *options,
+		const struct blurred *b) {
+	struct flame_gl *gl = pass->gl;
+	struct wlr_box box = options->box;
+	struct level blurred = b->level;
+	const int *w = b->w, *h = b->h;
 	fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
 	fglViewport(0, 0, pass->width, pass->height);
 	fglEnable(GL_BLEND);
 	const struct gl_program *program = &gl->glass;
 	fglUseProgram(program->program);
+	fglActiveTexture(GL_TEXTURE0);
 	fglBindTexture(GL_TEXTURE_2D, blurred.texture);
 	fglUniform1i(program->tex, 0);
 	// the buffer pixels the texture's allocation spans: 1:1 for the copy, a
 	// level down as many as its pixels stand for (w[0] / w[1], odd sizes too)
-	float span_x = passes ? (float)blurred.alloc_width * w[0] / w[1] : blurred.alloc_width;
-	float span_y = passes ? (float)blurred.alloc_height * h[0] / h[1] : blurred.alloc_height;
+	float span_x = b->passes ? (float)blurred.alloc_width * w[0] / w[1] : blurred.alloc_width;
+	float span_y = b->passes ? (float)blurred.alloc_height * h[0] / h[1] : blurred.alloc_height;
 	// where the texture starts in the buffer: its used part is reach's
-	float origin_x = reach.x - blurred.x * (span_x / blurred.alloc_width);
-	float origin_y = reach.y - blurred.y * (span_y / blurred.alloc_height);
+	float origin_x = b->reach.x - blurred.x * (span_x / blurred.alloc_width);
+	float origin_y = b->reach.y - blurred.y * (span_y / blurred.alloc_height);
 	fglUniform4f(program->reach, origin_x, origin_y, span_x, span_y);
 	set_bounds(program, blurred);
 	fglUniform2f(program->texel, 1.0f / blurred.alloc_width, 1.0f / blurred.alloc_height);
-	fglUniform1f(program->offset, passes ? offset : 0.0f);
+	fglUniform1f(program->offset, b->passes ? b->offset : 0.0f);
 	fglUniform4f(program->box, box.x, box.y, box.width, box.height);
 	fglUniform1f(program->radius, options->radius);
 	fglUniform4f(program->tint, options->tint[0], options->tint[1], options->tint[2],
@@ -343,6 +348,118 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 		(struct wlr_fbox){box.x, box.y, box.width, box.height});
 	gl->stats.glass += gl_draw_box(box, options->clip, program->pos);
 	fglBindTexture(GL_TEXTURE_2D, 0);
+}
+
+bool gl_kept_blur_fits(const struct gl_kept_blur *kept, const struct gl_pass *pass,
+		float blur) {
+	return kept->ready && kept->buffer_width == pass->width
+		&& kept->buffer_height == pass->height && kept->blur == blur;
+}
+
+void gl_pass_keep_blur(struct gl_pass *pass, struct gl_kept_blur *kept, float blur) {
+	kept->ready = false;
+	float offset;
+	if (!blur_passes(blur, &offset)) {
+		return;
+	}
+	// the whole buffer as drawn so far, nothing kept in the way
+	gl_pass_backdrop_end(pass);
+	struct blurred b;
+	if (!blur_behind(pass, (struct wlr_box){0, 0, pass->width, pass->height}, blur, &b)) {
+		fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
+		fglViewport(0, 0, pass->width, pass->height);
+		fglEnable(GL_BLEND);
+		return;
+	}
+	// level 1 copied out of the blur's own, which the next glass reuses
+	int w = b.w[1], h = b.h[1];
+	if (!kept->texture || kept->width < w || kept->height < h) {
+		if (!kept->texture) {
+			fglGenTextures(1, &kept->texture);
+		}
+		kept->width = w;
+		kept->height = h;
+		fglBindTexture(GL_TEXTURE_2D, kept->texture);
+		fglTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+		texture_params();
+	}
+	fglBindFramebuffer(GL_FRAMEBUFFER, b.fbo);
+	fglActiveTexture(GL_TEXTURE0);
+	fglBindTexture(GL_TEXTURE_2D, kept->texture);
+	fglCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, b.level.x, b.level.y, w, h);
+	fglBindTexture(GL_TEXTURE_2D, 0);
+	pass->gl->stats.copy += (uint64_t)w * (uint64_t)h;
+	fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
+	fglViewport(0, 0, pass->width, pass->height);
+	fglEnable(GL_BLEND);
+
+	kept->reach = b.reach;
+	kept->passes = b.passes;
+	kept->offset = b.offset;
+	for (int i = 0; i < GL_BLUR_LEVELS; i++) {
+		kept->w[i] = b.w[i];
+		kept->h[i] = b.h[i];
+	}
+	kept->buffer_width = pass->width;
+	kept->buffer_height = pass->height;
+	kept->blur = blur;
+	kept->ready = true;
+}
+
+void gl_kept_blur_finish(struct flame_gl *gl, struct gl_kept_blur *kept) {
+	if (kept->texture && gl->usable) {
+		gl_make_current(gl);
+		fglDeleteTextures(1, &kept->texture);
+	}
+	*kept = (struct gl_kept_blur){0};
+}
+
+void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options) {
+	struct wlr_box box = options->box;
+	if (wlr_box_empty(&box) || options->alpha <= 0) {
+		return;
+	}
+	pixman_region32_t shown;
+	pixman_region32_init_rect(&shown, box.x, box.y, box.width, box.height);
+	if (options->clip) {
+		pixman_region32_intersect(&shown, &shown, options->clip);
+	}
+	bool any = pixman_region32_not_empty(&shown);
+	pixman_region32_fini(&shown);
+	if (!any) {
+		return;
+	}
+
+	const struct gl_kept_blur *kept = options->kept;
+	if (kept && gl_kept_blur_fits(kept, pass, options->blur)) {
+		// what's behind it blurred once and kept: nothing copied, nothing blurred
+		struct blurred b = {
+			.reach = kept->reach,
+			.passes = kept->passes,
+			.offset = kept->offset,
+			.level = {kept->texture, 0, 0, kept->w[1], kept->h[1], kept->width, kept->height},
+		};
+		for (int i = 0; i < GL_BLUR_LEVELS; i++) {
+			b.w[i] = kept->w[i];
+			b.h[i] = kept->h[i];
+		}
+		draw_pane(pass, options, &b);
+		return;
+	}
+
+	// what it reads, cut to the buffer
+	int grow = gl_glass_reach(options->blur, options->refraction);
+	struct wlr_box reach = {box.x - grow, box.y - grow, box.width + 2 * grow,
+		box.height + 2 * grow};
+	struct wlr_box buffer = {0, 0, pass->width, pass->height};
+	if (!wlr_box_intersection(&reach, &reach, &buffer)) {
+		return;
+	}
+	struct blurred b;
+	if (!blur_behind(pass, reach, options->blur, &b)) {
+		return;
+	}
+	draw_pane(pass, options, &b);
 }
 
 void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area, bool blurred) {

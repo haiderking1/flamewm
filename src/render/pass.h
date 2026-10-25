@@ -39,8 +39,10 @@ void pass_glass_group(struct flame_pass *pass, const struct flame_render_target 
 	const struct flame_element_list *list, size_t i);
 // a scene glass's look at an output's scale, faded to alpha
 struct flame_glass_style;
+// kept: the blur it reads instead of what's drawn when it fits, NULL for none
 void pass_glass_style(struct flame_pass *pass, const struct flame_glass_style *style,
-	struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha);
+	struct wlr_box box, const pixman_region32_t *clip, float scale, float alpha,
+	const struct gl_kept_blur *kept);
 bool pass_submit(struct flame_pass *pass);
 
 #endif

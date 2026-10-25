@@ -73,6 +73,24 @@ struct flame_gl {
 bool gl_init(struct flame_gl *gl, struct wlr_renderer *renderer);
 void gl_finish(struct flame_gl *gl);
 
+// a whole buffer blurred, kept between frames: glass with only what doesn't
+// change behind it reads this instead of copying and blurring what's drawn
+// every frame. level 1 of the blur, the last step up is the pane's. the
+// caller's, one a screen
+struct gl_kept_blur {
+	unsigned texture;
+	int width, height; // allocated
+	bool ready;
+	// what it's the blur of: the buffer's size, the blur (buffer pixels)
+	int buffer_width, buffer_height;
+	float blur;
+	// how it was blurred, the pane's last step up needs it
+	struct wlr_box reach;
+	int passes;
+	float offset;
+	int w[GL_BLUR_LEVELS], h[GL_BLUR_LEVELS];
+};
+
 // one buffer being drawn, on the caller's stack
 struct gl_pass {
 	struct flame_gl *gl;
@@ -128,6 +146,9 @@ struct gl_glass_options {
 	float saturation, edge;
 	float rim; // how wide the lit rim is
 	float alpha; // the whole pane faded, 1 for not at all
+	// read this instead of what's drawn when it fits (gl_kept_blur_fits),
+	// NULL: what's drawn
+	const struct gl_kept_blur *kept;
 };
 
 // glass over what this pass drew so far. it reads box grown by
@@ -142,6 +163,13 @@ int gl_glass_reach(float blur, float refraction);
 // pane over it blurs, it can be kept at half size
 void gl_pass_backdrop(struct gl_pass *pass, struct wlr_box area, bool blurred);
 void gl_pass_backdrop_end(struct gl_pass *pass);
+// everything this pass drew so far, all of the buffer, blurred into kept
+// (not ready after when it couldn't be)
+void gl_pass_keep_blur(struct gl_pass *pass, struct gl_kept_blur *kept, float blur);
+// kept is the blur of a buffer like pass's, by blur
+bool gl_kept_blur_fits(const struct gl_kept_blur *kept, const struct gl_pass *pass,
+	float blur);
+void gl_kept_blur_finish(struct flame_gl *gl, struct gl_kept_blur *kept);
 // false: the gpu can't be trusted with what it drew
 bool gl_pass_submit(struct gl_pass *pass);
 

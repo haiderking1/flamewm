@@ -59,6 +59,9 @@ struct flame_tree {
 	struct wl_list children; // flame_node.link
 	bool has_effect;
 	struct flame_effect effect;
+	// what's in it is under every window (the wallpaper, layers below the
+	// windows): glass with only that behind it reads it blurred once, kept
+	bool under_windows;
 };
 
 struct flame_rect {

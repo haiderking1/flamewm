@@ -258,9 +258,15 @@ static void collect_node(struct collect *collect, struct flame_node *node, int x
 				break; // all faded out, nothing to draw
 			}
 		}
+		size_t from = collect->list->len;
 		struct flame_node *child;
 		wl_list_for_each(child, &tree->children, link) {
 			collect_node(collect, child, x, y);
+		}
+		if (tree->under_windows) {
+			for (size_t k = from; k < collect->list->len; k++) {
+				collect->list->data[k].under_windows = true;
+			}
 		}
 		collect->t = outer;
 		break;

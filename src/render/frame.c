@@ -612,6 +612,7 @@ void frame_finish(struct flame_frame *frame) {
 		wlr_swapchain_destroy(frame->snapshots);
 		frame->snapshots = NULL;
 	}
+	gl_kept_blur_finish(&frame->render->gl, &frame->kept);
 	timing_finish(&frame->timing);
 	gpu_time_finish(&frame->gpu);
 	if (frame->in_timeline) {
@@ -650,13 +651,20 @@ static void sampled(struct flame_frame *frame, struct wlr_surface *surface) {
 	}
 }
 
+// whole: all of it, covered or not (what's under the windows, being blurred
+// to keep)
 static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 		const struct flame_render_target *target, const struct flame_element *element,
-		const pixman_region32_t *repaint) {
+		const pixman_region32_t *repaint, bool whole) {
 	// only the part that shows and changed
 	pixman_region32_t region;
 	pixman_region32_init(&region);
-	pixman_region32_copy(&region, &element->visible);
+	if (whole) {
+		pixman_region32_union_rect(&region, &region, element->clip.x, element->clip.y,
+			(unsigned)element->clip.width, (unsigned)element->clip.height);
+	} else {
+		pixman_region32_copy(&region, &element->visible);
+	}
 	target_region_to_buffer(target, &region, true);
 	pixman_region32_intersect(&region, &region, repaint);
 	if (!pixman_region32_not_empty(&region)) {
@@ -675,7 +683,8 @@ static void draw_element(struct flame_frame *frame, struct flame_pass *pass,
 	target_box_to_buffer(target, &dst);
 
 	if (element->type == FLAME_ELEMENT_GLASS) {
-		pass_glass_style(pass, &element->glass, dst, &region, target->scale, element->alpha);
+		pass_glass_style(pass, &element->glass, dst, &region, target->scale, element->alpha,
+			element->from_kept ? &frame->kept : NULL);
 		pixman_region32_fini(&region);
 		return;
 	}
@@ -773,6 +782,80 @@ static void draw_background(struct flame_pass *pass,
 	pixman_region32_fini(&background);
 }
 
+// ---- the blur of what's under the windows, kept ----
+// glass with nothing behind it but what's under every window (the
+// wallpaper, layers below the windows) reads that blurred once and kept,
+// not what's drawn copied and blurred again every frame: a tiled window's,
+// the bar's. a workspace sliding by blurs nothing. made again when what's
+// under the windows looks different
+
+static size_t under_windows(const struct flame_element_list *list) {
+	size_t n = 0;
+	while (n < list->len && list->data[n].under_windows) {
+		n++;
+	}
+	return n;
+}
+
+static const void *pane_group(const struct flame_element *element) {
+	return element->glass_group ? element->glass_group : element;
+}
+
+// nothing drawn between what's under the windows and the pane shows where it is
+static bool only_under(const struct flame_element_list *list, size_t under, size_t pane) {
+	const struct flame_element *glass = &list->data[pane];
+	pixman_box32_t box = {glass->clip.x, glass->clip.y, glass->clip.x + glass->clip.width,
+		glass->clip.y + glass->clip.height};
+	for (size_t j = under; j < pane; j++) {
+		const struct flame_element *e = &list->data[j];
+		if (e->type == FLAME_ELEMENT_GONE || e->clear
+				|| (e->type == FLAME_ELEMENT_GLASS && pane_group(e) == pane_group(glass))) {
+			continue;
+		}
+		if (pixman_region32_contains_rectangle((pixman_region32_t *)&e->visible, &box)
+				!= PIXMAN_REGION_OUT) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// marks the panes that read the kept blur, a surface's all or none. the
+// blur it's kept at (buffer pixels): the first such pane's, 0 for none
+static float mark_from_kept(struct flame_element_list *list, size_t under, float scale) {
+	float blur = 0;
+	for (size_t i = 0; i < list->len; i++) {
+		list->data[i].from_kept = false;
+	}
+	for (size_t i = under; i < list->len;) {
+		struct flame_element *e = &list->data[i];
+		if (e->type != FLAME_ELEMENT_GLASS) {
+			i++;
+			continue;
+		}
+		size_t end = i + 1;
+		while (end < list->len && list->data[end].type == FLAME_ELEMENT_GLASS
+				&& e->glass_group && list->data[end].glass_group == e->glass_group) {
+			end++;
+		}
+		bool ok = true;
+		float want = blur;
+		for (size_t p = i; p < end && ok; p++) {
+			float b = (float)list->data[p].glass.blur * scale;
+			ok = b >= 1 && (!want || b == want) && only_under(list, under, p);
+			want = ok && !want ? b : want;
+		}
+		if (ok) {
+			blur = want;
+		}
+		for (size_t p = i; p < end; p++) {
+			list->data[p].from_kept = ok;
+		}
+		i = end;
+	}
+	return blur;
+}
+
 // glass is drawn from what's in the buffer under it: wherever one gets
 // drawn, everything it reads has to be drawn fresh this frame first, or it
 // blurs its own last frame into itself. repaint grows to that (buffer
@@ -785,8 +868,8 @@ static void glass_repaint(const struct flame_element_list *list,
 		bool grew = false;
 		for (size_t i = 0; i < list->len; i++) {
 			const struct flame_element *element = &list->data[i];
-			if (element->type != FLAME_ELEMENT_GLASS) {
-				continue;
+			if (element->type != FLAME_ELEMENT_GLASS || element->from_kept) {
+				continue; // the kept blur doesn't read the buffer
 			}
 			struct wlr_box box = element->clip;
 			target_box_to_buffer(target, &box);
@@ -843,6 +926,24 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	pixman_region32_init(&repaint);
 	wlr_damage_ring_add(&frame->ring, damage);
 	wlr_damage_ring_rotate_buffer(&frame->ring, buffer, &repaint);
+	// glass that reads the kept blur: made again first when what's under the
+	// windows looks different, all of that drawn for it, covered or not
+	size_t under = under_windows(&frame->cur);
+	float kept_blur = frame->render->gl.usable
+		? mark_from_kept(&frame->cur, under, target->scale) : 0;
+	bool keep = false;
+	if (kept_blur > 0) {
+		const struct flame_element_list below = {frame->cur.data, under, under};
+		uint64_t look = elements_look(&below, target->logical, target->scale);
+		const struct gl_kept_blur *kept = &frame->kept;
+		keep = !kept->ready || kept->blur != kept_blur || kept->buffer_width != buffer->width
+			|| kept->buffer_height != buffer->height || look != frame->kept_look;
+		frame->kept_look = look;
+		if (keep) {
+			pixman_region32_union_rect(&repaint, &repaint, 0, 0, buffer->width,
+				buffer->height);
+		}
+	}
 	glass_repaint(&frame->cur, target, &repaint, buffer->width, buffer->height);
 	if (frame->timing.enabled) {
 		timing_areas(&frame->timing, region_area(damage), region_area(&repaint));
@@ -862,8 +963,11 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 
 	draw_background(&pass, target, &frame->cur, &repaint, buffer->width, buffer->height);
 	for (size_t i = 0; i < frame->cur.len; i++) {
+		if (keep && i == under) {
+			gl_pass_keep_blur(&pass.gl, &frame->kept, kept_blur);
+		}
 		pass_glass_group(&pass, target, &frame->cur, i);
-		draw_element(frame, &pass, target, &frame->cur.data[i], &repaint);
+		draw_element(frame, &pass, target, &frame->cur.data[i], &repaint, keep && i < under);
 	}
 	pixman_region32_fini(&repaint);
 

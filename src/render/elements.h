@@ -72,6 +72,11 @@ struct flame_element {
 	// buffer): never drawn, never in the way of scanout, still a surface
 	// that's on screen (its frames, enter and leave)
 	bool clear;
+	// from a tree under every window (see flame_tree.under_windows)
+	bool under_windows;
+	// glass: reads the kept blur of what's under the windows instead of
+	// what's drawn (nothing else is behind it). set by whoever draws it
+	bool from_kept;
 
 	// layout coords: what isn't covered by anything opaque above it, and
 	// what of it is opaque itself. filled by elements_occlude
