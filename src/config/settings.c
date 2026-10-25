@@ -55,6 +55,8 @@ static const struct setting settings[] = {
 	{"keyboard.variant", KIND_STRING, 0, 0, NULL},
 	{"keyboard.options", KIND_STRING, 0, 0, NULL},
 	{"keyboard.model", KIND_STRING, 0, 0, NULL},
+	{"blur.noise", KIND_FLOAT, 0, 0.1, NULL},
+	{"blur.size", KIND_FLOAT, 0, 64, NULL},
 	{"animations.enabled", KIND_BOOL, 0, 0, NULL},
 	{"animations.unfocused_opacity", KIND_FLOAT, 0.1, 1, NULL},
 	{"allow_tearing", KIND_BOOL, 0, 0, NULL},
@@ -143,6 +145,10 @@ static void write_value(struct strbuf *out, const struct flame_config *c, const 
 		strbuf_json_string(out, k->options ? k->options : "");
 	} else if (!strcmp(key, "keyboard.model")) {
 		strbuf_json_string(out, k->model ? k->model : "");
+	} else if (!strcmp(key, "blur.noise")) {
+		strbuf_printf(out, "%.4f", c->blur.noise);
+	} else if (!strcmp(key, "blur.size")) {
+		strbuf_printf(out, "%.0f", c->blur.size);
 	} else if (!strcmp(key, "animations.enabled")) {
 		strbuf_printf(out, "%s", c->anim.enabled ? "true" : "false");
 	} else if (!strcmp(key, "animations.unfocused_opacity")) {
@@ -323,7 +329,8 @@ static bool literal(const struct setting *s, const char *value, struct strbuf *o
 static void line_for(struct strbuf *out, const char *key, const char *output, const char *lit) {
 	if (*output) {
 		strbuf_printf(out, "flame.output(\"%s\", { scale = %s }) -- %s\n", output, lit, key);
-	} else if (!strncmp(key, "keyboard.", 9) || !strncmp(key, "animations.", 11)) {
+	} else if (!strncmp(key, "keyboard.", 9) || !strncmp(key, "animations.", 11)
+			|| !strncmp(key, "blur.", 5)) {
 		const char *dot = strchr(key, '.');
 		strbuf_printf(out, "flame.set{ %.*s = { %s = %s } } -- %s\n", (int)(dot - key), key,
 			dot + 1, lit, key);

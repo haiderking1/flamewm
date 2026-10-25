@@ -3,6 +3,8 @@
 #include <wlr/render/pass.h>
 #include <wlr/render/wlr_renderer.h>
 
+#include "config/config.h"
+#include "core/server.h"
 #include "render/coords.h"
 #include "render/elements.h"
 #include "render/render.h"
@@ -12,7 +14,11 @@ bool pass_begin(struct flame_pass *pass, struct flame_render *render,
 		struct wlr_buffer *buffer, struct wlr_drm_syncobj_timeline *signal, uint64_t point) {
 	pass->wlr = NULL;
 	if (render->gl.usable) {
-		return gl_pass_begin(&pass->gl, &render->gl, buffer, signal, point);
+		if (!gl_pass_begin(&pass->gl, &render->gl, buffer, signal, point)) {
+			return false;
+		}
+		pass->gl.noise = render->server->config->blur.noise;
+		return true;
 	}
 	pass->wlr = wlr_renderer_begin_buffer_pass(render->renderer, buffer,
 		&(struct wlr_buffer_pass_options){

@@ -64,6 +64,11 @@ static void queue_process(struct flame_frame *frame) {
 	}
 }
 
+void frame_redraw_whole(struct flame_frame *frame) {
+	frame->whole = true;
+	frame_request(frame);
+}
+
 void frame_display_changed(struct flame_frame *frame) {
 	sync_reset(&frame->sync); // KMS gets another chance at tearing and vrr
 	frame->tearing_logged = false;

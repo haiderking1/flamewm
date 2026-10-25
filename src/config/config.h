@@ -116,6 +116,15 @@ struct flame_config {
 	uint32_t cursor_size;
 
 	struct flame_anim_config anim;
+	// glass and what's see-through over it
+	struct {
+		// grain (of full, +-) over glass and blended windows: dark blur
+		// doesn't come out in bands
+		float noise;
+		// how far apps' own blur reaches (ext-background-effect: foot's),
+		// layout pixels
+		float size;
+	} blur;
 
 	const struct flame_keybind *keybinds;
 	size_t keybind_count;

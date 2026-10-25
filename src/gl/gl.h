@@ -25,6 +25,7 @@ struct gl_program {
 	// glass and blur
 	int texel, offset, bounds, box, reach, radius, tint, saturation, edge, refraction,
 		rim;
+	int noise; // the dither's, see DITHER in gl.c
 };
 
 // what glass reads from: what's behind it, copied out, then shrunk and
@@ -80,6 +81,9 @@ struct gl_pass {
 	float proj[9];
 	struct wlr_drm_syncobj_timeline *signal;
 	uint64_t signal_point;
+	// grain over what's blended and over glass (of full, +-), 0 for none:
+	// smooth dark gradients don't band. set before drawing
+	float noise;
 	// glass reads this instead of what's drawn now, see gl_pass_backdrop.
 	// empty for none. half: kept at half size (every pane over it blurs)
 	struct wlr_box backdrop;

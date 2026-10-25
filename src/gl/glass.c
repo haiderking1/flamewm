@@ -336,6 +336,7 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	fglUniform1f(program->refraction, options->refraction);
 	fglUniform1f(program->rim, fmaxf(options->rim, 0.5f));
 	fglUniform1f(program->alpha, options->alpha);
+	fglUniform1f(program->noise, pass->noise);
 	gl_box_proj(pass->proj, program->proj, box);
 	// v_texcoord comes out as the buffer pixel
 	gl_tex_proj(program->tex_proj, WL_OUTPUT_TRANSFORM_NORMAL,

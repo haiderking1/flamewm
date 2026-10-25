@@ -76,6 +76,31 @@ static const char vertex_src[] =
 	"	return clamp(0.5 - d, 0.0, 1.0);\n" \
 	"}\n"
 
+// a grain over what's drawn see-through, before it's rounded to the buffer's
+// levels: a dark smooth gradient (a blur) would come out in bands, a few
+// levels each, wide and plain to see. +-noise (of full) at most, triangular,
+// a different pixel each. premultiplied: scaled by alpha, clear stays clear.
+// see_through: only a pixel something shows through, an opaque one is the
+// app's own as it drew it
+#define DITHER \
+	"uniform float noise;\n" \
+	"float hash(vec2 p) {\n" \
+	"	vec3 q = fract(vec3(p.xyx) * 0.1031);\n" \
+	"	q += dot(q, q.yzx + 33.33);\n" \
+	"	return fract((q.x + q.y) * q.z);\n" \
+	"}\n" \
+	"vec4 dither(vec4 c) {\n" \
+	"	if (noise <= 0.0) {\n" \
+	"		return c;\n" \
+	"	}\n" \
+	"	float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + vec2(19.19, 47.47)) - 1.0;\n" \
+	"	c.rgb = clamp(c.rgb + n * noise * c.a, 0.0, c.a);\n" \
+	"	return c;\n" \
+	"}\n" \
+	"vec4 see_through(vec4 c) {\n" \
+	"	return c.a < 0.998 ? dither(c) : c;\n" \
+	"}\n"
+
 static const char quad_src[] =
 	"uniform vec4 color;\n"
 	"void main() {\n"
@@ -84,30 +109,33 @@ static const char quad_src[] =
 
 static const char tex_rgba_src[] =
 	SHAPE
+	DITHER
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha * inside();\n"
+	"	gl_FragColor = see_through(texture2D(tex, v_texcoord) * alpha * inside());\n"
 	"}\n";
 
 static const char tex_rgbx_src[] =
 	SHAPE
+	DITHER
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha * inside();\n"
+	"	gl_FragColor = see_through(vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha * inside());\n"
 	"}\n";
 
 static const char tex_ext_src[] =
 	"#extension GL_OES_EGL_image_external : require\n"
 	SHAPE
+	DITHER
 	"varying vec2 v_texcoord;\n"
 	"uniform samplerExternalOES tex;\n"
 	"uniform float alpha;\n"
 	"void main() {\n"
-	"	gl_FragColor = texture2D(tex, v_texcoord) * alpha * inside();\n"
+	"	gl_FragColor = see_through(texture2D(tex, v_texcoord) * alpha * inside());\n"
 	"}\n";
 
 // dual kawase: each level down is half the size, five taps; back up, eight.
@@ -165,6 +193,7 @@ static const char blur_up_src[] =
 // (top left) and where the light comes out again (bottom right), and the
 // lip a little brighter all around
 static const char glass_src[] =
+	DITHER
 	"varying vec2 v_texcoord;\n"
 	"uniform sampler2D tex;\n"
 	// where tex starts in the buffer, and the buffer pixels its whole
@@ -236,7 +265,7 @@ static const char glass_src[] =
 	"	float lit = 0.12 + 0.88 * facing * facing;\n"
 	"	float light = edge * (line * lit * 0.85 + t * t * t * lit * 0.2);\n"
 	"	col.rgb = min(col.rgb + vec3(light) * col.a, vec3(col.a));\n"
-	"	gl_FragColor = col * clamp(0.5 - d, 0.0, 1.0) * alpha;\n"
+	"	gl_FragColor = dither(col * clamp(0.5 - d, 0.0, 1.0) * alpha);\n"
 	"}\n";
 
 static GLuint compile_as(GLenum type, const char *precision, const char *src, bool quiet) {
@@ -315,6 +344,7 @@ static bool link_program(struct gl_program *program, const char *fragment_src) {
 	program->edge = fglGetUniformLocation(id, "edge");
 	program->refraction = fglGetUniformLocation(id, "refraction");
 	program->rim = fglGetUniformLocation(id, "rim");
+	program->noise = fglGetUniformLocation(id, "noise");
 	return true;
 }
 

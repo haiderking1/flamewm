@@ -34,6 +34,9 @@
 //   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
 //     action a function or a string to spawn. replaces a bind on the same keys
 //   flame.unbind(mods, key), flame.clear_binds()
+//   flame.set{ blur = { noise = 0.004, size = 18 } }: grain over glass and
+//     see-through windows (0 for none, dark blur bands without it), how far
+//     apps' own blur reaches (foot's)
 //   flame.set{ animations = false } or animations = { enabled, layers,
 //     open, close, layer_open, layer_close ("slide", "zoom", "fade", "none"),
 //     fade_in, fade_out, fade_in_from, fade_out_from, zoom_from, zoom_to,
@@ -297,6 +300,25 @@ static int set_animations(lua_State *L, struct flame_anim_config *anim, int tabl
 	return 0;
 }
 
+static int set_blur(lua_State *L, struct flame_config *config, int table) {
+	lua_pushnil(L);
+	while (lua_next(L, table)) {
+		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+		int value = lua_gettop(L);
+		if (!strcmp(key, "noise")) {
+			double n = luaL_checknumber(L, value);
+			config->blur.noise = (float)(n < 0 ? 0 : n > 0.1 ? 0.1 : n);
+		} else if (!strcmp(key, "size")) {
+			double n = luaL_checknumber(L, value);
+			config->blur.size = (float)(n < 0 ? 0 : n > 64 ? 64 : n);
+		} else {
+			return luaL_error(L, "flame.set: blur has no %s", key);
+		}
+		lua_pop(L, 1);
+	}
+	return 0;
+}
+
 static void set_keyboard(lua_State *L, struct flame_config *config, int table) {
 	struct flame_keyboard_names *k = &config->keyboard;
 	char **fields[] = {&k->rules, &k->model, &k->layout, &k->variant, &k->options};
@@ -399,6 +421,10 @@ static int l_set(lua_State *L) {
 			luaL_checktype(L, value, LUA_TTABLE);
 			set_keyboard(L, config, value);
 			pin_fields(L, self(L), value, "keyboard");
+		} else if (!strcmp(key, "blur")) {
+			luaL_checktype(L, value, LUA_TTABLE);
+			set_blur(L, config, value);
+			pin_fields(L, self(L), value, "blur");
 		} else if (!strcmp(key, "animations")) {
 			if (lua_isboolean(L, value)) {
 				config->anim.enabled = lua_toboolean(L, value);

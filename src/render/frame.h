@@ -186,6 +186,9 @@ void frame_request(struct flame_frame *frame);
 // the log once they're over, how many reached the screen, missed vblanks,
 // the worst gap between two and how long the gpu took at worst
 void frame_watch(struct flame_frame *frame, const char *what, int64_t ns);
+// all of it drawn again: something that changes how everything's drawn (the
+// config's blur grain) and nothing that damage would say
+void frame_redraw_whole(struct flame_frame *frame);
 // the output's mode or what its display can do changed: tearing and vrr
 // get tried again, refused before or not
 void frame_display_changed(struct flame_frame *frame);

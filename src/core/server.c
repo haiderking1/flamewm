@@ -129,6 +129,9 @@ static void server_apply_config(struct flame_server *server) {
 	struct flame_output *output;
 	wl_list_for_each(output, &server->outputs.list, link) {
 		scene_rect_set_color(output->background, server->config->background_color);
+		// the blur's grain and reach change every pixel of glass, damage
+		// doesn't know
+		frame_redraw_whole(&output->frames);
 	}
 	wallpaper_config_changed(&server->wallpaper);
 	keyboards_apply_config(&server->input);

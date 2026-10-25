@@ -1028,6 +1028,25 @@ $ROUGH candy.ppm candy
 $ROUGH blur.ppm blur
 $ROUGH faded.ppm faded" "glass up" "candy smooth over sharp" "blur smooth over sharp" \
 	"faded sharp over sharp"
+case_run "glass gets a grain: a dark blur doesn't come out in flat bands, blur.noise 0 does" "
+# down the middle of the blur, how long the longest stretch of one level is
+flat() { grim -t ppm \$1.ppm; python3 -I -c \"
+d = open('\$1.ppm', 'rb').read()
+w, h = map(int, d.split(b'\\\\n')[1].split())
+px = d[-(w * h * 3):]
+vals = [px[(y * w + w // 2) * 3 + 1] for y in range(h // 2 - 120, h // 2 + 120)]
+longest = run = 1
+for a, b in zip(vals, vals[1:]):
+    run = run + 1 if a == b else 1
+    longest = max(longest, run)
+print('\$1', 'grain' if longest < 40 else 'flat %d px' % longest)
+\"; }
+$BIN/wlglass blur 6 &
+sleep 1.2
+flat default
+$CTL set blur.noise 0 > /dev/null
+sleep 0.4
+flat off" "default grain" "off flat"
 # the color in the middle of a ppm screenshot, by name
 CENTER="python3 -I -c \"
 import sys

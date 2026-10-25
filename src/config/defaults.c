@@ -74,6 +74,8 @@ const struct flame_config flame_default_config = {
 	.cursor_theme = NULL,
 	.cursor_size = 24,
 
+	// a level up or down (of 255): enough to break up bands, too little to see
+	.blur = {.noise = 1.0f / 255, .size = 18},
 	.anim = {
 		.enabled = true,
 		.layers = true,

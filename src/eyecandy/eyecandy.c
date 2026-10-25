@@ -162,6 +162,13 @@ double eyecandy_shape(struct wlr_surface *surface) {
 const struct eyecandy_pane *eyecandy_panes(struct wlr_surface *surface, size_t *len) {
 	struct surface_glass *glass = glass_of(surface);
 	*len = glass ? glass->all.len : 0;
+	// an app's own blur reaches as far as the config says now, not as it
+	// said when the app last committed
+	for (size_t i = 0; i < *len; i++) {
+		if (glass->all.panes[i].app_blur) {
+			glass->all.panes[i].style.blur = glass->server->config->blur.size;
+		}
+	}
 	return *len ? glass->all.panes : NULL;
 }
 
@@ -343,6 +350,7 @@ static void background_handle_set_blur_region(struct wl_client *client,
 				span(rects[i].y1, rects[i].y2)},
 			.style = blur_style,
 			.opacity = 1,
+			.app_blur = true,
 		};
 	}
 }
