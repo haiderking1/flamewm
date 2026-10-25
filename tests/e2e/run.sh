@@ -753,6 +753,18 @@ echo zen \$(head -1 zen.txt)
 echo firefox \$(head -1 firefox.txt)
 echo other \$(head -1 other.txt)
 " "zen maximized" "firefox maximized" "other not maximized"
+case_run "lock runs what the config says: a locker of your own, or nothing" "
+$CTL set lock \"touch \$PWD/locked\" > /dev/null
+$CTL lock > /dev/null
+sleep 0.5
+[ -e locked ] && echo ran it
+rm -f locked
+$CTL set lock '' > /dev/null
+$CTL lock > /dev/null
+sleep 0.5
+[ -e locked ] || echo nothing ran
+$CTL settings | python3 -I -c \"import json, sys; print('lock is', repr(json.load(sys.stdin)['values']['lock']))\"
+" "ran it" "nothing ran" "lock is ''"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched

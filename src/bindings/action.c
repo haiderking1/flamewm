@@ -36,6 +36,13 @@ void action_reload(struct flame_server *server, const union flame_arg *arg) {
 	server_reload_config(server);
 }
 
+void action_lock(struct flame_server *server, const union flame_arg *arg) {
+	const char *command = config_lock_command(server->config);
+	if (command) {
+		spawn_shell(command);
+	}
+}
+
 void action_lua(struct flame_server *server, const union flame_arg *arg) {
 	config_run_lua_bind(server, arg->i);
 }

@@ -105,10 +105,14 @@ static int prepare_for_sleep(sd_bus_message *m, void *data, sd_bus_error *error)
 		let_go(sleep); // already locked, nothing to wait for
 		return 0;
 	}
+	const char *command = config_lock_command(sleep->server->config);
+	if (!lock_active(lock) && !command) {
+		let_go(sleep); // nothing locks here (lock = ""), nothing to wait for
+		return 0;
+	}
 	wlr_log(WLR_INFO, "sleep: locking first");
 	if (!lock_active(lock)) {
-		const char *const argv[] = {"flamelock", NULL};
-		spawn(argv);
+		spawn_shell(command);
 	}
 	sleep->waiting = true;
 	wl_event_source_timer_update(sleep->give_up, WAIT_MS);

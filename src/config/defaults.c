@@ -23,7 +23,6 @@ static const char *const terminal[] = { "foot", NULL };
 static const char *const settings[] = { "flamesettings", NULL };
 static const char *const files[] = { "flamefiles", NULL };
 static const char *const search[] = { "flamesearch", NULL };
-static const char *const lock[] = { "flamelock", NULL };
 
 static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_Return, action_spawn, { .argv = terminal } },
@@ -32,7 +31,7 @@ static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_comma, action_spawn, { .argv = settings } },
 	{ MOD, XKB_KEY_e, action_spawn, { .argv = files } },
 	{ MOD, XKB_KEY_space, action_spawn, { .argv = search } },
-	{ MOD, XKB_KEY_l, action_spawn, { .argv = lock } },
+	{ MOD, XKB_KEY_l, action_lock, { 0 } },
 	{ MOD, XKB_KEY_j, action_focus, { .i = +1 } },
 	{ MOD, XKB_KEY_k, action_focus, { .i = -1 } },
 	{ MOD, XKB_KEY_f, action_fullscreen, { 0 } },

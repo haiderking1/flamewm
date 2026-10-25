@@ -112,6 +112,10 @@ struct flame_config {
 	char *wallpaper;
 	enum flame_wallpaper_mode wallpaper_mode;
 
+	// what locks the screen (super+l, before the computer sleeps): a shell
+	// command. NULL for flamelock, "" for nothing
+	char *lock;
+
 	const char *cursor_theme; // NULL = default theme
 	uint32_t cursor_size;
 
@@ -181,5 +185,10 @@ const struct flame_output_config *config_output(const struct flame_config *confi
 
 // a keybind's lua function
 void config_run_lua_bind(struct flame_server *server, int ref);
+
+// the command that locks the screen, NULL when nothing does
+static inline const char *config_lock_command(const struct flame_config *config) {
+	return !config->lock ? "flamelock" : *config->lock ? config->lock : NULL;
+}
 
 #endif

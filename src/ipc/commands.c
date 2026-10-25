@@ -34,6 +34,7 @@ static const struct command {
 	{ "fullscreen", action_fullscreen, ARG_NONE },
 	{ "togglefloating", action_toggle_floating, ARG_NONE },
 	{ "reload", action_reload, ARG_NONE },
+	{ "lock", action_lock, ARG_NONE },
 	{ "close", action_close, ARG_NONE },
 	{ "quit", action_quit, ARG_NONE },
 };
@@ -159,15 +160,16 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 		return;
 	}
 	if (!strcmp(name, "set") || !strcmp(name, "unset")) {
-		// set KEY VALUE (the rest of the line, spaces and all), unset KEY
+		// set KEY VALUE (the rest of the line, spaces and all, nothing for
+		// an empty text: lock "", wallpaper ""), unset KEY
 		const char *key = strtok_r(NULL, " \t\r", &save);
-		const char *value = save;
-		while (value && (*value == ' ' || *value == '\t')) {
+		const char *value = save ? save : "";
+		while (*value == ' ' || *value == '\t') {
 			value++;
 		}
 		const char *error = NULL;
 		bool set = !strcmp(name, "set");
-		if (!key || (set && (!value || !*value))) {
+		if (!key) {
 			reply_error(client, set ? "set KEY VALUE" : "unset KEY");
 		} else if (set ? settings_set(client->ipc->server, key, value, &error)
 				: settings_unset(client->ipc->server, key, &error)) {

@@ -46,6 +46,7 @@ static const struct setting settings[] = {
 	{"background", KIND_COLOR, 0, 0, NULL},
 	{"wallpaper", KIND_STRING, 0, 0, NULL},
 	{"wallpaper_mode", KIND_ENUM, 0, 0, wallpaper_modes},
+	{"lock", KIND_STRING, 0, 0, NULL},
 	{"focus_follows_mouse", KIND_BOOL, 0, 0, NULL},
 	{"repeat_rate", KIND_INT, 1, 200, NULL},
 	{"repeat_delay", KIND_INT, 50, 2000, NULL},
@@ -127,6 +128,8 @@ static void write_value(struct strbuf *out, const struct flame_config *c, const 
 		strbuf_json_string(out, c->wallpaper ? c->wallpaper : "");
 	} else if (!strcmp(key, "wallpaper_mode")) {
 		strbuf_json_string(out, wallpaper_modes[c->wallpaper_mode]);
+	} else if (!strcmp(key, "lock")) {
+		strbuf_json_string(out, c->lock ? c->lock : "flamelock");
 	} else if (!strcmp(key, "focus_follows_mouse")) {
 		strbuf_printf(out, "%s", c->focus_follows_mouse ? "true" : "false");
 	} else if (!strcmp(key, "repeat_rate")) {

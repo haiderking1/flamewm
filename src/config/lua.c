@@ -29,6 +29,8 @@
 //     drag_modifier = "super", cursor_theme = "Adwaita", cursor_size = 24,
 //     wallpaper = "~/walls/sea.jpg" ("" for none: jpeg, png or webp),
 //     wallpaper_mode = "fill" ("fit", "center", "stretch"),
+//     lock = "flamelock" (what super+l and going to sleep run: "swaylock",
+//       "" for nothing),
 //     keyboard = { layout = "us,ara", variant = "", model = "",
 //       options = "grp:alt_shift_toggle", rules = "" } }
 //   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
@@ -402,6 +404,10 @@ static int l_set(lua_State *L) {
 			} else if (*path) {
 				config->wallpaper = strdup(path);
 			}
+		} else if (!strcmp(key, "lock")) {
+			// a command, "" for nothing
+			free(config->lock);
+			config->lock = strdup(lua_isstring(L, value) ? lua_tostring(L, value) : "");
 		} else if (!strcmp(key, "wallpaper_mode")) {
 			static const char *const modes[] = {"fill", "fit", "center", "stretch"};
 			const char *mode = lua_isstring(L, value) ? lua_tostring(L, value) : "";
@@ -766,6 +772,7 @@ void config_free(struct flame_config *config) {
 	free(config->owned_keybinds);
 	free(config->owned_cursor_theme);
 	free(config->wallpaper);
+	free(config->lock);
 	struct flame_keyboard_names *k = &config->keyboard;
 	free(k->rules);
 	free(k->model);
