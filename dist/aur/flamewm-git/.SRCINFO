@@ -62,14 +62,14 @@ pkgname = flamewm-git
 	depends = libwebp
 	depends = xdg-desktop-portal
 	depends = xdg-desktop-portal-gtk
-	optdepends = flame-apps-git: the bar, files, settings, player, search, lock and login screens
+	optdepends = flame-apps-git: the bar, files, player, search, lock and login screens
 	optdepends = foot: the terminal super+enter opens
 	optdepends = swaylock: a locker if you skip flame-apps-git (set lock = "swaylock")
 	provides = flamewm
 	conflicts = flamewm
 
 pkgname = flame-apps-git
-	pkgdesc = flame's apps: the bar, files, settings, the player, search, the lock and login screens
+	pkgdesc = flame's apps: the bar, files, the player, search, the lock and login screens
 	depends = flamewm-git
 	depends = wayland
 	depends = libxkbcommon

@@ -14,8 +14,6 @@
 // comments, and the bar when flame's is installed
 static const char starter_top[] =
 	"-- flame's config, lua. save it and flame picks it up right away.\n"
-	"-- flamesettings (super+,) changes things too and keeps them in\n"
-	"-- settings.lua next to this file: what's set here wins over it.\n"
 	"-- every option: https://github.com/haiderking1/flamewm/blob/main/examples/flame.lua\n"
 	"\n";
 

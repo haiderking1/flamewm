@@ -1,14 +1,9 @@
 # config
 
-you don't need one. **flamesettings** (`super+,`) changes everything live,
-and so does `flamectl set gap 8` (`flamectl settings` lists them all). they
-end up in `~/.config/flame/settings.lua`. the wallpaper too, flame draws it
-itself: pick one in settings or `flamectl set wallpaper ~/walls/x.jpg`.
-
-for more, there's lua at `~/.config/flame/flame.lua` (flame writes a first one the
-first time it starts) (see
-[examples/flame.lua](../examples/flame.lua)). what you set there wins over
-settings.lua. save it and flame reloads it right away.
+flame's config is one lua file, `~/.config/flame/flame.lua`. flame writes
+a first one the first time it starts, and reloads it the moment you save
+it. every option is in [examples/flame.lua](../examples/flame.lua), each
+block saying what it's for.
 
 ```lua
 flame.look { gap = 8, border_width = 2 }
@@ -29,7 +24,6 @@ mod is super.
 | --- | --- |
 | `super+q` | terminal (foot) |
 | `super+c` | close window |
-| `super+,` | settings |
 | `super+e` | files |
 | `super+space` | search |
 | `super+l` | lock (whatever `lock` says) |

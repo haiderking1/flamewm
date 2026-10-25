@@ -20,14 +20,12 @@
 	{ MOD | SHIFT, sym, action_move_to_workspace, { .i = index } }
 
 static const char *const terminal[] = { "foot", NULL };
-static const char *const settings[] = { "flamesettings", NULL };
 static const char *const files[] = { "flamefiles", NULL };
 static const char *const search[] = { "flamesearch", NULL };
 
 static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_q, action_spawn, { .argv = terminal } },
 	{ MOD, XKB_KEY_c, action_close, { 0 } },
-	{ MOD, XKB_KEY_comma, action_spawn, { .argv = settings } },
 	{ MOD, XKB_KEY_e, action_spawn, { .argv = files } },
 	{ MOD, XKB_KEY_space, action_spawn, { .argv = search } },
 	{ MOD, XKB_KEY_l, action_lock, { 0 } },

@@ -1,6 +1,6 @@
 # Maintainer: haiderking1 <haiderking1@users.noreply.github.com>
 # two packages from one build: flamewm-git is flame alone, flame-apps-git its
-# apps (the bar, files, settings, the player, search, the lock and login
+# apps (the bar, files, the player, search, the lock and login
 # screens). install both for the whole thing
 
 pkgbase=flamewm-git
@@ -33,7 +33,7 @@ package_flamewm-git() {
 	depends=(wlroots0.20 wayland libxkbcommon libglvnd libdrm libxshmfence lua54 pango
 		cairo pixman harfbuzz glib2 libpipewire systemd-libs libjpeg-turbo libpng libwebp
 		xdg-desktop-portal xdg-desktop-portal-gtk)
-	optdepends=('flame-apps-git: the bar, files, settings, player, search, lock and login screens'
+	optdepends=('flame-apps-git: the bar, files, player, search, lock and login screens'
 		'foot: the terminal super+enter opens'
 		'swaylock: a locker if you skip flame-apps-git (set lock = "swaylock")')
 	provides=(flamewm)
@@ -45,7 +45,7 @@ package_flamewm-git() {
 }
 
 package_flame-apps-git() {
-	pkgdesc="flame's apps: the bar, files, settings, the player, search, the lock and login screens"
+	pkgdesc="flame's apps: the bar, files, the player, search, the lock and login screens"
 	depends=(flamewm-git wayland libxkbcommon libjpeg-turbo libwebp ffmpeg librsvg
 		gdk-pixbuf2 pango cairo harfbuzz libpng glib2 libpipewire libass uchardet mesa
 		libpulse systemd-libs curl pam)

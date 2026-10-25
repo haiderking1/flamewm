@@ -68,9 +68,7 @@ then `systemctl enable greetd` (and disable your old display manager).
 `-g` runs flame as just the login screen: no binds, and it's gone the
 moment someone logs in.
 
-everyone picks their own login look in settings (wallpaper, login screen):
-a wallpaper (a copy goes to `/var/lib/flamegreet`, no root needed) and blur
-on or off. for the default look, give the greeter a config:
+its look comes from the greeter's own config:
 `-c /etc/greetd/flame.lua` with `flame.wallpaper { path = ... }` in it. it
 remembers who logged in last and into what.
 

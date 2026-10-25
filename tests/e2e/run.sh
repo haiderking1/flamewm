@@ -1222,18 +1222,6 @@ mkdir -p "$WORK/apps/tmp" "$WORK/apps/config/flame"
 # flame's config there too, empty: no first one with the bar in it
 echo "-- e2e" > "$WORK/apps/config/flame/flame.lua"
 CASE_ENV="XDG_CONFIG_HOME=$WORK/apps/config XDG_DATA_HOME=$WORK/apps/data XDG_CACHE_HOME=$WORK/apps/cache XDG_STATE_HOME=$WORK/apps/state TMPDIR=$WORK/apps/tmp"
-case_run "flamesettings: the Wallpaper page shows the wallpaper's folder, a click on a picture puts it on" "
-mkdir walls
-$CTL set background '#ff0000' > /dev/null; sleep 0.5; grim walls/red.png
-$CTL set background '#0000ff' > /dev/null; sleep 0.5; grim walls/blue.png
-$CTL set wallpaper \$PWD/walls/red.png > /dev/null; sleep 0.5
-$(dirname $CTL)/flamesettings wallpaper > /dev/null 2>&1 &
-sleep 2
-$CTL pointer move 538 390 > /dev/null; sleep 0.3
-$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
-sleep 0.6
-$CTL settings | python3 -I -c \"import json, sys; print('picked', json.load(sys.stdin)['values']['wallpaper'].split('/')[-1])\"" \
-	"picked blue.png"
 case_run "flamefiles: super+e opens it, a new folder named, a copy pasted into it, the trash and back" "
 $CTL key Super_L press > /dev/null; $CTL key e press > /dev/null
 $CTL key e release > /dev/null; $CTL key Super_L release > /dev/null
@@ -1376,48 +1364,6 @@ for name in ['clip.mp4', 'song.mp3', 'plain.mp3']:
     ok = os.path.exists(f) and ('Thumb::MTime\\0' + str(int(os.stat(path).st_mtime))).encode() in open(f, 'rb').read()
     print(name, 'kept' if ok else 'none')
 \" \$PWD" "clip.mp4 kept" "song.mp3 kept" "plain.mp3 none"
-case_run "flamesettings: super+comma opens it, borderless glass, a toggle and a slider change flame live" "
-$CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
-$CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
-sleep 1.5
-$CTL state | grep -o '\"app_id\":\"flamesettings\"'
-$CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('window', w['width'], w['height'])\"
-$CTL settings | python3 -I -c \"import json, sys; v = json.load(sys.stdin)['values']; print('before', v['animations.enabled'], v['gap'])\"
-$CTL pointer move 1028 440 > /dev/null; sleep 0.2
-$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
-sleep 0.2
-$CTL pointer move 814 184 > /dev/null; sleep 0.1
-$CTL pointer button left press > /dev/null
-for x in 830 860 900 940 980; do $CTL pointer move \$x 184 > /dev/null; sleep 0.03; done
-$CTL pointer button left release > /dev/null
-sleep 0.6
-$CTL settings | python3 -I -c \"import json, sys; v = json.load(sys.stdin)['values']; print('after', v['animations.enabled'], v['gap'])\"" \
-	'"app_id":"flamesettings"' "window 900 600" "before True 6" "after False 39"
-case_run "flamesettings: a search finds settings on any page, the window resizes but no smaller than it draws" "
-$CTL key Super_L press > /dev/null; $CTL key comma press > /dev/null
-$CTL key comma release > /dev/null; $CTL key Super_L release > /dev/null
-sleep 1.5
-$CTL pointer move 640 400 > /dev/null
-for k in a n i; do $CTL key \$k press > /dev/null; $CTL key \$k release > /dev/null; done
-sleep 0.4
-$CTL pointer move 1028 184 > /dev/null; sleep 0.2
-$CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null
-sleep 0.4
-$CTL settings | python3 -I -c \"import json, sys; print('found', json.load(sys.stdin)['values']['animations.enabled'])\"
-win() { $CTL state | python3 -I -c \"import json, sys; w = json.load(sys.stdin)['window']; print('\$1', w['width'], w['height'], w['floating'])\"; }
-win opened
-$CTL pointer move 1000 600 > /dev/null
-$CTL key Super_L press > /dev/null; $CTL pointer button right press > /dev/null
-for x in 1040 1080 1120 1160; do $CTL pointer move \$x 640 > /dev/null; sleep 0.05; done
-$CTL pointer button right release > /dev/null; $CTL key Super_L release > /dev/null
-sleep 0.6
-win bigger
-$CTL pointer move 1100 620 > /dev/null
-$CTL key Super_L press > /dev/null; $CTL pointer button right press > /dev/null
-for x in 900 700 500 300; do $CTL pointer move \$x 200 > /dev/null; sleep 0.05; done
-$CTL pointer button right release > /dev/null; $CTL key Super_L release > /dev/null
-sleep 0.6
-win squeezed" "found False" "opened 900 600 True" "bigger 1060 640 True" "squeezed 780 480 True"
 printf 'flame.set{ gap = 4 }\n' > "$WORK/pin.lua"
 CASE_ARGS="-c $WORK/pin.lua"
 # decoded on the gpu where it can be (vulkan), and on the cpu

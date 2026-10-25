@@ -564,7 +564,6 @@ install-core:
 # no file of flame's own replaced, one apps of their own can remove
 install-apps:
 	@$(MAKE) --no-print-directory release GOALS=apps
-	install -Dm755 build-release/flamesettings $(DESTDIR)$(PREFIX)/bin/flamesettings
 	install -Dm755 build-release/flamefiles $(DESTDIR)$(PREFIX)/bin/flamefiles
 	install -Dm755 build-release/flameplay $(DESTDIR)$(PREFIX)/bin/flameplay
 	install -Dm755 build-release/flamebar $(DESTDIR)$(PREFIX)/bin/flamebar
@@ -574,8 +573,6 @@ install-apps:
 	install -Dm755 build-release/flamegreet $(DESTDIR)$(PREFIX)/bin/flamegreet
 	# everyone's login screen look, a folder each made as themselves (like /tmp)
 	install -dm1777 $(DESTDIR)/var/lib/flamegreet
-	install -Dm644 data/flamesettings.desktop \
-		$(DESTDIR)$(PREFIX)/share/applications/flamesettings.desktop
 	install -Dm644 data/flamefiles.desktop $(DESTDIR)$(PREFIX)/share/applications/flamefiles.desktop
 	install -Dm644 data/flameplay.desktop $(DESTDIR)$(PREFIX)/share/applications/flameplay.desktop
 	install -Dm644 data/flamewm-mimeapps.list \
