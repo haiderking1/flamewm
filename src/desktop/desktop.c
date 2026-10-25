@@ -202,7 +202,6 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 
 	drag_forget(&desktop->server->input.drag, view);
 	drag_tree_changed(&desktop->server->input.drag);
-	cursor_forget_view(&desktop->server->input.cursor, view);
 	// a remap starts from whatever the client asks for next, not a stale claim
 	view->fullscreen_wanted = false;
 	view->floating = false;
@@ -262,9 +261,9 @@ static struct flame_view *view_under_pointer(struct flame_desktop *desktop,
 	return NULL;
 }
 
-// who has the keyboard on a workspace that comes up, hyprland's way: a
-// fullscreen window covering it, else the last one typed in when it floats,
-// else (focus following the mouse) the one under the pointer, else the last
+// who has the keyboard on a workspace that comes up: a fullscreen window
+// covering it, else the last one typed in when it floats, else (focus
+// following the mouse) the one under the pointer, else the last
 static struct flame_view *focus_on_show(struct flame_desktop *desktop,
 		struct flame_workspace *workspace) {
 	struct flame_view *last = focus_fallback(workspace);

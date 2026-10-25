@@ -123,7 +123,7 @@ static void end_move(struct flame_drag *drag, bool drop) {
 // ---- resize ----
 
 // the split under the edge we want to move. an edge on the screen border
-// has nothing to move, so the opposite edge takes over like hyprland does
+// has nothing to move, so the opposite edge takes over
 static struct flame_drag_axis grab_axis(struct flame_view *view, enum tree_split split,
 		bool far, bool *moves_far) {
 	struct tree_node *node = tree_edge_split(view->node, split, far);

@@ -134,7 +134,7 @@ struct flame_view *focus_after_close(struct flame_desktop *desktop, struct wlr_b
 
 	// with follow mouse, whoever ends up under the cursor. it never moved,
 	// so the next nudge would focus it anyway, and jumping somewhere else in
-	// between is what feels wrong (hyprland's focus_on_close = 1)
+	// between is what feels wrong
 	struct wlr_cursor *cursor = server->input.cursor.wlr;
 	if (server->config->focus_follows_mouse) {
 		wl_list_for_each(view, &workspace->views, link) {
@@ -144,6 +144,5 @@ struct flame_view *focus_after_close(struct flame_desktop *desktop, struct wlr_b
 		}
 	}
 	// else the one closest to where it was, usually whoever took its space
-	// (hyprland's default, focus_on_close = 0)
 	return nearest(workspace, closed.x + closed.width / 2.0, closed.y + closed.height / 2.0);
 }

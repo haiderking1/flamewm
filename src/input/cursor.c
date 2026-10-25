@@ -22,13 +22,11 @@ static uint32_t now_msec(void) {
 }
 
 // the pointer's over view now (NULL: a layer, surface, or the background),
-// moved there or something moved under it. focus follows the mouse into
-// another window, like hyprland's follow_mouse = 1 with mouse_refocus = 0:
-// a move into a window other than the one the mouse last went into focuses
-// it, moving around inside that one doesn't, and nothing does by itself. a
-// window that opened (a game started from steam's play button) keeps the
-// focus it got while the mouse wiggles where it was, the keyboard sent
-// elsewhere stays there till the mouse goes into another window
+// moved there or something moved under it. focus follows the mouse: the
+// mouse moving at all puts the keyboard on the window under it, even right
+// after a bind or a new window took it elsewhere. nothing moving under a
+// still pointer does. a game that opened under steam and loses it to a wiggle still goes
+// fullscreen when it asks, it just opened (see fullscreen.c)
 static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 		struct wlr_surface *surface, bool moved) {
 	struct flame_server *server = cursor->server;
@@ -42,7 +40,7 @@ static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 		return;
 	}
 	// only the mouse moving says where it went: what moves under a still one
-	// changes nothing (hyprland's m_lastMouseFocus is set as it focuses)
+	// changes nothing
 	if (!moved || !server->config->focus_follows_mouse) {
 		return;
 	}
@@ -62,12 +60,8 @@ static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 	if (desktop->active->fullscreen && desktop->active->fullscreen != view) {
 		return;
 	}
-	// the one it last went into: moving around in it changes nothing. unless
-	// a layer took the keyboard on hover, then it takes it back
-	if (view == cursor->mouse_focused && !(view == desktop->focused && server->layers.focused)) {
-		return;
-	}
-	cursor->mouse_focused = view;
+	// already typing here. unless a layer took the keyboard on hover, then
+	// coming back onto the window takes it back
 	if (view != desktop->focused || server->layers.focused) {
 		focus_view(desktop, view);
 	}
@@ -437,12 +431,6 @@ void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *
 
 void cursor_refresh(struct flame_cursor *cursor) {
 	process_motion(cursor, now_msec(), false);
-}
-
-void cursor_forget_view(struct flame_cursor *cursor, struct flame_view *view) {
-	if (cursor->mouse_focused == view) {
-		cursor->mouse_focused = NULL;
-	}
 }
 
 void cursor_warp(struct flame_cursor *cursor, double x, double y) {

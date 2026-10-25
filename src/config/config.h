@@ -90,7 +90,7 @@ struct flame_config {
 
 	// X apps at the screen's scale draw at its pixels and are told its dpi
 	// (they scale themselves, sharp), not stretched up (blurry). apps that
-	// ignore dpi come out small. hyprland's force_zero_scaling
+	// ignore dpi come out small
 	bool x_zero_scaling;
 
 	enum flame_x_global_keys x_global_keys;

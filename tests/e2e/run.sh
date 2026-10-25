@@ -254,7 +254,7 @@ $BIN/xewmh fullscreen" "state: FOCUSED MAXIMIZED_VERT MAXIMIZED_HORZ" \
 	"state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
 case_run "EWMH: an X window that starts fullscreen does" "
 $BIN/xewmh startfull" "state: FULLSCREEN FOCUSED" "geometry 0,0 1280x720"
-case_run "focus follows the mouse into another window, not around the one it's in: a window that just opened keeps it" "
+case_run "focus follows the mouse: a window that just opened has it till the mouse moves, then the one under it does" "
 title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
 $BIN/xtyped steam > /dev/null &
 sleep 1
@@ -265,9 +265,8 @@ title opened
 $CTL pointer move 305 402 > /dev/null; sleep 0.3
 title wiggled
 $CTL pointer move 900 400 > /dev/null; sleep 0.3
-$CTL pointer move 300 400 > /dev/null; sleep 0.3
-title crossed" "opened game" "wiggled game" "crossed steam"
-case_run "back on a workspace the window under the mouse has the keyboard (hyprland's way), not the last one typed in" "
+title crossed" "opened game" "wiggled steam" "crossed game"
+case_run "back on a workspace the window under the mouse has the keyboard, not the last one typed in" "
 title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
 $BIN/xtyped left > /dev/null &
 sleep 1
@@ -281,7 +280,7 @@ $CTL workspace 1 > /dev/null; sleep 0.5
 title back
 $CTL pointer move 303 401 > /dev/null; sleep 0.3
 title wiggled" "before right" "back left" "wiggled left"
-case_run "the keyboard sent elsewhere stays while the mouse moves in its window, the mouse going into another takes it" "
+case_run "the keyboard sent elsewhere with a bind: the mouse moving gives it to the window under it again" "
 title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
 $BIN/xtyped a > /dev/null &
 sleep 1
@@ -297,7 +296,7 @@ title keyboard
 $CTL pointer move 903 551 > /dev/null; sleep 0.3
 title wiggled
 $CTL pointer move 900 200 > /dev/null; sleep 0.3
-title crossed" "mouse c" "keyboard a" "wiggled a" "crossed b"
+title crossed" "mouse c" "keyboard a" "wiggled c" "crossed b"
 case_run "a window that just opened takes the screen when it asks, though the user clicked elsewhere meanwhile; one long open doesn't" "
 click() { $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; }
 $BIN/xtyped steam > /dev/null &
@@ -315,6 +314,15 @@ click
 wait \$!
 echo long open, fullscreen: \$(grep -c FULLSCREEN late.out)" \
 	"just opened: state: FULLSCREEN FOCUSED geometry 0,0 1280x720" "long open, fullscreen: 0"
+case_run "a game that just opened takes the screen when it asks, though the mouse moving over steam took the keyboard meanwhile" "
+$BIN/xtyped steam > /dev/null &
+sleep 1
+$CTL pointer move 300 400 > /dev/null; sleep 0.3
+$BIN/xewmh latefull 1 > late.out &
+sleep 0.6
+$CTL pointer move 305 402 > /dev/null
+wait \$!
+echo just opened: \$(cat late.out)" "just opened: state: FULLSCREEN FOCUSED geometry 0,0 1280x720"
 case_run "an X window asking for fullscreen right after it maps, drawn nothing yet, is never tiled first" "
 $BIN/xewmh mapfull > mapfull.out
 cat mapfull.out

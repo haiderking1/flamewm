@@ -17,10 +17,6 @@ struct flame_cursor {
 	struct flame_cursor_image image;
 	bool image_ready;
 	struct wlr_cursor_shape_manager_v1 *shape_manager;
-	// the window the mouse itself last moved into, hyprland's
-	// m_lastMouseFocus: focus follows the mouse into another one, not around
-	// this. windows moving under a still pointer don't change it
-	struct flame_view *mouse_focused;
 
 	struct wl_listener motion;
 	struct wl_listener motion_absolute;
@@ -38,8 +34,6 @@ void cursor_finish(struct flame_cursor *cursor);
 void cursor_attach_device(struct flame_cursor *cursor, struct wlr_input_device *device);
 // redo pointer focus after windows moved under a still cursor
 void cursor_refresh(struct flame_cursor *cursor);
-// view's going: the pointer isn't over it any more
-void cursor_forget_view(struct flame_cursor *cursor, struct flame_view *view);
 // an app moved the pointer to a layout point (an X client's WarpPointer): no
 // mouse moved, so focus doesn't follow it
 void cursor_warp(struct flame_cursor *cursor, double x, double y);

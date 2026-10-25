@@ -10,14 +10,14 @@ struct flame_view;
 struct tree_node;
 
 // mod + mouse on a floating window moves it (left) or resizes it from the
-// nearest corner (right). on a tiled window, like hyprland:
+// nearest corner (right). on a tiled window:
 // - left drag picks it up, it rides the cursor on top of everything, its slot
 //   stays empty, and dropping it on another window swaps the two
 // - right drag resizes in place: the edges nearest to where you grabbed follow
 //   the cursor by moving the tree splits they sit on
 // moves land through a transaction, so both windows move in the same frame.
 // resizes don't wait on anyone: the edges follow the cursor once per output
-// frame and clients catch up as fast as they redraw, like hyprland
+// frame and clients catch up as fast as they redraw
 
 enum flame_drag_mode {
 	FLAME_DRAG_MOVE,
