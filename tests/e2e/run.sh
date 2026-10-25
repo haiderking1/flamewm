@@ -719,6 +719,22 @@ foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5
 $BIN/wlcapture $CTL capme" "listed: yes" "drawn pixels: 889856 of 889856" \
 	"unchanged window, next frame: yes"
+case_run "a workspace sliding in draws each pixel once: a moved window still hides what's behind it" "
+foot sh -c 'sleep 30' > /dev/null 2>&1 &
+sleep 0.6
+foot sh -c 'sleep 30' > /dev/null 2>&1 &
+sleep 0.6
+$CTL workspace 2 > /dev/null
+foot sh -c 'sleep 30' > /dev/null 2>&1 &
+sleep 1
+for i in 1 2 3; do $CTL workspace 1 > /dev/null; sleep 0.5; $CTL workspace 2 > /dev/null; sleep 0.5; done
+sleep 0.3
+# the screen's 1280x720: 921.6k pixels
+grep -a 'a drawn frame was' flame.log | tail -4 | python3 -I -c \"
+import re, sys
+drawn = [float(re.search(r'was (\d+)k', l).group(1)) for l in sys.stdin]
+print('slides', len(drawn), 'pixels drawn per frame', 'about the screen' if drawn and max(drawn) <= 1014 else 'more: %s' % drawn)
+\"" "slides 4 pixels drawn per frame about the screen"
 case_run "sharing a window paces to the screen: a still one sends the keepalive, a hidden game a steady stream" "
 foot --title still sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 $BIN/wlgame 14 > game.txt 2>&1 &

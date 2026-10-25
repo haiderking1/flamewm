@@ -67,8 +67,11 @@ struct transform {
 	float alpha;
 };
 
-static bool identity(const struct transform *t) {
-	return t->ax == 1 && t->ay == 1 && t->bx == 0 && t->by == 0 && t->alpha >= 1;
+// faded or scaled: see through, or its opaque region doesn't fit its box.
+// only moved (a workspace sliding in) it's as solid as ever, just elsewhere:
+// what's behind it still needn't be drawn
+static bool faded_or_scaled(const struct transform *t) {
+	return t->ax != 1 || t->ay != 1 || t->alpha < 1;
 }
 
 static struct wlr_box apply(const struct transform *t, struct wlr_box box) {
@@ -98,7 +101,7 @@ struct collect {
 
 static void mark(struct flame_element *element, const struct collect *collect) {
 	element->alpha = collect->t.alpha;
-	element->effected = !identity(&collect->t);
+	element->effected = faded_or_scaled(&collect->t);
 }
 
 // box cut down to what can show on this output, false when nothing can.

@@ -64,7 +64,8 @@ struct flame_element {
 	uint64_t wait_point;
 
 	// animations: drawn this see through (1 for not at all), and whether it's
-	// scaled or faded at all: then it covers nothing and never goes to scanout
+	// scaled or faded at all: then it covers nothing and never goes to scanout.
+	// only moved isn't effected
 	float alpha;
 	bool effected;
 	// a surface showing nothing (one pixel of no colour, a single-pixel
