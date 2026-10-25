@@ -74,23 +74,14 @@ on or off. for the default look, give the greeter a config:
 `-c /etc/greetd/flame.lua` with `flame.set{ wallpaper = ... }` in it. it
 remembers who logged in last and into what.
 
-## no apps
+## barebones
 
-every app is its own program, flamewm doesn't need any of them. the bar
-only runs because of one line in `~/.config/flame/flame.lua`:
-
-```lua
-flame.autostart("flamebar")
-```
-
-swap it for `flame.autostart("waybar")` (or nothing) and that's it. search
-only starts when you press `super+space`, the rest only when you open them.
-
-without flame's lock screen, tell flame what locks the screen instead
-(`super+l` and before the computer sleeps), or `""` for nothing:
+the barebones install has none of flame's apps, so two things work a bit
+differently. tell flame what locks the screen (`super+l`, and before the
+computer sleeps), or `""` for nothing:
 
 ```lua
 flame.set { lock = "swaylock" }
 ```
 
-without flamefiles, apps' open and save dialogs are gtk's.
+and apps' open and save dialogs are gtk's instead of flamefiles.
