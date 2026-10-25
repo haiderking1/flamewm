@@ -14,19 +14,24 @@ just the window manager, barebones:
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
 ```
 
-it builds real packages (`flamewm-git`, `flame-apps-git`) and installs them
-with pacman, and installs `flame-update` too. to update flame to the newest
-version later:
+## after installing
+
+`super+q` opens foot, the default terminal (`sudo pacman -S foot` if you
+don't have it). want another one: `flame.bind("super", "q", "kitty")` in
+your flame.lua.
+
+to update flame to the newest version later:
 
 ```sh
 flame-update
 ```
 
-it updates what you have (just flame, or flame and the apps) and does
-nothing when there's nothing new. `flame-update --all` / `--core` switch
-between the two. the PKGBUILD it builds is in
-[dist/aur](../dist/aur/flamewm-git/PKGBUILD), the aur package is coming once
-the aur takes new accounts again.
+it updates what you installed (all of flame, or just the window manager)
+and does nothing when there's nothing new. `flame-update --all` / `--core`
+switch between the two. under the hood both installs build real packages
+(`flamewm-git`, `flame-apps-git`, from [this PKGBUILD](../dist/aur/flamewm-git/PKGBUILD))
+and install them with pacman. the aur package is coming once the aur takes
+new accounts again.
 
 ## from source
 
