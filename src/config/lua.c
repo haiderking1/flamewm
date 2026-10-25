@@ -786,15 +786,38 @@ static int l_output(lua_State *L) {
 	struct flame_config *config = self(L)->config;
 	const char *name = luaL_checkstring(L, 1);
 	luaL_checktype(L, 2, LUA_TTABLE);
-	// scale's all a screen has for now: anything else is a mistake
+	// scale and mode's all a screen has: anything else is a mistake
 	lua_pushnil(L);
 	while (lua_next(L, 2)) {
 		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "?";
-		if (strcmp(key, "scale")) {
-			return luaL_error(L, "flame.output: there's no %s (scale)", key);
+		if (strcmp(key, "scale") && strcmp(key, "mode")) {
+			return luaL_error(L, "flame.output: there's no %s (mode, scale)", key);
 		}
 		lua_pop(L, 1);
 	}
+	// "1920x1080@120", or "1920x1080" for the fastest that size has
+	int width = 0, height = 0;
+	double hz = 0;
+	lua_getfield(L, 2, "mode");
+	if (!lua_isnil(L, -1)) {
+		const char *mode = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
+		int used = 0;
+		bool ok = sscanf(mode, "%dx%d%n", &width, &height, &used) == 2 && width > 0
+			&& height > 0;
+		const char *rest = mode + used;
+		if (ok && *rest == '@') {
+			char *end = NULL;
+			hz = strtod(rest + 1, &end);
+			ok = end != rest + 1 && !*end && hz > 0 && hz < 1000;
+		} else {
+			ok = ok && !*rest;
+		}
+		if (!ok) {
+			return luaL_error(L, "flame.output: mode is \"1920x1080@120\" (or \"1920x1080\"), "
+				"not %s", mode);
+		}
+	}
+	lua_pop(L, 1);
 	lua_getfield(L, 2, "scale");
 	float scale = 0;
 	if (!lua_isnil(L, -1)) {
@@ -825,6 +848,9 @@ static int l_output(lua_State *L) {
 		out->name = copy;
 	}
 	out->scale = scale;
+	out->width = width;
+	out->height = height;
+	out->refresh = (int32_t)(hz * 1000 + 0.5);
 	char key[160];
 	snprintf(key, sizeof(key), "output.%s.scale", name);
 	pin(self(L), key);

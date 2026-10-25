@@ -18,4 +18,11 @@ struct mode_info {
 // freesync is on in their menu. ties keep the preferred one. -1 for none
 int mode_pick(const struct mode_info *modes, size_t count);
 
+// the mode flame.lua asks for: that size, at the refresh nearest the one
+// asked (refresh in mHz, within a hertz: 120 is 119.982 too), or at the
+// fastest that size has when refresh is 0. -1 when the display has no such
+// mode
+int mode_pick_asked(const struct mode_info *modes, size_t count, int32_t width,
+	int32_t height, int32_t refresh);
+
 #endif

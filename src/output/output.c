@@ -80,8 +80,15 @@ static float configured_scale(const struct flame_config *config, const char *nam
 	return oc && oc->scale > 0 ? oc->scale : 1;
 }
 
-// the display's native size at its fastest refresh (output/mode.h)
-static struct wlr_output_mode *best_mode(struct wlr_output *wlr_output) {
+static bool mode_asked(const struct flame_config *config, const char *name) {
+	const struct flame_output_config *oc = config_output(config, name);
+	return oc && oc->width;
+}
+
+// the mode flame.lua asks for, else the display's native size at its
+// fastest refresh (output/mode.h). NULL when it has none listed
+static struct wlr_output_mode *wanted_mode(struct wlr_output *wlr_output,
+		const struct flame_config *config) {
 	size_t count = (size_t)wl_list_length(&wlr_output->modes);
 	struct mode_info *infos = count ? calloc(count, sizeof(*infos)) : NULL;
 	if (!infos) {
@@ -93,7 +100,22 @@ static struct wlr_output_mode *best_mode(struct wlr_output *wlr_output) {
 		infos[i++] = (struct mode_info){mode->width, mode->height, mode->refresh,
 			mode->preferred};
 	}
-	int pick = mode_pick(infos, count);
+	int pick = -1;
+	const struct flame_output_config *oc = config_output(config, wlr_output->name);
+	if (mode_asked(config, wlr_output->name)) {
+		pick = mode_pick_asked(infos, count, oc->width, oc->height, oc->refresh);
+		if (pick < 0) {
+			wlr_log(WLR_ERROR, "%s: there's no %dx%d@%.3f, its fastest then", wlr_output->name,
+				oc->width, oc->height, oc->refresh / 1000.0);
+			wl_list_for_each(mode, &wlr_output->modes, link) {
+				wlr_log(WLR_INFO, "%s: it has %dx%d@%.3f", wlr_output->name, mode->width,
+					mode->height, mode->refresh / 1000.0);
+			}
+		}
+	}
+	if (pick < 0) {
+		pick = mode_pick(infos, count);
+	}
 	free(infos);
 	i = 0;
 	wl_list_for_each(mode, &wlr_output->modes, link) {
@@ -113,7 +135,7 @@ static bool output_enable(struct wlr_output *wlr_output, const struct flame_conf
 	// the preferred mode when the fastest one won't light up (a cable or a
 	// gpu port that can't carry it)
 	struct wlr_output_mode *preferred = wlr_output_preferred_mode(wlr_output);
-	struct wlr_output_mode *mode = best_mode(wlr_output);
+	struct wlr_output_mode *mode = wanted_mode(wlr_output, config);
 	if (mode) {
 		wlr_output_state_set_mode(&state, mode);
 		if (mode != preferred && preferred && !wlr_output_test_state(wlr_output, &state)) {
@@ -168,6 +190,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 	}
 	output->server = server;
 	output->wlr = wlr_output;
+	output->mode_asked = mode_asked(server->config, wlr_output->name);
 	output->background = scene_rect_create(server->render.layers[FLAME_LAYER_BACKGROUND],
 		0, 0, server->config->background_color);
 	struct flame_frame_hooks hooks = {
@@ -279,14 +302,35 @@ struct flame_output *outputs_primary(struct flame_outputs *outputs) {
 void outputs_apply_config(struct flame_outputs *outputs) {
 	struct flame_output *output;
 	wl_list_for_each(output, &outputs->list, link) {
-		float scale = configured_scale(outputs->server->config, output->wlr->name);
-		if (scale == output->wlr->scale) {
+		const struct flame_config *config = outputs->server->config;
+		float scale = configured_scale(config, output->wlr->name);
+		// a modeset waits for the flip on its way, it doesn't race it. only
+		// when flame.lua asks, or asked and doesn't any more: a screen that
+		// came up in its preferred mode because the fastest wouldn't light up
+		// isn't tried again on every save
+		bool asked = mode_asked(config, output->wlr->name);
+		struct wlr_output_mode *mode = asked || output->mode_asked
+			? wanted_mode(output->wlr, config) : NULL;
+		bool new_mode = mode && mode != output->wlr->current_mode;
+		if (scale == output->wlr->scale && !new_mode) {
 			continue;
 		}
 		struct wlr_output_state state;
 		wlr_output_state_init(&state);
 		wlr_output_state_set_scale(&state, scale);
-		if (!wlr_output_commit_state(output->wlr, &state)) {
+		if (new_mode) {
+			wlr_output_state_set_mode(&state, mode);
+		}
+		if (wlr_output_commit_state(output->wlr, &state)) {
+			output->mode_asked = asked;
+			if (new_mode) {
+				wlr_log(WLR_INFO, "%s: %dx%d@%.3fHz now", output->wlr->name, mode->width,
+					mode->height, mode->refresh / 1000.0);
+			}
+		} else if (new_mode) {
+			wlr_log(WLR_ERROR, "%s: can't change to %dx%d@%.3fHz", output->wlr->name,
+				mode->width, mode->height, mode->refresh / 1000.0);
+		} else {
 			wlr_log(WLR_ERROR, "%s: can't change scale to %.2f", output->wlr->name, scale);
 		}
 		wlr_output_state_finish(&state);

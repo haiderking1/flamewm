@@ -49,6 +49,9 @@ struct flame_anim_config {
 struct flame_output_config {
 	char *name;
 	float scale; // 0 for the default
+	// the mode it asked for, 0 for the fastest at the native size. refresh in
+	// mHz, 0 for the fastest at that size
+	int32_t width, height, refresh;
 };
 
 // read only while it's in use. the compiled in defaults, with the user's

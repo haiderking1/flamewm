@@ -109,8 +109,10 @@ end
 -- flame.rule({ app_id = "^foot$" }, { opacity = 0.95 })
 
 -- screens by connector name (flame logs them when they come up), "*" for
--- every screen without its own. scale: hidpi, fractional ones work too
+-- every screen without its own. scale: hidpi, fractional ones work too.
+-- mode: the size and refresh, the fastest the screen has when it says nothing
 -- flame.output("DP-1", { scale = 1.5 })
+-- flame.output("DP-2", { mode = "1920x1080@120" })
 -- flame.output("*", { scale = 1 })
 
 -- things to start with flame, once

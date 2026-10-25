@@ -18,6 +18,9 @@ struct flame_output {
 	struct flame_rect *background;
 	struct wlr_box box; // layout coords
 	struct wlr_box usable; // box minus what bars reserve, tiles go here
+	// the mode on it is the one flame.lua asked for: without the ask any more
+	// it goes back to the fastest
+	bool mode_asked;
 
 	struct wl_listener request_state;
 	struct wl_listener destroy;

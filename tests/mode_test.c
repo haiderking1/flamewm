@@ -58,8 +58,28 @@ static void test_none(void) {
 	CHECK(mode_pick(NULL, 0) == -1);
 }
 
+// flame.lua asking: 120 is the 119.982 the display has, a size alone is its
+// fastest, a refresh or a size it doesn't have is none
+static void test_asked(void) {
+	struct mode_info modes[] = {
+		{1920, 1080, 60000, true},
+		{1920, 1080, 164955, false},
+		{1920, 1080, 119982, false},
+		{1920, 1080, 120000, false},
+		{1280, 720, 60000, false},
+	};
+	CHECK(mode_pick_asked(modes, 5, 1920, 1080, 120000) == 3);
+	CHECK(mode_pick_asked(modes, 5, 1920, 1080, 119982) == 2);
+	CHECK(mode_pick_asked(modes, 5, 1920, 1080, 165000) == 1);
+	CHECK(mode_pick_asked(modes, 5, 1920, 1080, 0) == 1);
+	CHECK(mode_pick_asked(modes, 5, 1280, 720, 0) == 4);
+	CHECK(mode_pick_asked(modes, 5, 1920, 1080, 100000) == -1);
+	CHECK(mode_pick_asked(modes, 5, 2560, 1440, 0) == -1);
+}
+
 int main(void) {
 	test_fastest_at_native();
+	test_asked();
 	test_size_first();
 	test_no_preferred();
 	test_tie();

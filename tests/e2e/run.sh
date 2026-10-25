@@ -843,6 +843,24 @@ printf 'flame.animations {\\n\\topne = { ms = 1 },\\n}\\n' > \$XDG_CONFIG_HOME/f
 sleep 0.6
 grep -ao \"flame.lua:1: flame.animations: there's no opne\" flame.log | tail -1
 " "config errors: 0" "flame.lua:1: flame.animations: there's no opne"
+case_run "flame.output's mode: a size and a refresh load clean, what isn't a mode is an error that says what one looks like" "
+cat > \$XDG_CONFIG_HOME/flame/flame.lua <<'EOL'
+flame.output(\"HEADLESS-1\", { mode = \"1280x720@60\", scale = 1 })
+flame.output(\"*\", { mode = \"1920x1080\" })
+EOL
+sleep 0.6
+grep -ac 'ERROR.*config: ' flame.log | sed 's/^/config errors: /'
+for bad in 'fast' '1920x1080@' '1920x1080x' '0x0@60'; do
+	printf 'flame.output(\"*\", { mode = \"%s\" })\\n' \"\$bad\" > \$XDG_CONFIG_HOME/flame/flame.lua
+	sleep 0.5
+	grep -ao \"mode is .* not \$bad\\$\" flame.log | tail -1
+done
+printf 'flame.output(\"*\", { scael = 1 })\\n' > \$XDG_CONFIG_HOME/flame/flame.lua
+sleep 0.5
+grep -ao \"flame.output: there's no scael (mode, scale)\" flame.log | tail -1
+$CTL state > /dev/null && echo still up
+" "config errors: 0" "not fast" "not 1920x1080@" "not 1920x1080x" "not 0x0@60" \
+	"flame.output: there's no scael (mode, scale)" "still up"
 case_run "examples/flame.lua and the first flame.lua flame writes both load without an error" "
 cp $(dirname "$FLAME")/../examples/flame.lua \$XDG_CONFIG_HOME/flame/flame.lua
 sleep 0.6
