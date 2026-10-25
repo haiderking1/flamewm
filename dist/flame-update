@@ -44,7 +44,13 @@ done
 
 [ "$(id -u)" != 0 ] || die "not as root: makepkg won't build as root, it asks for sudo when it installs"
 command -v pacman > /dev/null && command -v makepkg > /dev/null || die "this is for arch (pacman and makepkg). anywhere else: make install, see docs/install.md"
-command -v git > /dev/null || die "git first: sudo pacman -S git"
+# what makepkg builds with, and git: on most arch installs already, put in
+# when they aren't (a fresh one)
+if ! pacman -Qq base-devel git > /dev/null 2>&1; then
+	say "getting what flame builds with first (base-devel, git)"
+	sudo -v || die "installing needs sudo"
+	answer sudo pacman -S --needed base-devel git
+fi
 
 # what's in now decides what gets updated
 if [ -z "$want" ]; then
