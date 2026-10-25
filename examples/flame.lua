@@ -60,19 +60,23 @@ flame.blur {
 	noise = 0.004,
 }
 
--- animations: curves named once ({x1, y1, x2, y2}, like css cubic-bezier),
--- then a line for each thing that moves: how long (ms), along which curve,
--- how it looks. flame.animations(false) turns them all off
-flame.curve("smooth", { 0.46, 1.0, 0.29, 0.99 })
-flame.curve("linear", { 0, 0, 1, 1 })
-
-flame.animation("open",      { ms = 400, curve = "smooth", style = "slide" }) -- slide, zoom 40%, fade, none
-flame.animation("close",     { ms = 300, curve = "smooth", style = "slide" })
-flame.animation("move",      { ms = 500, curve = "smooth" })
-flame.animation("workspace", { ms = 300, curve = "smooth", style = "slide" }) -- or slidevert
-flame.animation("fade_in",   { from = 0.5, curve = "smooth" })
-flame.animation("fade_out",  { from = 0.5, curve = "linear" })
-flame.animation("layers",    { open = "slide", close = "slide" }) -- bars, notifications, launchers
+-- animations: on or off for all of them, curves named once ({x1, y1, x2,
+-- y2}, like css cubic-bezier), then each thing that moves: how long (ms),
+-- along which curve, how it looks
+flame.animations {
+	enabled = true,
+	curves = {
+		smooth = { 0.46, 1.0, 0.29, 0.99 },
+		linear = { 0, 0, 1, 1 },
+	},
+	open      = { ms = 400, curve = "smooth", style = "slide" }, -- slide, zoom 40%, fade, none
+	close     = { ms = 300, curve = "smooth", style = "slide" },
+	move      = { ms = 500, curve = "smooth" },
+	workspace = { ms = 300, curve = "smooth", style = "slide" }, -- or slidevert
+	fade_in   = { from = 0.5, curve = "smooth" },
+	fade_out  = { from = 0.5, curve = "linear" },
+	layers    = { open = "slide", close = "slide" }, -- bars, notifications, launchers
+}
 
 -- the binds flame has on its own, as an example of saying them yourself.
 -- binding the same keys again replaces them, flame.unbind and
