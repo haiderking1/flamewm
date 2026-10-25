@@ -28,7 +28,7 @@ to update flame to the newest version later, run `flame-update`.
 - light: ~30MB of its own memory, X server included
 - made for games: tearing, vrr, and frame pacing with nothing injected into the game
 - its own renderer: glass, blur, rounded corners and animations, all drawn by flame
-- its own frame scheduler: nothing drawn when nothing changes, frames start as late as they can
+- its own frame scheduler
 - a hardware cursor that actually works on nvidia
 - bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
 - screen sharing with its own portal and picker: point at a window, click, done
@@ -36,7 +36,7 @@ to update flame to the newest version later, run `flame-update`.
 - its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications. or bring your own bar and config
 - every setting live: an optional settings app if you want them graphical, or `flamectl set`
 - lua config for everything else, reloaded the moment you save it
-- socket-based ipc, plus ext-workspace for waybar
+- ext-workspace for waybar
 - explicit sync, and windows on hidden workspaces told to stop drawing
 - frame logs that show where a slow frame's time went
 - and more...
