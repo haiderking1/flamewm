@@ -40,6 +40,7 @@ package_flamewm-git() {
 	conflicts=(flamewm)
 	cd "$pkgbase"
 	make install-core DESTDIR="$pkgdir" PREFIX=/usr
+	install -Dm755 dist/flame-update "$pkgdir/usr/bin/flame-update"
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
