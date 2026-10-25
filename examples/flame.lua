@@ -4,29 +4,52 @@
 -- reloads right away. a mistake only shows in the log, flame keeps going on
 -- whatever loaded before it
 
+-- how it looks: the gaps between windows, their borders, and the color
+-- behind everything
 flame.set {
 	gap = 6,
 	border_width = 2,
 	border_color = "#2a2a2a",
 	border_focused_color = "#ff6a00",
 	background = "#111111",
-	-- wallpaper = "~/walls/sea.jpg", -- a jpeg, png or webp over the background
-	-- wallpaper_mode = "fill", -- "fit", "center", "stretch"
-	lock = "flamelock", -- what super+l and going to sleep run: "swaylock", "" for nothing
+}
+
+-- the wallpaper: a jpeg, png or webp, flame draws it itself
+-- flame.set {
+-- 	wallpaper = "~/walls/sea.jpg",
+-- 	wallpaper_mode = "fill", -- "fit", "center", "stretch"
+-- }
+
+-- what locks the screen: super+l, and before the computer sleeps.
+-- "swaylock" or any other locker, "" for nothing
+flame.set {
+	lock = "flamelock",
+}
+
+-- the keyboard: layouts, and how fast a held key repeats
+flame.set {
 	repeat_rate = 30, -- keys a second
 	repeat_delay = 250, -- ms
-	focus_follows_mouse = true,
-	-- on a scaled screen: X apps draw at its real pixels and scale themselves
-	-- (sharp, told the dpi), instead of being stretched (blurry). apps that
-	-- ignore dpi look small
-	x_zero_scaling = false,
-	drag_modifier = "super", -- held: left drag moves, right drag resizes
-	cursor_size = 24,
-	-- cursor_theme = "Adwaita",
 	keyboard = {
 		-- layout = "us,ara",
 		-- options = "grp:alt_shift_toggle",
 	},
+}
+
+-- the mouse: focus follows it, a held key to move and resize windows with,
+-- the cursor
+flame.set {
+	focus_follows_mouse = true,
+	drag_modifier = "super", -- held: left drag moves, right drag resizes
+	cursor_size = 24,
+	-- cursor_theme = "Adwaita",
+}
+
+-- X apps on a scaled screen: drawn at its real pixels and scaling
+-- themselves (sharp, told the dpi), instead of being stretched (blurry).
+-- apps that ignore dpi look small
+flame.set {
+	x_zero_scaling = false,
 }
 
 -- animations: windows opening, closing and moving around, the

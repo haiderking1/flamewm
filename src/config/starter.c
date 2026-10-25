@@ -16,7 +16,7 @@ static const char starter_top[] =
 	"-- flame's config, lua. save it and flame picks it up right away.\n"
 	"-- flamesettings (super+,) changes things too and keeps them in\n"
 	"-- settings.lua next to this file: what's set here wins over it.\n"
-	"-- every option: https://github.com/haiderking1/flamewm/blob/main/docs/config.md\n"
+	"-- every option: https://github.com/haiderking1/flamewm/blob/main/examples/flame.lua\n"
 	"\n";
 
 static const char starter_bar[] =
@@ -30,6 +30,8 @@ static const char starter_no_bar[] =
 	"\n";
 
 static const char starter_rest[] =
+	"-- the things people change first: the gaps, the borders, the keyboard\n"
+	"-- layout, what locks the screen\n"
 	"-- flame.set {\n"
 	"--   gap = 8,\n"
 	"--   border_width = 2,\n"
@@ -37,6 +39,7 @@ static const char starter_rest[] =
 	"--   lock = \"flamelock\",   -- what super+l runs: \"swaylock\", \"\" for nothing\n"
 	"-- }\n"
 	"\n"
+	"-- your own binds: keys, and what they run\n"
 	"-- flame.bind(\"super\", \"b\", \"firefox\")\n";
 
 // path's folder, made if it isn't there (and the ones above it)
