@@ -124,8 +124,36 @@ static void pin_fields(lua_State *L, struct flame_lua *lua, int table, const cha
 
 static const char prelude[] =
 	"local rules = {}\n"
+	"-- what a rule can match on and say, a wrong name an error where it's written\n"
+	"local rule_match = { app_id = 'string', title = 'string' }\n"
+	"local rule_props = { floating = 'boolean', fullscreen = 'boolean', workspace = 'number',\n"
+	"  animation = 'boolean', open = 'string', close = 'string', fade_in = 'boolean',\n"
+	"  fade_out = 'boolean', opacity = 'number' }\n"
+	"local function names(t)\n"
+	"  local out = {}\n"
+	"  for k in pairs(t) do out[#out + 1] = k end\n"
+	"  table.sort(out)\n"
+	"  return table.concat(out, ', ')\n"
+	"end\n"
 	"function flame.rule(match, props)\n"
-	"  assert(type(match) == 'table' and type(props) == 'table', 'flame.rule(match, props)')\n"
+	"  if type(match) ~= 'table' or type(props) ~= 'table' then\n"
+	"    error('flame.rule({ app_id = ... }, { floating = true, ... })', 2)\n"
+	"  end\n"
+	"  for k, v in pairs(match) do\n"
+	"    if not rule_match[k] then\n"
+	"      error(\"flame.rule: it matches on \" .. names(rule_match) .. \", there's no \" .. tostring(k), 2)\n"
+	"    elseif type(v) ~= rule_match[k] then\n"
+	"      error('flame.rule: ' .. k .. ' is a ' .. rule_match[k] .. ' (a lua pattern)', 2)\n"
+	"    end\n"
+	"  end\n"
+	"  if next(match) == nil then error('flame.rule: match on app_id or title', 2) end\n"
+	"  for k, v in pairs(props) do\n"
+	"    if not rule_props[k] then\n"
+	"      error(\"flame.rule: there's no \" .. tostring(k) .. ' (' .. names(rule_props) .. ')', 2)\n"
+	"    elseif type(v) ~= rule_props[k] then\n"
+	"      error('flame.rule: ' .. k .. ' is a ' .. rule_props[k], 2)\n"
+	"    end\n"
+	"  end\n"
 	"  rules[#rules + 1] = { match = match, props = props }\n"
 	"end\n"
 	"function flame._rules(app_id, title)\n"
@@ -758,6 +786,15 @@ static int l_output(lua_State *L) {
 	struct flame_config *config = self(L)->config;
 	const char *name = luaL_checkstring(L, 1);
 	luaL_checktype(L, 2, LUA_TTABLE);
+	// scale's all a screen has for now: anything else is a mistake
+	lua_pushnil(L);
+	while (lua_next(L, 2)) {
+		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "?";
+		if (strcmp(key, "scale")) {
+			return luaL_error(L, "flame.output: there's no %s (scale)", key);
+		}
+		lua_pop(L, 1);
+	}
 	lua_getfield(L, 2, "scale");
 	float scale = 0;
 	if (!lua_isnil(L, -1)) {
