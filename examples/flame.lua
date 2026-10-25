@@ -43,15 +43,6 @@ flame.mouse {
 	-- cursor_theme = "Adwaita",
 }
 
--- games: tearing when a fullscreen game turns vsync off, adaptive sync,
--- and its frames at an even pace (pace_fps: a cap, 0 for none)
-flame.games {
-	tearing = true,
-	vrr = "fullscreen", -- "off", "fullscreen", "always"
-	pace = "vrr", -- "off", "vrr", "always"
-	pace_fps = 0,
-}
-
 -- X apps: on a scaled screen drawn at its real pixels and scaling
 -- themselves (sharp, told the dpi) instead of stretched (blurry), apps that
 -- ignore dpi look small. global_keys: which keys X apps see while a wayland
