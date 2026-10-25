@@ -735,6 +735,15 @@ import re, sys
 drawn = [float(re.search(r'was (\d+)k', l).group(1)) for l in sys.stdin]
 print('slides', len(drawn), 'pixels drawn per frame', 'about the screen' if drawn and max(drawn) <= 1014 else 'more: %s' % drawn)
 \"" "slides 4 pixels drawn per frame about the screen"
+case_run "a window out of sight is told so (suspended): its workspace left, shown again, sent to a hidden one" "
+$BIN/wlsuspend 5 > s.txt &
+sleep 0.6
+$CTL workspace 2 > /dev/null; sleep 0.4
+$CTL workspace 1 > /dev/null; sleep 0.4
+$CTL movetoworkspace 3 > /dev/null; sleep 0.4
+wait
+tr '\\n' ' ' < s.txt; echo
+" "shown suspended shown suspended"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched

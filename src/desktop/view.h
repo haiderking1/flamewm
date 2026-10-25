@@ -34,6 +34,8 @@ struct flame_view_impl {
 	void (*set_activated)(struct flame_view *view, bool activated);
 	// the user is dragging its size around, sizes will change every frame
 	void (*set_resizing)(struct flame_view *view, bool resizing);
+	// optional: it's on a hidden workspace, nobody sees what it draws
+	void (*set_suspended)(struct flame_view *view, bool suspended);
 	void (*close)(struct flame_view *view);
 	struct wlr_surface *(*surface)(struct flame_view *view);
 	// what bars show. NULL when the client never said
@@ -77,6 +79,8 @@ struct flame_view {
 	bool shown;
 	// held by a mouse drag, the drag owns where its tree sits
 	bool grabbed;
+	// told it's out of sight (its workspace isn't the one shown)
+	bool suspended;
 
 	// floating: no tile, its own box above the tiles. float_box is where,
 	// border included, layout coords. float_wanted: the shell says it should
@@ -138,6 +142,7 @@ void view_set_focused(struct flame_view *view, bool focused);
 // its border in the config's colors, after the config changed
 void view_refresh_border(struct flame_view *view, bool focused);
 void view_set_resizing(struct flame_view *view, bool resizing);
+void view_set_suspended(struct flame_view *view, bool suspended);
 void view_close(struct flame_view *view);
 struct wlr_surface *view_surface(struct flame_view *view);
 // where the keyboard goes when it's focused

@@ -161,6 +161,14 @@ static void impl_set_resizing(struct flame_view *view, bool resizing) {
 	}
 }
 
+static void impl_set_suspended(struct flame_view *view, bool suspended) {
+	struct wlr_xdg_toplevel *xdg = from_view(view)->xdg;
+	if (xdg->base->initialized
+			&& wl_resource_get_version(xdg->resource) >= XDG_TOPLEVEL_STATE_SUSPENDED_SINCE_VERSION) {
+		wlr_xdg_toplevel_set_suspended(xdg, suspended);
+	}
+}
+
 static void impl_close(struct flame_view *view) {
 	wlr_xdg_toplevel_send_close(from_view(view)->xdg);
 }
@@ -241,6 +249,7 @@ static const struct flame_view_impl toplevel_impl = {
 	.window_geometry = impl_window_geometry,
 	.set_activated = impl_set_activated,
 	.set_resizing = impl_set_resizing,
+	.set_suspended = impl_set_suspended,
 	.close = impl_close,
 	.surface = impl_surface,
 	.app_id = impl_app_id,

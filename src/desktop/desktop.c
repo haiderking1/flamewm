@@ -150,6 +150,23 @@ bool desktop_prospective_geometry(struct flame_desktop *desktop, struct wlr_box 
 	return true;
 }
 
+// windows on the workspaces not shown are told they're out of sight
+// (suspended): an app stops drawing for nobody. said the moment a workspace
+// is left, its slide out shows what it last drew
+static void update_suspended(struct flame_desktop *desktop) {
+	for (int i = 0; i < FLAME_WORKSPACE_COUNT; i++) {
+		struct flame_workspace *workspace = &desktop->workspaces[i];
+		bool hidden = workspace != desktop->active;
+		struct flame_view *view;
+		wl_list_for_each(view, &workspace->views, link) {
+			view_set_suspended(view, hidden);
+		}
+		wl_list_for_each(view, &workspace->floats, link) {
+			view_set_suspended(view, hidden);
+		}
+	}
+}
+
 void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 	struct flame_workspace *workspace = desktop->active;
 	view->mapped_at = now_ns();
@@ -180,6 +197,7 @@ void desktop_map_view(struct flame_desktop *desktop, struct flame_view *view) {
 		// sent off to another workspace: it lays out when that one shows
 		workspace->last_focused = view;
 		fullscreen_claim_if_wanted(desktop, view);
+		update_suspended(desktop);
 		desktop_notify(desktop);
 		return;
 	}
@@ -206,6 +224,8 @@ void desktop_unmap_view(struct flame_desktop *desktop, struct flame_view *view) 
 	view->fullscreen_wanted = false;
 	view->floating = false;
 	view->has_float_box = false;
+	// a remap's a new toplevel to the client, nothing said to it yet
+	view->suspended = false;
 	// its last picture plays the close, from where it is now
 	if (!view->unmap_quietly && !desktop->server->terminating) {
 		window_anim_snapshot_if_missing(view);
@@ -311,6 +331,7 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 
 	desktop_arrange(desktop);
 	focus_view(desktop, focus_on_show(desktop, target));
+	update_suspended(desktop);
 	// a different set of windows is under the still cursor now. waiting for a
 	// transaction doesn't work, there's none when nothing needs a new size,
 	// and the scroll would keep going to a window on the old workspace
@@ -357,6 +378,7 @@ void desktop_move_view_to_workspace(struct flame_desktop *desktop,
 	}
 	// target gets laid out when it becomes visible
 	desktop_arrange(desktop);
+	update_suspended(desktop);
 	// the last window leaving needs no transaction, the pointer moves on now
 	cursor_refresh(&desktop->server->input.cursor);
 	desktop_notify(desktop);

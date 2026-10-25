@@ -164,6 +164,15 @@ void view_set_resizing(struct flame_view *view, bool resizing) {
 	}
 }
 
+void view_set_suspended(struct flame_view *view, bool suspended) {
+	if (view->suspended != suspended) {
+		view->suspended = suspended;
+		if (view->impl->set_suspended) {
+			view->impl->set_suspended(view, suspended);
+		}
+	}
+}
+
 void view_close(struct flame_view *view) {
 	view->impl->close(view);
 }
