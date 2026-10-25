@@ -19,14 +19,18 @@
 // and changes what it says. by block, each its own function (the prelude
 // below, all flame.set underneath):
 //   flame.look{ gap, border_width, border_color, border_focused_color,
-//     background }
+//     background, unfocused_opacity, focused_opacity }
 //   flame.wallpaper{ path, mode }, flame.lockscreen{ command }
 //   flame.keyboard{ layout, variant, model, options, rules, repeat_rate,
 //     repeat_delay }
 //   flame.mouse{ focus_follows, drag_modifier, cursor_size, cursor_theme }
 //   flame.games{ tearing, vrr, pace, pace_fps }
 //   flame.x11{ zero_scaling, global_keys }
-//   flame.blur{ noise, size }, flame.animations{ ... } (or false)
+//   flame.blur{ noise, size }, flame.animations(false) for none
+//   flame.curve(name, { x1, y1, x2, y2 }), then a line per thing that moves:
+//   flame.animation(open|close|move|workspace|focus|fade_in|fade_out|layers,
+//     { enabled, ms, curve, style ("slide", "zoom 40%", "fade", "none";
+//     workspace: "slide", "slidevert"), from (fades), open/close (layers) })
 // the api, all under the global `flame`:
 //   flame.set{ gap = 6, border_width = 2, border_color = "#2a2a2a",
 //     border_focused_color = "#ff6a00", background = "#111111",
@@ -155,7 +159,8 @@ static const char prelude[] =
 	"end\n"
 	"section('look', { gap = 'gap', border_width = 'border_width',\n"
 	"  border_color = 'border_color', border_focused_color = 'border_focused_color',\n"
-	"  background = 'background' })\n"
+	"  background = 'background', unfocused_opacity = 'animations.unfocused_opacity',\n"
+	"  focused_opacity = 'animations.focused_opacity' })\n"
 	"section('wallpaper', { path = 'wallpaper', mode = 'wallpaper_mode' })\n"
 	"section('lockscreen', { command = 'lock' })\n"
 	"section('keyboard', { layout = 'keyboard.layout', variant = 'keyboard.variant',\n"
@@ -169,7 +174,78 @@ static const char prelude[] =
 	"section('x11', { zero_scaling = 'x_zero_scaling', global_keys = 'x_global_keys' })\n"
 	// these two are tables of their own in flame.set already
 	"function flame.blur(t) flame.set({ blur = t }) end\n"
-	"function flame.animations(t) flame.set({ animations = t }) end\n";
+	"function flame.animations(t) flame.set({ animations = t }) end\n"
+	"-- animations, the way they read best: curves named once, then a line for\n"
+	"-- each thing that moves. all of it flame.set{ animations = ... } underneath\n"
+	"local curves = { default = { 0.46, 1.0, 0.29, 0.99 }, linear = { 0, 0, 1, 1 } }\n"
+	"function flame.curve(name, points)\n"
+	"  if type(name) ~= 'string' or type(points) ~= 'table' or #points ~= 4 then\n"
+	"    error('flame.curve(name, { x1, y1, x2, y2 })', 2)\n"
+	"  end\n"
+	"  curves[name] = points\n"
+	"end\n"
+	"local kinds = { none = true, slide = true, zoom = true, fade = true }\n"
+	"-- \"zoom 40%\": how it looks, and the size a zoom starts from (or ends at)\n"
+	"local function look_of(text)\n"
+	"  local kind, pct = string.match(tostring(text), '^(%a+)%s*(%d*)%%?$')\n"
+	"  if not kind or not kinds[kind] then return nil end\n"
+	"  return kind, pct ~= '' and tonumber(pct) / 100 or nil\n"
+	"end\n"
+	"local leaves = {\n"
+	"  open = { ms = 'open', style = 'open', zoom = 'zoom_from' },\n"
+	"  close = { ms = 'close', style = 'close', zoom = 'zoom_to' },\n"
+	"  move = { ms = 'move' },\n"
+	"  workspace = { ms = 'workspace', style = 'workspace' },\n"
+	"  focus = { ms = 'focus' },\n"
+	"  fade_in = { from = 'fade_in_from', fade = 'fade_in' },\n"
+	"  fade_out = { from = 'fade_out_from', fade = 'fade_out' },\n"
+	"  layers = { layers = true },\n"
+	"}\n"
+	"function flame.animation(name, t)\n"
+	"  local leaf = leaves[name]\n"
+	"  if not leaf then\n"
+	"    error(\"flame.animation: there's no \" .. tostring(name) .. ' (open, close, move, ' ..\n"
+	"      'workspace, focus, fade_in, fade_out, layers)', 2)\n"
+	"  end\n"
+	"  if type(t) ~= 'table' then error('flame.animation(' .. name .. ', { ... })', 2) end\n"
+	"  local a = {}\n"
+	"  for k, v in pairs(t) do\n"
+	"    if k == 'enabled' then\n"
+	"      if leaf.fade then a[leaf.fade] = v and true or false\n"
+	"      elseif leaf.layers then a.layers = v and true or false\n"
+	"      elseif not v then\n"
+	"        if leaf.style and name ~= 'workspace' then a[leaf.style] = 'none'\n"
+	"        else a.duration = { [leaf.ms] = 0 } end\n"
+	"      end\n"
+	"    elseif k == 'ms' and leaf.ms then\n"
+	"      a.duration = a.duration or {}\n"
+	"      a.duration[leaf.ms] = v\n"
+	"    elseif k == 'curve' and (leaf.ms or leaf.fade) then\n"
+	"      local points = curves[v]\n"
+	"      if not points then error('flame.animation: no curve ' .. tostring(v) .. ', flame.curve makes one', 2) end\n"
+	"      a.curve = { [leaf.ms or leaf.fade] = points }\n"
+	"    elseif k == 'from' and leaf.from then\n"
+	"      a[leaf.from] = v\n"
+	"    elseif k == 'style' and name == 'workspace' then\n"
+	"      if v ~= 'slide' and v ~= 'slidevert' then\n"
+	"        error('flame.animation: workspace style is slide or slidevert', 2)\n"
+	"      end\n"
+	"      a.workspace_vertical = v == 'slidevert'\n"
+	"    elseif k == 'style' and leaf.style then\n"
+	"      local kind, size = look_of(v)\n"
+	"      if not kind then error('flame.animation: ' .. name .. ' style is none, slide, zoom or fade (zoom 40%)', 2) end\n"
+	"      a[leaf.style] = kind\n"
+	"      if size then a[leaf.zoom] = size end\n"
+	"    elseif (k == 'open' or k == 'close') and leaf.layers then\n"
+	"      local kind = look_of(v)\n"
+	"      if not kind then error('flame.animation: layers ' .. k .. ' is none, slide, zoom or fade', 2) end\n"
+	"      a['layer_' .. k] = kind\n"
+	"    else\n"
+	"      error('flame.animation: ' .. name .. \" has no \" .. tostring(k), 2)\n"
+	"    end\n"
+	"  end\n"
+	"  flame.set({ animations = a })\n"
+	"end\n";
 
 static struct flame_lua *self(lua_State *L) {
 	return lua_touserdata(L, lua_upvalueindex(1));

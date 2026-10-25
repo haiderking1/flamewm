@@ -12,6 +12,7 @@ flame.look {
 	border_color = "#2a2a2a",
 	border_focused_color = "#ff6a00",
 	background = "#111111",
+	unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
 }
 
 -- the wallpaper: a jpeg, png or webp, flame draws it itself
@@ -59,42 +60,23 @@ flame.blur {
 	noise = 0.004,
 }
 
--- animations: windows opening, closing and moving around, the
--- workspace sliding over, bars and notifications coming and going.
--- `flame.animations(false)` turns them all off
-flame.animations {
-	enabled = true,
-	layers = true, -- bars, notifications, launchers
-	open = "slide", -- slide, zoom, fade or none
-	close = "slide",
-	layer_open = "slide",
-	layer_close = "slide",
-	fade_in = true, -- on top of a slide or zoom
-	fade_out = true,
-	fade_in_from = 0.5,
-	fade_out_from = 0.5,
-	zoom_from = 0.4, -- a zoom opens from 40%
-	zoom_to = 0.8, -- and closes to 80%
-	workspace_vertical = false,
-	focused_opacity = 1.0,
-	unfocused_opacity = 1.0, -- say 0.9 and windows without focus fade a bit
-	duration = { open = 400, close = 300, move = 500, workspace = 300, focus = 0 },
-	-- css cubic-bezier curves: {x1, y1, x2, y2}
-	curve = {
-		open = { 0.46, 1.0, 0.29, 0.99 },
-		close = { 0.46, 1.0, 0.29, 0.99 },
-		move = { 0.46, 1.0, 0.29, 0.99 },
-		workspace = { 0.46, 1.0, 0.29, 0.99 },
-		focus = { 0.46, 1.0, 0.29, 0.99 },
-		fade_in = { 0.46, 1.0, 0.29, 0.99 },
-		fade_out = { 0.5, 0.5, 0.5, 0.5 },
-	},
-}
+-- animations: curves named once ({x1, y1, x2, y2}, like css cubic-bezier),
+-- then a line for each thing that moves: how long (ms), along which curve,
+-- how it looks. flame.animations(false) turns them all off
+flame.curve("smooth", { 0.46, 1.0, 0.29, 0.99 })
+flame.curve("linear", { 0, 0, 1, 1 })
+
+flame.animation("open",      { ms = 400, curve = "smooth", style = "slide" }) -- slide, zoom 40%, fade, none
+flame.animation("close",     { ms = 300, curve = "smooth", style = "slide" })
+flame.animation("move",      { ms = 500, curve = "smooth" })
+flame.animation("workspace", { ms = 300, curve = "smooth", style = "slide" }) -- or slidevert
+flame.animation("fade_in",   { from = 0.5, curve = "smooth" })
+flame.animation("fade_out",  { from = 0.5, curve = "linear" })
+flame.animation("layers",    { open = "slide", close = "slide" }) -- bars, notifications, launchers
 
 -- the binds flame has on its own, as an example of saying them yourself.
 -- binding the same keys again replaces them, flame.unbind and
 -- flame.clear_binds() take them away
-flame.bind("super", "Return", "foot")
 flame.bind("super", "q", "foot")
 flame.bind("super", "c", flame.close)
 flame.bind("super", "j", function() flame.focus("next") end)
@@ -102,7 +84,6 @@ flame.bind("super", "k", function() flame.focus("prev") end)
 flame.bind("super", "f", flame.fullscreen)
 flame.bind("super+shift", "space", flame.toggle_floating)
 flame.bind("super+shift", "q", flame.quit)
-flame.bind("super+shift", "r", flame.reload)
 for i = 1, 10 do
 	local key = tostring(i % 10) -- 0 is the 10th
 	flame.bind("super", key, function() flame.workspace(i) end)

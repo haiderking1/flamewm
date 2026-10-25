@@ -826,6 +826,20 @@ echo 'flame.mouse { cursor_sise = 3 }' > \$XDG_CONFIG_HOME/flame/flame.lua
 sleep 0.6
 grep -ao 'flame.lua:1: flame.mouse: there.s no cursor_sise' flame.log | tail -1
 " "set [13, 3, 40, False, 32, 'swaylock', False, 90, True, 10, False, 'fit']" "flame.lua sets it" "flame.lua:1: flame.mouse: there's no cursor_sise"
+case_run "animations a line each: flame.curve, flame.animation load clean, a wrong name says where" "
+cat > \$XDG_CONFIG_HOME/flame/flame.lua <<'EOL'
+flame.curve(\"snappy\", { 0.2, 1, 0.3, 1 })
+flame.animation(\"open\", { ms = 300, curve = \"snappy\", style = \"zoom 40%\" })
+flame.animation(\"workspace\", { ms = 250, style = \"slidevert\" })
+flame.animation(\"fade_out\", { enabled = false })
+flame.animation(\"layers\", { open = \"fade\" })
+EOL
+sleep 0.6
+grep -ac 'ERROR.*config: ' flame.log | sed 's/^/config errors: /'
+echo 'flame.animation(\"opne\", { ms = 1 })' > \$XDG_CONFIG_HOME/flame/flame.lua
+sleep 0.6
+grep -ao \"flame.lua:1: flame.animation: there's no opne\" flame.log | tail -1
+" "config errors: 0" "flame.lua:1: flame.animation: there's no opne"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-timing on > /dev/null
 $CTL frame-pipeline sideways 2>&1 | head -1

@@ -8,8 +8,7 @@ itself: pick one in settings or `flamectl set wallpaper ~/walls/x.jpg`.
 for more, there's lua at `~/.config/flame/flame.lua` (flame writes a first one the
 first time it starts) (see
 [examples/flame.lua](../examples/flame.lua)). what you set there wins over
-settings.lua. save it and flame reloads it right away (`super+shift+r`
-does too).
+settings.lua. save it and flame reloads it right away.
 
 ```lua
 flame.look { gap = 8, border_width = 2 }
@@ -28,7 +27,7 @@ mod is super.
 
 | bind | does |
 | --- | --- |
-| `super+enter` / `super+q` | terminal (foot) |
+| `super+q` | terminal (foot) |
 | `super+c` | close window |
 | `super+,` | settings |
 | `super+e` | files |
@@ -41,7 +40,6 @@ mod is super.
 | `super+shift+1..0` | send window to workspace |
 | `super` + left drag | swap two windows |
 | `super` + right drag | resize |
-| `super+shift+r` | reload config |
 | `super+shift+q` | quit |
 
 ## ipc
