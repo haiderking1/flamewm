@@ -1,7 +1,8 @@
--- flame's config. copy it to ~/.config/flame/flame.lua and change what you
--- like: everything here is what flame does without one. super+shift+r (or
--- `flamectl reload`) loads it again, a mistake only shows in the log and
--- flame keeps going on whatever loaded before it
+-- every option flame's config has, set to what flame does on its own.
+-- your config is ~/.config/flame/flame.lua: flame makes one the first time
+-- it starts, take what you want from here into it. save it and flame
+-- reloads right away. a mistake only shows in the log, flame keeps going on
+-- whatever loaded before it
 
 flame.set {
 	gap = 6,
