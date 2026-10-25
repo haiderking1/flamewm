@@ -8,12 +8,19 @@ written from scratch and built right in. no Xwayland anywhere.
 
 ## install (arch)
 
+flame with all its apps:
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install.sh | sh
 ```
 
-that's flame with all its apps. just flame: `... | sh -s -- --core`. later,
-`flame-update` gets you the newest.
+just flame, bring your own bar and locker:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
+```
+
+later, `flame-update` gets you the newest.
 
 ## features
 

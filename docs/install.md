@@ -2,14 +2,16 @@
 
 ## arch
 
+flame with all its apps:
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install.sh | sh
 ```
 
-flame with all its apps. for flame alone, bring your own bar and locker:
+flame alone, bring your own bar and locker:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/flame-update | sh -s -- --core
+curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
 ```
 
 it builds real packages (`flamewm-git`, `flame-apps-git`) and installs them
