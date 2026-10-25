@@ -32,8 +32,7 @@ to update flame to the newest version later, run `flame-update`.
 - a hardware cursor that actually works on nvidia
 - bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
 - screen sharing with its own portal and picker: point at a window, click, done
-- its own login screen and lock screen, on greetd
-- its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications. or bring your own bar and config
+- its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications, a lock screen and a login screen. or bring your own bar and config
 - every setting live: an optional settings app if you want them graphical, or `flamectl set`
 - lua config for everything else, reloaded the moment you save it
 - ext-workspace for waybar
