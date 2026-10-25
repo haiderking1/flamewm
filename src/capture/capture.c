@@ -23,13 +23,17 @@
 #include "render/pass.h"
 #include "render/snapshot.h"
 #include "scene/scene.h"
+#include "scene/surface.h"
 #include "util/listener.h"
+#include "util/timer.h"
 
 // a window's capture source: it draws the window's content node on its own
 // into a buffer of the window's size at the screen's scale. a frame goes out
 // when a client asks for one and the window looks different from the last
-// one (a surface committed, something moved), checked at the screen's
-// refresh only while someone waits
+// one (a surface committed, something moved). it's looked at once a screen
+// refresh at most: never more frames than the screen shows, however fast
+// the app draws or the client asks. a window that isn't on screen gets its
+// frame callbacks from here, at that same pace, for as long as it's shared
 
 struct window_source;
 
@@ -52,6 +56,7 @@ struct window_source {
 	bool force; // and it wants one whatever changed (its first)
 	uint64_t look; // what the last frame showed
 	int64_t started, sent; // ms: when it started, the last frame
+	int64_t looked; // ns: the last look at the window, one a refresh at most
 	struct wlr_swapchain *swapchain;
 	struct wl_event_source *tick;
 	// copies into clients' gpu buffers signal here when the gpu's done
@@ -112,6 +117,19 @@ static int64_t now_ms(void) {
 // don't catch, and the keepalive
 #define FALLBACK_MS 100
 
+// the screen's refresh, 60Hz for one that doesn't say (headless)
+static int64_t period_ns(struct flame_capture *capture) {
+	struct flame_output *output = screen(capture);
+	int refresh = output ? output->wlr->refresh : 0;
+	return refresh > 0 ? 1000000000000LL / refresh : 16666667;
+}
+
+// in the screen's last frame: its frame callbacks come from there
+static bool on_screen(struct wlr_surface *surface) {
+	struct flame_surface_state *state = scene_surface_state(surface);
+	return state && scene_surface_drawn(state);
+}
+
 // buffers of the window's size, in the format the screen's frames use (known
 // to work with this gpu). a new size tells the clients to reallocate
 static bool source_size(struct window_source *source, int width, int height) {
@@ -140,10 +158,17 @@ static bool source_size(struct window_source *source, int width, int height) {
 
 static void source_produce(struct window_source *source) {
 	struct capture_window *window = source->window;
-	if (!window || !source->started_count || !source->wanted) {
+	if (!window || !source->started_count) {
 		return;
 	}
 	struct flame_capture *capture = source->capture;
+	// looked at this refresh already: once more when the next one's due
+	int64_t since = now_ns() - source->looked, period = period_ns(capture);
+	if (since < period) {
+		wl_event_source_timer_update(source->tick, (int)((period - since + 999999) / 1000000));
+		return;
+	}
+	source->looked = now_ns();
 	struct flame_view *view = window->view;
 	float scale = window_scale(capture);
 	struct wlr_box area;
@@ -155,7 +180,7 @@ static void source_produce(struct window_source *source) {
 	int64_t now = now_ms();
 	bool due = now - source->started < WARM_UP_MS || now - source->sent >= KEEPALIVE_MS;
 	struct wlr_buffer *buffer = NULL;
-	if (ok && (source->force || due || look != source->look)
+	if (ok && source->wanted && (source->force || due || look != source->look)
 			&& source_size(source, (int)ceilf(area.width * scale),
 				(int)ceilf(area.height * scale))) {
 		buffer = wlr_swapchain_acquire(source->swapchain);
@@ -178,12 +203,16 @@ static void source_produce(struct window_source *source) {
 	if (buffer) {
 		wlr_buffer_unlock(buffer);
 	}
-	// its clients draw on for whoever watches, on a hidden workspace too
+	// its clients draw on for whoever watches, on a hidden workspace too: the
+	// ones the screen isn't giving frame callbacks, once a look. one that's
+	// on screen has the screen's (both: it'd draw twice as fast)
 	struct timespec when;
 	clock_gettime(CLOCK_MONOTONIC, &when);
 	for (size_t i = 0; i < list.len; i++) {
-		if (list.data[i].surface) {
-			wlr_surface_send_frame_done(list.data[i].surface, &when);
+		struct wlr_surface *surface = list.data[i].surface;
+		if (surface && !on_screen(surface)
+				&& !wl_list_empty(&surface->current.frame_callback_list)) {
+			wlr_surface_send_frame_done(surface, &when);
 		}
 	}
 	elements_finish(&list);
@@ -205,7 +234,7 @@ static void handle_poke(void *data) {
 	capture->poke = NULL;
 	struct capture_window *window;
 	wl_list_for_each(window, &capture->windows, link) {
-		if (window->source && window->source->wanted) {
+		if (window->source && window->source->started_count) {
 			source_produce(window->source);
 		}
 	}
@@ -217,7 +246,7 @@ static void poke(struct flame_capture *capture) {
 	}
 	struct capture_window *window;
 	wl_list_for_each(window, &capture->windows, link) {
-		if (window->source && window->source->wanted) {
+		if (window->source && window->source->started_count) {
 			capture->poke = wl_event_loop_add_idle(capture->server->loop, handle_poke, capture);
 			return;
 		}
@@ -239,6 +268,7 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *base, bool with
 	if (source->started_count++ == 0) {
 		source->look = 0;
 		source->started = now_ms();
+		source->looked = 0;
 	}
 }
 
@@ -255,10 +285,9 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *base,
 	struct window_source *source = wl_container_of(base, source, base);
 	source->wanted = true;
 	source->force |= schedule_frame;
-	// not from inside the request: right after it when it wants one now or
-	// the share just started, else when the window next draws
-	bool warming = now_ms() - source->started < WARM_UP_MS;
-	wl_event_source_timer_update(source->tick, schedule_frame || warming ? 1 : FALLBACK_MS);
+	// not from inside the request: a look right after it, when this
+	// refresh's is done already the next one's (the look keeps the pace)
+	wl_event_source_timer_update(source->tick, 1);
 }
 
 static void copy_free(struct pending_copy *copy) {

@@ -4,7 +4,11 @@
 // that isn't showing: it comes out red anyway
 // gpu: the frames go into gpu buffers (gbm, linux-dmabuf) the way the portal
 // takes them, several in a row
+// rate: frames asked for back to back like a recorder does, for SECONDS:
+// how many came each second (an unchanged window: the keepalive, a busy one:
+// never more than the screen's refresh)
 // usage: wlcapture FLAMECTL [TITLE]  (TITLE: a window that's there, else its own)
+//        wlcapture FLAMECTL rate TITLE SECONDS
 #define _GNU_SOURCE
 #include <stdbool.h>
 #include <stdio.h>
@@ -218,7 +222,10 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 	bool use_gpu = argc > 2 && !strcmp(argv[2], "gpu");
-	if (argc > 2 && !use_gpu) {
+	bool rate = argc > 4 && !strcmp(argv[2], "rate");
+	if (rate) {
+		want_title = argv[3];
+	} else if (argc > 2 && !use_gpu) {
 		want_title = argv[2];
 	}
 	// a window that's there already, by title, else an X one of its own
@@ -314,6 +321,43 @@ int main(int argc, char **argv) {
 	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
 	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, width, height, (int32_t)stride,
 		format);
+	if (rate) {
+		int seconds = atoi(argv[4]), counts[16] = {0};
+		seconds = seconds < 1 ? 1 : seconds > 16 ? 16 : seconds;
+		struct timespec t0, now;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		for (;;) {
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			double at = (double)(now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9;
+			if (at >= seconds) {
+				break;
+			}
+			ready = -1;
+			struct ext_image_copy_capture_frame_v1 *f =
+				ext_image_copy_capture_session_v1_create_frame(session);
+			ext_image_copy_capture_frame_v1_add_listener(f, &frame_listener, NULL);
+			ext_image_copy_capture_frame_v1_attach_buffer(f, buffer);
+			ext_image_copy_capture_frame_v1_damage_buffer(f, 0, 0, width, height);
+			ext_image_copy_capture_frame_v1_capture(f);
+			while (ready < 0 && wl_display_dispatch(display) != -1) {
+			}
+			ext_image_copy_capture_frame_v1_destroy(f);
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			int second = (int)((double)(now.tv_sec - t0.tv_sec)
+				+ (now.tv_nsec - t0.tv_nsec) / 1e9);
+			if (ready == 1 && second < seconds) {
+				counts[second]++;
+			}
+			if (ready != 1) {
+				break;
+			}
+		}
+		for (int i = 0; i < seconds; i++) {
+			printf("second %d: %d frames\n", i, counts[i]);
+		}
+		wl_display_disconnect(display);
+		return 0;
+	}
 	struct ext_image_copy_capture_frame_v1 *frame =
 		ext_image_copy_capture_session_v1_create_frame(session);
 	ext_image_copy_capture_frame_v1_add_listener(frame, &frame_listener, NULL);

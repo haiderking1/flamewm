@@ -21,6 +21,7 @@ alone() {
 	case "$1" in
 	pacing:*|tearing:*|allow_tearing*|"a fullscreen X game shows its own buffers"*) return 0 ;;
 	"an app busy for a while"*|"sharing a wayland window on a hidden workspace"*) return 0 ;;
+	"sharing a window paces to the screen"*|"sharing a window that's on screen"*) return 0 ;;
 	esac
 	return 1
 }
@@ -679,6 +680,36 @@ foot --title capme sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 sleep 1.5
 $BIN/wlcapture $CTL capme" "listed: yes" "drawn pixels: 889856 of 889856" \
 	"unchanged window, next frame: yes"
+case_run "sharing a window paces to the screen: a still one sends the keepalive, a hidden game a steady stream" "
+foot --title still sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
+$BIN/wlgame 14 > game.txt 2>&1 &
+sleep 1.5
+$BIN/wlcapture $CTL rate still 4 > still.txt
+$BIN/wlcapture $CTL rate wlgame 3 > rate.txt
+python3 -I -c \"
+import re
+def counts(f):
+    return [int(n) for n in re.findall(r'second \d+: (\d+) frames', open(f).read())]
+still, game = counts('still.txt'), counts('rate.txt')
+print('still', still, 'game', game)
+print('warm-up paced' if still and still[0] <= 70 else 'warm-up flooded')
+print('still: keepalive only' if all(1 <= n <= 2 for n in still[2:]) else 'still: sent unchanged frames')
+print('hidden game: steady at the refresh' if game and all(40 <= n <= 70 for n in game) else 'hidden game: off pace')
+\"" "warm-up paced" "still: keepalive only" "hidden game: steady at the refresh"
+case_run "sharing a window that's on screen doesn't make it draw twice as fast" "
+$CTL workspace 2 > /dev/null
+$BIN/wlgame 3 > alone.txt 2>&1
+# shared for as much of its time as it can be (the sharing sets up for a second)
+$BIN/wlgame 4 > shared.txt 2>&1 &
+$BIN/wlcapture $CTL rate wlgame 4 > /dev/null
+wait
+python3 -I -c \"
+import re
+alone = int(re.search(r'frames (\d+)', open('alone.txt').read()).group(1)) / 3
+shared = int(re.search(r'frames (\d+)', open('shared.txt').read()).group(1)) / 4
+print('alone %.0f/s shared %.0f/s' % (alone, shared))
+print('shared draws at its own pace' if shared < alone * 1.3 else 'shared draws faster')
+\"" "shared draws at its own pace"
 case_run "sharing a window into gpu buffers, the portal's way: each copy done before it's ready" "
 $BIN/wlcapture $CTL gpu" "gpu buffer: yes" "gpu frames ready: 3"
 case_run "sharing one window: listed, captured on its own, even on a hidden workspace" "
