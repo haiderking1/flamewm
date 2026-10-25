@@ -189,8 +189,9 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 		h[i] = h[i - 1] > 1 ? h[i - 1] / 2 : 1;
 	}
 	struct gl_blur *blur = &gl->blur;
-	for (int i = 0; i <= passes; i++) {
-		if (passes && !level_ready(blur, i, w[i], h[i])) {
+	// level 0 is the copy's: the levels down from it, the pane does the last step up
+	for (int i = 1; i <= passes; i++) {
+		if (!level_ready(blur, i, w[i], h[i])) {
 			fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
 			return;
 		}
@@ -222,11 +223,13 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 		struct level from = i == 0 ? behind : level_of(blur, i, w[i], h[i]);
 		blur_step(gl, &gl->blur_down, from, blur->fbo[i + 1], w[i + 1], h[i + 1], offset);
 	}
-	for (int i = passes; i > 0; i--) {
+	// back up to the level below full size: the last step up the pane does
+	// itself as it's drawn, no full size picture written and read again
+	for (int i = passes; i > 1; i--) {
 		blur_step(gl, &gl->blur_up, level_of(blur, i, w[i], h[i]), blur->fbo[i - 1], w[i - 1],
 			h[i - 1], offset);
 	}
-	struct level blurred = passes ? level_of(blur, 0, w[0], h[0]) : behind;
+	struct level blurred = passes ? level_of(blur, 1, w[1], h[1]) : behind;
 
 	// the pane over the buffer again
 	fglBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
@@ -236,9 +239,14 @@ void gl_pass_glass(struct gl_pass *pass, const struct gl_glass_options *options)
 	fglUseProgram(program->program);
 	fglBindTexture(GL_TEXTURE_2D, blurred.texture);
 	fglUniform1i(program->tex, 0);
-	fglUniform4f(program->reach, reach.x - blurred.x, reach.y - blurred.y, blurred.alloc_width,
-		blurred.alloc_height);
+	// the buffer pixels the texture's allocation spans: 1:1 for the copy, a
+	// level down as many as its pixels stand for (w[0] / w[1], odd sizes too)
+	float span_x = passes ? (float)blurred.alloc_width * w[0] / w[1] : blurred.alloc_width;
+	float span_y = passes ? (float)blurred.alloc_height * h[0] / h[1] : blurred.alloc_height;
+	fglUniform4f(program->reach, reach.x - blurred.x, reach.y - blurred.y, span_x, span_y);
 	set_bounds(program, blurred);
+	fglUniform2f(program->texel, 1.0f / blurred.alloc_width, 1.0f / blurred.alloc_height);
+	fglUniform1f(program->offset, passes ? offset : 0.0f);
 	fglUniform4f(program->box, box.x, box.y, box.width, box.height);
 	fglUniform1f(program->radius, options->radius);
 	fglUniform4f(program->tint, options->tint[0], options->tint[1], options->tint[2],
