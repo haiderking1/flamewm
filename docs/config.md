@@ -25,7 +25,7 @@ mod is super.
 | `super+q` | terminal (foot) |
 | `super+c` | close window |
 | `super+e` | files |
-| `super+space` | search |
+| `super+d` | search |
 | `super+l` | lock (whatever `lock` says) |
 | `super+j` / `super+k` | focus next / previous |
 | `super+f` | fullscreen |

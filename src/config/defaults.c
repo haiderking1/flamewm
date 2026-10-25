@@ -27,7 +27,7 @@ static const struct flame_keybind keybinds[] = {
 	{ MOD, XKB_KEY_q, action_spawn, { .argv = terminal } },
 	{ MOD, XKB_KEY_c, action_close, { 0 } },
 	{ MOD, XKB_KEY_e, action_spawn, { .argv = files } },
-	{ MOD, XKB_KEY_space, action_spawn, { .argv = search } },
+	{ MOD, XKB_KEY_d, action_spawn, { .argv = search } },
 	{ MOD, XKB_KEY_l, action_lock, { 0 } },
 	{ MOD, XKB_KEY_j, action_focus, { .i = +1 } },
 	{ MOD, XKB_KEY_k, action_focus, { .i = -1 } },

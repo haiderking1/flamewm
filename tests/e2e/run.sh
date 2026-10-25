@@ -843,6 +843,16 @@ printf 'flame.animations {\\n\\topne = { ms = 1 },\\n}\\n' > \$XDG_CONFIG_HOME/f
 sleep 0.6
 grep -ao \"flame.lua:1: flame.animations: there's no opne\" flame.log | tail -1
 " "config errors: 0" "flame.lua:1: flame.animations: there's no opne"
+case_run "examples/flame.lua and the first flame.lua flame writes both load without an error" "
+cp $(dirname "$FLAME")/../examples/flame.lua \$XDG_CONFIG_HOME/flame/flame.lua
+sleep 0.6
+echo example errors: \$(grep -ac 'ERROR.*config: ' flame.log)
+mkdir -p first
+XDG_CONFIG_HOME=\$PWD/first FLAME_SETTINGS=\$PWD/first/settings.lua WLR_BACKENDS=headless \\
+	timeout 3 $FLAME > first.log 2>&1
+[ -s first/flame/flame.lua ] && echo first written
+echo first errors: \$(grep -ac 'ERROR.*config: ' first.log)
+" "example errors: 0" "first written" "first errors: 0"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-timing on > /dev/null
 $CTL frame-pipeline sideways 2>&1 | head -1

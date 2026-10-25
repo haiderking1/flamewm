@@ -1,7 +1,7 @@
 // flamesearch: one field over everything to find what's wanted as it's
 // typed, apps, files in home, a sum's answer, and open it. it stays running
 // once it's started, hidden: run again, it's up (or down) at once, the run
-// only tells the one there is. super+space
+// only tells the one there is. super+d
 
 #include <errno.h>
 #include <gio/gdesktopappinfo.h>

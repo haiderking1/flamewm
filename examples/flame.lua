@@ -29,6 +29,7 @@ flame.lockscreen {
 -- the keyboard: layouts, and how fast a held key repeats
 -- flame.keyboard {
 -- 	layout = "us,ara",
+-- 	variant = ",", -- one per layout, often empty
 -- 	options = "grp:alt_shift_toggle",
 -- 	repeat_rate = 30, -- keys a second
 -- 	repeat_delay = 250, -- ms
@@ -81,6 +82,9 @@ flame.animations {
 -- binding the same keys again replaces them, flame.unbind and
 -- flame.clear_binds() take them away
 flame.bind("super", "q", "foot")
+flame.bind("super", "e", "flamefiles")
+flame.bind("super", "d", "flamesearch")
+flame.bind("super", "l", flame.lock)
 flame.bind("super", "c", flame.close)
 flame.bind("super", "j", function() flame.focus("next") end)
 flame.bind("super", "k", function() flame.focus("prev") end)
@@ -93,10 +97,13 @@ for i = 1, 10 do
 	flame.bind("super+shift", key, function() flame.move_to_workspace(i) end)
 end
 
--- window rules: lua patterns on app_id and title, the last match wins
+-- window rules: lua patterns on app_id and title, the last match wins. a
+-- rule can say floating, fullscreen, workspace, opacity, animation (false
+-- for none), open and close (how it animates), fade_in and fade_out
 -- flame.rule({ app_id = "^pavucontrol$" }, { floating = true })
 -- flame.rule({ title = "Picture.in.Picture" }, { floating = true })
 -- flame.rule({ app_id = "^steam$" }, { workspace = 5 })
+-- flame.rule({ app_id = "^gamescope$" }, { fullscreen = true })
 -- flame.rule({ app_id = "^mpv$" }, { animation = false })
 -- flame.rule({ app_id = "^rofi$" }, { open = "zoom", close = "fade" })
 -- flame.rule({ app_id = "^foot$" }, { opacity = 0.95 })

@@ -67,7 +67,7 @@
 //     fade_out = false, opacity = 0.9 }
 //   flame.autostart(command)  run once when flame comes up
 //   flame.output(name, { scale = 1.5 })  name a connector (DP-1) or "*"
-//   flame.spawn(command), flame.quit(), flame.close(), flame.fullscreen(),
+//   flame.spawn(command), flame.quit(), flame.close(), flame.lock(), flame.fullscreen(),
 //   flame.toggle_floating(), flame.focus("next"|"prev"), flame.workspace(n),
 //   flame.move_to_workspace(n), flame.reload(), flame.log(message)
 
@@ -859,6 +859,11 @@ static int l_close(lua_State *L) {
 	return run_action(L, "flame.close", action_close, (union flame_arg){0});
 }
 
+// whatever flame.lockscreen says locks the screen (flamelock on its own)
+static int l_lock(lua_State *L) {
+	return run_action(L, "flame.lock", action_lock, (union flame_arg){0});
+}
+
 static int l_fullscreen(lua_State *L) {
 	return run_action(L, "flame.fullscreen", action_fullscreen, (union flame_arg){0});
 }
@@ -911,6 +916,7 @@ static const luaL_Reg functions[] = {
 	{"log", l_log},
 	{"quit", l_quit},
 	{"close", l_close},
+	{"lock", l_lock},
 	{"fullscreen", l_fullscreen},
 	{"toggle_floating", l_toggle_floating},
 	{"reload", l_reload},

@@ -3177,7 +3177,7 @@ bool xshell_key(struct flame_xshell *xshell, struct wlr_keyboard *keyboard, uint
 	if (!is_xview(xshell->server->desktop.focused)) {
 		return false;
 	}
-	// a launcher or the like over it has the keyboard (super+space): the
+	// a launcher or the like over it has the keyboard (super+d): the
 	// keys are its, not the app's under it. one that went down in the app
 	// still comes up in it (super), nothing's left held there
 	if (xshell->server->layers.focused && (pressed || !in_app)) {
