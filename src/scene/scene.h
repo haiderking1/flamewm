@@ -148,6 +148,16 @@ struct flame_scene {
 	// app frames that came in after the render they were woken just in time
 	// for, frame timing counts them
 	uint32_t late_app_frames;
+	// while counting: the apps that committed new buffers, by window (its
+	// app id, else its title, else "?"), how many. who kept drawing through
+	// a workspace switch
+#define SCENE_COUNTED 4
+	bool counting;
+	struct {
+		const struct wlr_surface *root; // only ever compared
+		char app_id[32];
+		uint32_t buffers;
+	} counted[SCENE_COUNTED];
 
 	struct {
 		// something moved, showed up, went away or looks different

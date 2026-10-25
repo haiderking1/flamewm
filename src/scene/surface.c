@@ -1,7 +1,9 @@
 #include "scene/surface.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
 #include "scene/scene.h"
@@ -57,10 +59,33 @@ static bool shown(struct flame_surface_state *state) {
 		|| (root->node && scene_node_coords(&root->node->node, &lx, &ly));
 }
 
+// a buffer from surface while the scene counts
+static void count_buffer(struct flame_scene *scene, struct wlr_surface *surface) {
+	struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+	for (int i = 0; i < SCENE_COUNTED; i++) {
+		if (scene->counted[i].root == root) {
+			scene->counted[i].buffers++;
+			return;
+		}
+		if (!scene->counted[i].root) {
+			struct wlr_xdg_toplevel *toplevel = wlr_xdg_toplevel_try_from_wlr_surface(root);
+			snprintf(scene->counted[i].app_id, sizeof(scene->counted[i].app_id), "%s",
+				!toplevel ? "?" : toplevel->app_id ? toplevel->app_id
+				: toplevel->title ? toplevel->title : "?");
+			scene->counted[i].root = root;
+			scene->counted[i].buffers = 1;
+			return;
+		}
+	}
+}
+
 static void handle_commit(struct wl_listener *listener, void *data) {
 	struct flame_surface_state *state = wl_container_of(listener, state, commit);
 	wl_signal_emit_mutable(&state->scene->events.commit, state->surface);
 	if (state->surface->current.committed & WLR_SURFACE_STATE_BUFFER) {
+		if (state->scene->counting) {
+			count_buffer(state->scene, state->surface);
+		}
 		int64_t now = now_ns();
 		state->buffer_since = now;
 		if (state->drawing && state->callback_time) {

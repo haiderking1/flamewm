@@ -751,7 +751,12 @@ $CTL workspace 2 > /dev/null
 sleep 0.6
 grep -a 'the first frame started' flame.log | tail -1 | grep -o '(immediate pipeline)'
 $CTL frame-pipeline adaptive > /dev/null
-" "frame-pipeline adaptive|immediate|deadline" "switched" "(immediate pipeline)"
+$BIN/wlgame 2 > /dev/null 2>&1 &
+sleep 0.5
+$CTL workspace 1 > /dev/null
+sleep 0.6
+grep -a \"apps' new buffers in it\" flame.log | tail -1 | grep -o \"it: .*\"
+" "frame-pipeline adaptive|immediate|deadline" "switched" "(immediate pipeline)" "it: wlgame "
 case_run "sharing a window paces to the screen: a still one sends the keepalive, a hidden game a steady stream" "
 foot --title still sh -c 'echo hello; sleep 30' > /dev/null 2>&1 &
 $BIN/wlgame 14 > game.txt 2>&1 &

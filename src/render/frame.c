@@ -1,6 +1,7 @@
 #include "render/frame.h"
 
 #include <math.h>
+#include <string.h>
 #include <wlr/backend.h>
 #include <wlr/backend/session.h>
 #include <wlr/render/drm_syncobj.h>
@@ -183,6 +184,9 @@ void frame_watch(struct flame_frame *frame, const char *what, int64_t ns) {
 	frame->watch.composited = 0;
 	frame->watch.late = 0;
 	frame->watch.first_lead = frame->watch.first_gpu = 0;
+	struct flame_scene *scene = &frame->render->scene;
+	memset(scene->counted, 0, sizeof(scene->counted));
+	scene->counting = true;
 }
 
 // the watch is over: its line, the wall clock in it to line up with what
@@ -215,6 +219,20 @@ static void watch_report(struct flame_frame *frame) {
 		frame->output->name, frame->watch.what, frame->watch.first_lead / 1e6,
 		frame->watch.first_gpu / 1e6, frame->watch.late,
 		schedule_policy_name(frame->schedule.policy));
+	// an app drawing through it puts its gpu work between our frames
+	struct flame_scene *scene = &frame->render->scene;
+	scene->counting = false;
+	char apps[4 * 48] = "none";
+	size_t at = 0;
+	for (int i = 0; i < SCENE_COUNTED && scene->counted[i].root; i++) {
+		at += (size_t)snprintf(apps + at, sizeof(apps) - at, "%s%s %u", i ? ", " : "",
+			scene->counted[i].app_id, scene->counted[i].buffers);
+		if (at >= sizeof(apps)) {
+			break;
+		}
+	}
+	wlr_log(WLR_INFO, "%s: %s: apps' new buffers in it: %s", frame->output->name,
+		frame->watch.what, apps);
 	// what a drawn frame asked of the gpu, in thousands of pixels: the same
 	// whatever its clocks
 	const struct gl_draw_stats *now = &frame->render->gl.stats, *then = &frame->watch.drawn;
