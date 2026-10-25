@@ -42,14 +42,39 @@
 
 #define POINTER_EMULATED (1u << 16)
 
-// who wants which XI2 events on a window: from the masters, from the slaves.
-// bit n is event type n
+// who wants which XI2 events on a window, a mask per device id as it was
+// asked for: all devices, all masters, each device. a select for one never
+// touches another's (sdl asks for raw motion from the masters, then for
+// hierarchy changes from all devices: both hold). bit n is event type n
+#define DEVICE_IDS 6 // all devices, all masters, and the four devices
+
 struct select {
 	struct wl_list link; // flame_xserver.xi_selects
 	struct xs_client *client;
 	uint32_t window;
-	uint32_t master, slave;
+	uint32_t mask[DEVICE_IDS];
 };
+
+// what device's events go out to select for: its own mask, all devices',
+// all masters' when it's a master
+static uint32_t wants(const struct select *select, uint16_t device) {
+	uint32_t mask = select->mask[ALL_DEVICES];
+	if (device < DEVICE_IDS) {
+		mask |= select->mask[device];
+	}
+	if (device == MASTER_POINTER || device == MASTER_KEYBOARD) {
+		mask |= select->mask[ALL_MASTER_DEVICES];
+	}
+	return mask;
+}
+
+static uint32_t any(const struct select *select) {
+	uint32_t mask = 0;
+	for (int i = 0; i < DEVICE_IDS; i++) {
+		mask |= select->mask[i];
+	}
+	return mask;
+}
 
 static struct select *find_select(struct flame_xserver *xserver, struct xs_client *client,
 		uint32_t window) {
@@ -65,7 +90,7 @@ static struct select *find_select(struct flame_xserver *xserver, struct xs_clien
 bool xs_xi_selected(struct flame_xserver *xserver, struct xs_window *window, int evtype) {
 	struct select *select;
 	wl_list_for_each(select, &xserver->xi_selects, link) {
-		if (select->window == window->id && ((select->master | select->slave) >> evtype & 1)) {
+		if (select->window == window->id && (any(select) >> evtype & 1)) {
 			return true;
 		}
 	}
@@ -77,7 +102,7 @@ bool xs_xi_client_selected(struct xs_client *client, struct xs_window *window, i
 		return false; // a core event XI2 doesn't stand in for
 	}
 	struct select *select = find_select(client->xserver, client, window->id);
-	return select && ((select->master | select->slave) >> evtype & 1);
+	return select && (any(select) >> evtype & 1);
 }
 
 // ---- events ----
@@ -126,11 +151,11 @@ static void deliver(struct flame_xserver *xserver, uint32_t window, int evtype,
 		if (select->window != window || (only && select->client != only)) {
 			continue;
 		}
-		if (select->master >> evtype & 1) {
+		if (wants(select, master) >> evtype & 1) {
 			put16(event + 10, master);
 			send(select->client, event, len);
 		}
-		if (select->slave >> evtype & 1) {
+		if (wants(select, slave) >> evtype & 1) {
 			put16(event + 10, slave);
 			send(select->client, event, len);
 		}
@@ -509,8 +534,9 @@ static void select_events(struct xs_client *client, const struct xin *in) {
 		xs_error(client, XS_ERROR_WINDOW, window, XS_XI_OPCODE, 46);
 		return;
 	}
-	uint32_t master = 0, slave = 0;
-	bool master_set = false, slave_set = false;
+	// checked whole first: a bad one changes nothing
+	uint32_t masks_for[DEVICE_IDS];
+	bool given[DEVICE_IDS] = {false};
 	size_t at = 12;
 	for (uint16_t i = 0; i < masks; i++) {
 		if (at + 4 > in->len) {
@@ -522,27 +548,18 @@ static void select_events(struct xs_client *client, const struct xin *in) {
 			xs_error(client, XS_ERROR_LENGTH, 0, XS_XI_OPCODE, 46);
 			return;
 		}
-		if (device != ALL_DEVICES && device != ALL_MASTER_DEVICES && !device_exists(device)) {
+		if (device >= DEVICE_IDS || (device != ALL_DEVICES && device != ALL_MASTER_DEVICES
+				&& !device_exists(device))) {
 			xs_error(client, BAD_DEVICE, device, XS_XI_OPCODE, 46);
 			return;
 		}
-		uint32_t bits = units ? xin32(in, at + 4) : 0;
-		// a mask for one device sets that device's events, all others keep theirs
-		if (device == ALL_DEVICES || device == ALL_MASTER_DEVICES || device <= MASTER_KEYBOARD) {
-			master = bits | (master_set ? master : 0);
-			master_set = true;
-		}
-		if (device == ALL_DEVICES || device > MASTER_KEYBOARD) {
-			slave = bits | (slave_set ? slave : 0);
-			slave_set = true;
-		}
+		// a device named again: the last mask for it wins
+		masks_for[device] = units ? xin32(in, at + 4) : 0;
+		given[device] = true;
 		at += 4 + (size_t)units * 4;
 	}
 	struct select *select = find_select(xserver, client, window);
 	if (!select) {
-		if (!master && !slave) {
-			return;
-		}
 		select = calloc(1, sizeof(*select));
 		if (!select) {
 			xs_error(client, XS_ERROR_ALLOC, 0, XS_XI_OPCODE, 46);
@@ -552,13 +569,12 @@ static void select_events(struct xs_client *client, const struct xin *in) {
 		select->window = window;
 		wl_list_insert(&xserver->xi_selects, &select->link);
 	}
-	if (master_set) {
-		select->master = master;
+	for (int i = 0; i < DEVICE_IDS; i++) {
+		if (given[i]) {
+			select->mask[i] = masks_for[i];
+		}
 	}
-	if (slave_set) {
-		select->slave = slave;
-	}
-	if (!select->master && !select->slave) {
+	if (!any(select)) {
 		wl_list_remove(&select->link);
 		free(select);
 	}
@@ -574,18 +590,19 @@ static void get_selected_events(struct xs_client *client, const struct xin *in) 
 	struct select *select = find_select(xserver, client, window);
 	struct xout out;
 	xs_reply_begin(client, &out, 0);
-	uint16_t count = select ? (select->master != 0) + (select->slave != 0) : 0;
+	// each device's mask as it was asked for
+	uint16_t count = 0;
+	for (int i = 0; select && i < DEVICE_IDS; i++) {
+		count += select->mask[i] != 0;
+	}
 	xout16(&out, count);
 	xout_zero(&out, 22);
-	if (select && select->master) {
-		xout16(&out, ALL_MASTER_DEVICES);
-		xout16(&out, 1);
-		xout32(&out, select->master);
-	}
-	if (select && select->slave) {
-		xout16(&out, SLAVE_POINTER);
-		xout16(&out, 1);
-		xout32(&out, select->slave);
+	for (int i = 0; select && i < DEVICE_IDS; i++) {
+		if (select->mask[i]) {
+			xout16(&out, (uint16_t)i);
+			xout16(&out, 1);
+			xout32(&out, select->mask[i]);
+		}
 	}
 	xs_reply_send(client, &out);
 }

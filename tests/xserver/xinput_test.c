@@ -1,6 +1,7 @@
 // XInput 2 and RandR against flame's X server, run by the harness: make test
 #include <poll.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,9 +140,9 @@ static void test_devices(xcb_connection_t *c) {
 	if (l) {
 		int names = xcb_input_list_input_devices_names_length(l);
 		CHECK(names == 4);
-		xcb_str_iterator_t it = xcb_input_list_input_devices_names_iterator(l);
-		CHECK(xcb_str_name_length(it.data) == 20
-			&& !memcmp(xcb_str_name(it.data), "Virtual core pointer", 20));
+		xcb_str_iterator_t first = xcb_input_list_input_devices_names_iterator(l);
+		CHECK(xcb_str_name_length(first.data) == 20
+			&& !memcmp(xcb_str_name(first.data), "Virtual core pointer", 20));
 	}
 	free(l);
 }
@@ -259,6 +260,24 @@ static void test_keys(xcb_connection_t *c, xcb_connection_t *core, xcb_screen_t 
 static void test_raw(xcb_connection_t *c, xcb_screen_t *s) {
 	select_xi(c, s->root, XCB_INPUT_DEVICE_ALL_MASTER, XCB_INPUT_XI_EVENT_MASK_RAW_MOTION
 		| XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_PRESS);
+	// sdl3 asks again on the root, for all devices, for something else: the
+	// masters' raw motion has to hold (a game's mouse look went dead)
+	select_xi(c, s->root, XCB_INPUT_DEVICE_ALL, XCB_INPUT_XI_EVENT_MASK_HIERARCHY);
+	xcb_input_xi_get_selected_events_reply_t *selected = xcb_input_xi_get_selected_events_reply(c,
+		xcb_input_xi_get_selected_events(c, s->root), NULL);
+	CHECK(selected && selected->num_masks == 2);
+	bool masters = false, all = false;
+	xcb_input_event_mask_iterator_t it = selected
+		? xcb_input_xi_get_selected_events_masks_iterator(selected)
+		: (xcb_input_event_mask_iterator_t){0};
+	for (; selected && it.rem; xcb_input_event_mask_next(&it)) {
+		uint32_t mask = *xcb_input_event_mask_mask(it.data);
+		masters |= it.data->deviceid == XCB_INPUT_DEVICE_ALL_MASTER
+			&& mask == (XCB_INPUT_XI_EVENT_MASK_RAW_MOTION | XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_PRESS);
+		all |= it.data->deviceid == XCB_INPUT_DEVICE_ALL && mask == XCB_INPUT_XI_EVENT_MASK_HIERARCHY;
+	}
+	CHECK(masters && all);
+	free(selected);
 	struct events events;
 	collect(c, &events);
 	release(&events);
