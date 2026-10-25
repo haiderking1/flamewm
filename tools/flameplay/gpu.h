@@ -10,7 +10,10 @@
 // pass turns each frame into rgb in images flame can show (dmabufs in a
 // layout it imports). the frame never leaves the gpu, the cpu never
 // touches a pixel. the decoder's own images can't be shared (the driver
-// keeps them in its own layout), so it's one compute pass, like mpv's
+// keeps them in its own layout), so it's one compute pass, like mpv's.
+// the images' memory is gbm's, made for the display: a fullscreen video
+// goes to the display as it is, and vulkan's own memory can be compressed
+// in a way the display can't read
 
 struct gpu;
 

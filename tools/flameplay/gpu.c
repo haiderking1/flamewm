@@ -1,8 +1,11 @@
 #include "gpu.h"
 
+#include <fcntl.h>
+#include <gbm.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vulkan.h>
 #include <libavutil/pixdesc.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -30,12 +33,14 @@ static const uint32_t shader[] =
 	X(vkDestroyCommandPool) X(vkAllocateCommandBuffers) X(vkResetCommandBuffer) \
 	X(vkBeginCommandBuffer) X(vkEndCommandBuffer) X(vkCmdPipelineBarrier2) \
 	X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) X(vkCmdPushConstants) X(vkCmdDispatch) \
-	X(vkQueueSubmit2) X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) X(vkResetFences)
+	X(vkQueueSubmit2) X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) X(vkResetFences) \
+	X(vkGetMemoryFdPropertiesKHR)
 
 struct image {
 	VkImage image;
 	VkDeviceMemory memory;
 	VkImageView view;
+	struct gbm_bo *bo; // where its memory came from, NULL: vulkan's own
 };
 
 struct gpu {
@@ -48,6 +53,10 @@ struct gpu {
 #undef X
 	PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
 	PFN_vkGetPhysicalDeviceFormatProperties2 vkGetPhysicalDeviceFormatProperties2;
+	PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
+	// the same gpu's render node, the pictures' memory made through it
+	int drm_fd;
+	struct gbm_device *gbm;
 
 	int family; // a compute queue's, shared with ffmpeg (locked around a submit)
 	bool queues_locked; // the driver locks queues itself (internally synchronized)
@@ -100,6 +109,7 @@ struct gpu *gpu_create(AVBufferRef **device) {
 	g->ctx = (AVHWDeviceContext *)dev->data;
 	g->vk = g->ctx->hwctx;
 	g->dev = g->vk->act_dev;
+	g->drm_fd = -1;
 	g->family = -1;
 	// sharing images, and decoding at all
 	bool decodes = false;
@@ -122,8 +132,10 @@ struct gpu *gpu_create(AVBufferRef **device) {
 		g->vk->inst, "vkGetPhysicalDeviceMemoryProperties");
 	g->vkGetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2)gipa(
 		g->vk->inst, "vkGetPhysicalDeviceFormatProperties2");
+	g->vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)gipa(
+		g->vk->inst, "vkGetPhysicalDeviceProperties2");
 	bool all = gdpa && g->vkGetPhysicalDeviceMemoryProperties
-		&& g->vkGetPhysicalDeviceFormatProperties2;
+		&& g->vkGetPhysicalDeviceFormatProperties2 && g->vkGetPhysicalDeviceProperties2;
 #define X(name) \
 	g->name = all ? (PFN_##name)gdpa(g->dev, #name) : NULL; \
 	all = all && g->name;
@@ -186,19 +198,25 @@ struct gpu *gpu_create(AVBufferRef **device) {
 	return g;
 }
 
+static void image_free(struct gpu *g, struct image *im) {
+	if (im->view) {
+		g->vkDestroyImageView(g->dev, im->view, NULL);
+	}
+	if (im->image) {
+		g->vkDestroyImage(g->dev, im->image, NULL);
+	}
+	if (im->memory) {
+		g->vkFreeMemory(g->dev, im->memory, NULL);
+	}
+	if (im->bo) {
+		gbm_bo_destroy(im->bo);
+	}
+	*im = (struct image){0};
+}
+
 static void images_free(struct gpu *g) {
 	for (int i = 0; i < g->count; i++) {
-		struct image *im = &g->images[i];
-		if (im->view) {
-			g->vkDestroyImageView(g->dev, im->view, NULL);
-		}
-		if (im->image) {
-			g->vkDestroyImage(g->dev, im->image, NULL);
-		}
-		if (im->memory) {
-			g->vkFreeMemory(g->dev, im->memory, NULL);
-		}
-		*im = (struct image){0};
+		image_free(g, &g->images[i]);
 	}
 	g->count = 0;
 }
@@ -254,6 +272,12 @@ void gpu_destroy(struct gpu *g) {
 	}
 	if (g->pool) {
 		g->vkDestroyCommandPool(g->dev, g->pool, NULL);
+	}
+	if (g->gbm) {
+		gbm_device_destroy(g->gbm);
+	}
+	if (g->drm_fd >= 0) {
+		close(g->drm_fd);
 	}
 	av_buffer_unref(&g->device);
 	free(g);
@@ -384,6 +408,140 @@ static bool image_make(struct gpu *g, struct image *im, int width, int height,
 	return true;
 }
 
+// the vulkan device's render node, gbm on it: memory made there is made for
+// the display. NULL when there's none (the pictures are vulkan's own then)
+static struct gbm_device *gbm(struct gpu *g) {
+	if (g->gbm || g->drm_fd == -2) {
+		return g->gbm;
+	}
+	VkPhysicalDeviceDrmPropertiesEXT drm = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+	};
+	g->vkGetPhysicalDeviceProperties2(g->vk->phys_dev, &(VkPhysicalDeviceProperties2){
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+		.pNext = &drm,
+	});
+	char path[64];
+	snprintf(path, sizeof(path), "/dev/dri/renderD%lld",
+		drm.hasRender ? (long long)drm.renderMinor : 128LL);
+	g->drm_fd = open(path, O_RDWR | O_CLOEXEC);
+	g->gbm = g->drm_fd >= 0 ? gbm_create_device(g->drm_fd) : NULL;
+	if (!g->gbm) {
+		if (g->drm_fd >= 0) {
+			close(g->drm_fd);
+		}
+		g->drm_fd = -2; // tried, there's none
+	}
+	return g->gbm;
+}
+
+// an image in memory made for the display (gbm, scanout): what flame hands
+// the display as it is (a fullscreen video) is read right. vulkan's own
+// memory may be compressed in ways only the gpu's 3d side undoes: the
+// display reads that as a net of junk where the picture's flat
+static bool image_for_display(struct gpu *g, struct image *im, int width, int height,
+		const uint64_t *mods, uint32_t nmods, struct gpu_image *out) {
+	struct gbm_device *device = gbm(g);
+	if (!device) {
+		return false;
+	}
+	im->bo = gbm_bo_create_with_modifiers2(device, (uint32_t)width, (uint32_t)height,
+		GBM_FORMAT_XBGR8888, mods, nmods, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	if (!im->bo || gbm_bo_get_plane_count(im->bo) != 1) {
+		return false;
+	}
+	uint64_t modifier = gbm_bo_get_modifier(im->bo);
+	VkSubresourceLayout plane = {
+		.offset = gbm_bo_get_offset(im->bo, 0),
+		.rowPitch = gbm_bo_get_stride_for_plane(im->bo, 0),
+	};
+	VkImageDrmFormatModifierExplicitCreateInfoEXT explicit = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
+		.drmFormatModifier = modifier,
+		.drmFormatModifierPlaneCount = 1,
+		.pPlaneLayouts = &plane,
+	};
+	VkExternalMemoryImageCreateInfo external = {
+		.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+		.pNext = &explicit,
+		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+	};
+	VkImageCreateInfo info = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = &external,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.extent = {(uint32_t)width, (uint32_t)height, 1},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+		.usage = VK_IMAGE_USAGE_STORAGE_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	};
+	if (g->vkCreateImage(g->dev, &info, NULL, &im->image) != VK_SUCCESS) {
+		return false;
+	}
+	int fd = gbm_bo_get_fd(im->bo);
+	if (fd < 0) {
+		return false;
+	}
+	VkMemoryFdPropertiesKHR fd_props = {.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR};
+	VkMemoryRequirements req;
+	g->vkGetImageMemoryRequirements(g->dev, im->image, &req);
+	int type = g->vkGetMemoryFdPropertiesKHR(g->dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+		fd, &fd_props) == VK_SUCCESS ? memory_type(g, req.memoryTypeBits
+			& fd_props.memoryTypeBits, 0) : -1;
+	// vulkan owns the copy it's given once it takes it
+	int imported = type >= 0 ? dup(fd) : -1;
+	VkMemoryDedicatedAllocateInfo dedicated = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+		.image = im->image,
+	};
+	VkImportMemoryFdInfoKHR import = {
+		.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+		.pNext = &dedicated,
+		.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+		.fd = imported,
+	};
+	VkMemoryAllocateInfo alloc = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = &import,
+		.allocationSize = req.size,
+		.memoryTypeIndex = (uint32_t)type,
+	};
+	if (imported < 0 || g->vkAllocateMemory(g->dev, &alloc, NULL, &im->memory) != VK_SUCCESS) {
+		if (imported >= 0) {
+			close(imported);
+		}
+		close(fd);
+		return false;
+	}
+	VkImageViewCreateInfo view = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.image = im->image,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+	};
+	if (g->vkBindImageMemory(g->dev, im->image, im->memory, 0) != VK_SUCCESS
+			|| g->vkCreateImageView(g->dev, &view, NULL, &im->view) != VK_SUCCESS) {
+		close(fd);
+		return false;
+	}
+	*out = (struct gpu_image){
+		.fd = fd,
+		.fourcc = DRM_FORMAT_XBGR8888,
+		.modifier = modifier,
+		.offset = (uint32_t)plane.offset,
+		.stride = (uint32_t)plane.rowPitch,
+		.width = width,
+		.height = height,
+	};
+	return true;
+}
+
 bool gpu_images(struct gpu *g, int width, int height, int count, struct gpu_image *out) {
 	images_free(g);
 	uint64_t mods[32];
@@ -393,6 +551,11 @@ bool gpu_images(struct gpu *g, int width, int height, int count, struct gpu_imag
 	}
 	for (int i = 0; i < count; i++) {
 		g->count = i + 1;
+		if (image_for_display(g, &g->images[i], width, height, mods, nmods, &out[i])) {
+			continue;
+		}
+		// no gbm, or it can't make one vulkan writes into: vulkan's own
+		image_free(g, &g->images[i]);
 		if (!image_make(g, &g->images[i], width, height, mods, nmods, &out[i])) {
 			for (int j = 0; j < i; j++) {
 				close(out[j].fd);

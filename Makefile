@@ -134,7 +134,7 @@ $(PLAY): $(PLAY_SRCS) tools/flameplay/player.h tools/flameplay/gpu.h tools/flame
 		tools/flameplay/subs.h $(PLAY_GEN)/convert.spv.inc $(FLAMEUI_DEPS)
 	@mkdir -p $(dir $@)
 	$(UI_CC) -I$(PLAY_GEN) -o $@ $(PLAY_SRCS) $(FLAMEUI_SRCS) $(UI_PROTO_CODE) $(UI_LIBS) \
-		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3 libass uchardet)
+		$(shell pkg-config --cflags --libs libswresample libpipewire-0.3 libass uchardet gbm)
 
 BAR_SRCS := tools/flamebar/main.c tools/flamebar/control.c tools/flamebar/look.c \
 	tools/flamebar/notify.c tools/flamebar/notes.c tools/flamebar/osd.c \

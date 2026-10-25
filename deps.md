@@ -5,7 +5,7 @@ everything flamewm needs. add stuff here the moment it gets pulled in, not later
 install all of it (arch):
 
 ```sh
-sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp librsvg ffmpeg libass uchardet vulkan-headers shaderc make pkgconf foot
+sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon pixman libglvnd libdrm mesa libxshmfence lua54 pango cairo pipewire systemd-libs libjpeg-turbo libpng libwebp librsvg ffmpeg libass uchardet vulkan-headers shaderc make pkgconf foot
 ```
 
 ## build
@@ -44,6 +44,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 | gio-unix | `gio-unix-2.0` | flamesearch: the apps there are (their .desktop files, as they're installed or removed), opened the way they ask (a terminal for a terminal app), a file in the app that opens its kind |
 | pam | `-lpam` (`pam`) | flamelock: the password checked the way a console login checks it (`/etc/pam.d/flamelock`, which `make install` puts there: login's rules). systemd's logind (sd-bus): flame locks before the computer sleeps |
 | sd-bus (systemd) | `libsystemd` | flamegreet: sleep, restart and shut down asked of logind from the login screen |
+| gbm (mesa, or nvidia's `libnvidia-egl-gbm`) | `gbm` | flameplay: the pictures it decodes into are made for the display (gbm, scanout), vulkan writes into them. a fullscreen video goes to the display as it is, and memory vulkan makes itself can be compressed in a way only the gpu reads (on nvidia: a net of junk where the picture's flat) |
 | uchardet | `uchardet` | flameplay: what encoding a subtitle file that isn't utf-8 is in (old .srt files: windows' arabic, cyrillic, western...), read as that |
 | libass | `libass` | flameplay's subtitles: every text kind (srt, ass, webvtt, a video's own) drawn by it, a styled one the way it was made, a plain one in flame's look. fonts through fontconfig and the ones a file brings |
 | libdrm | `libdrm` | the hardware cursor: dumb buffers the cpu writes the pointer into, on their own fd (empty lease or reopened + authenticated), handed to the cursor plane as linear ARGB8888. nvidia can't render to linear, so wlroots' gpu cursor never made it there |
