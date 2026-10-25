@@ -34,7 +34,7 @@ to update flame to the newest version later, run `flame-update`.
 - bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
 - screen sharing with its own portal and picker: point at a window, click, done
 - its own login screen and lock screen, on greetd
-- its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications. skip them and use waybar, or nothing
+- its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications. or bring your own bar and config
 - every setting live, from the settings app or `flamectl set`
 - lua config for everything else, reloaded the moment you save it
 - socket-based ipc, plus ext-workspace for waybar
