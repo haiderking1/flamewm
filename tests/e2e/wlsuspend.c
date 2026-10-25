@@ -1,7 +1,8 @@
-// a window that says when flame tells it it's out of sight: "suspended" or
-// "shown" on every change of the xdg_toplevel suspended state, for
-// seconds (default 4). draws one plain buffer, nothing else
-// usage: wlsuspend [seconds]
+// a window that says what states flame gives it: "suspended" or "shown" on
+// every change of the xdg_toplevel suspended state, "maximized" or "not
+// maximized" on every change of that one, for seconds (default 4), as app_id
+// (default wlsuspend). draws one plain buffer, nothing else
+// usage: wlsuspend [seconds] [app_id]
 #define _POSIX_C_SOURCE 200809L
 #include <poll.h>
 #include <stdio.h>
@@ -21,7 +22,7 @@ static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm;
 static int configured;
-static int suspended = -1; // not told yet
+static int suspended = -1, maximized = -1; // not told yet
 
 static void global(void *data, struct wl_registry *registry, uint32_t name,
 		const char *interface, uint32_t version) {
@@ -54,10 +55,16 @@ static const struct xdg_surface_listener surface_listener = {surface_configure};
 
 static void toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t w, int32_t h,
 		struct wl_array *states) {
-	int now = 0;
+	int now = 0, max = 0;
 	uint32_t *state;
 	wl_array_for_each(state, states) {
 		now = now || *state == XDG_TOPLEVEL_STATE_SUSPENDED;
+		max = max || *state == XDG_TOPLEVEL_STATE_MAXIMIZED;
+	}
+	if (max != maximized) {
+		maximized = max;
+		printf("%s\n", max ? "maximized" : "not maximized");
+		fflush(stdout);
 	}
 	if (now != suspended) {
 		suspended = now;
@@ -84,6 +91,7 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 
 int main(int argc, char **argv) {
 	int seconds = argc > 1 ? atoi(argv[1]) : 4;
+	const char *app_id = argc > 2 ? argv[2] : "wlsuspend";
 	struct wl_display *display = wl_display_connect(NULL);
 	if (!display) {
 		return 1;
@@ -101,7 +109,7 @@ int main(int argc, char **argv) {
 	xdg_surface_add_listener(xs, &surface_listener, NULL);
 	struct xdg_toplevel *top = xdg_surface_get_toplevel(xs);
 	xdg_toplevel_add_listener(top, &toplevel_listener, NULL);
-	xdg_toplevel_set_app_id(top, "wlsuspend");
+	xdg_toplevel_set_app_id(top, app_id);
 	wl_surface_commit(surface);
 	while (!configured && wl_display_dispatch(display) >= 0) {
 	}

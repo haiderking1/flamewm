@@ -18,9 +18,11 @@ static struct flame_toplevel *from_view(struct flame_view *view) {
 	return toplevel;
 }
 
+// firefox and the browsers built on it (zen, as a package and a flatpak)
 static bool is_firefox(struct wlr_xdg_toplevel *xdg) {
 	static const char *const ids[] = {
 		"firefox", "firefox-esr", "org.mozilla.firefox", "org.mozilla.firefox_esr",
+		"zen", "app.zen_browser.zen",
 	};
 	if (!xdg->app_id) {
 		return false;

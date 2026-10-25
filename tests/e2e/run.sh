@@ -744,6 +744,15 @@ $CTL movetoworkspace 3 > /dev/null; sleep 0.4
 wait
 tr '\\n' ' ' < s.txt; echo
 " "shown suspended shown suspended"
+case_run "firefox and zen are told they're maximized (gtk keeps its shadow margins off, no strip after fullscreen), other apps aren't" "
+$BIN/wlsuspend 1 zen > zen.txt &
+$BIN/wlsuspend 1 firefox > firefox.txt &
+$BIN/wlsuspend 1 foot > other.txt &
+wait
+echo zen \$(head -1 zen.txt)
+echo firefox \$(head -1 firefox.txt)
+echo other \$(head -1 other.txt)
+" "zen maximized" "firefox maximized" "other not maximized"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched
