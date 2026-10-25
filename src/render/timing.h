@@ -40,6 +40,9 @@ struct flame_frame_timing {
 	// gpu: the longest finished measurement per collection, not per
 	// frame, results arrive a frame or two late
 	struct timing_stat draw, empty, gpu, flip, dispatch;
+	// thousands of pixels a composited frame: what changed, what got redrawn
+	// (that grown by what the buffer missed, and the glass over it)
+	struct timing_stat damage_kpx, repaint_kpx;
 	// a client's new buffer handed over -> the flip that first showed it
 	struct timing_stat wayland_latency, x11_latency;
 	// the focused fullscreen X game's own present to present: a hitch in
@@ -75,6 +78,8 @@ void timing_finish(struct flame_frame_timing *timing);
 // the probes on or off while flame runs (flamectl frame-timing), a report
 // every 2s in the log while they're on
 void timing_set(struct flame_frame_timing *timing, bool on);
+// a composited frame's changed and redrawn areas, in pixels
+void timing_areas(struct flame_frame_timing *timing, uint64_t damage, uint64_t repaint);
 
 // one call to frame_render, from start to end. drew: a changed frame got
 // queued, else it was an empty pass (no damage, nothing queued)

@@ -699,6 +699,16 @@ static void glass_repaint(const struct flame_element_list *list,
 }
 
 // renders the frame into a buffer and fills state with it, ready to commit
+static uint64_t region_area(const pixman_region32_t *region) {
+	int count = 0;
+	const pixman_box32_t *boxes = pixman_region32_rectangles((pixman_region32_t *)region, &count);
+	uint64_t area = 0;
+	for (int i = 0; i < count; i++) {
+		area += (uint64_t)(boxes[i].x2 - boxes[i].x1) * (uint64_t)(boxes[i].y2 - boxes[i].y1);
+	}
+	return area;
+}
+
 static bool draw(struct flame_frame *frame, const struct flame_render_target *target,
 		const pixman_region32_t *damage, struct wlr_output_state *state) {
 	struct wlr_output *output = frame->output;
@@ -717,6 +727,9 @@ static bool draw(struct flame_frame *frame, const struct flame_render_target *ta
 	wlr_damage_ring_add(&frame->ring, damage);
 	wlr_damage_ring_rotate_buffer(&frame->ring, buffer, &repaint);
 	glass_repaint(&frame->cur, target, &repaint, buffer->width, buffer->height);
+	if (frame->timing.enabled) {
+		timing_areas(&frame->timing, region_area(damage), region_area(&repaint));
+	}
 
 	frame->in_point++;
 	frame->draw_id++;

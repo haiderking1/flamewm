@@ -108,6 +108,8 @@ static void reset_span(struct flame_frame_timing *timing) {
 	memset(&timing->gpu, 0, sizeof(timing->gpu));
 	memset(&timing->flip, 0, sizeof(timing->flip));
 	memset(&timing->dispatch, 0, sizeof(timing->dispatch));
+	memset(&timing->damage_kpx, 0, sizeof(timing->damage_kpx));
+	memset(&timing->repaint_kpx, 0, sizeof(timing->repaint_kpx));
 	memset(&timing->wayland_latency, 0, sizeof(timing->wayland_latency));
 	memset(&timing->slack, 0, sizeof(timing->slack));
 	memset(&timing->gpu_done, 0, sizeof(timing->gpu_done));
@@ -128,7 +130,7 @@ static int handle_report(void *data) {
 	double span = ms_between(&timing->span_start, &now) / 1e3;
 
 	char draw[64], empty[64], gpu[64], flip[64], dispatch[64], late[64];
-	char wayland[64], x11[64], slack[64], gpu_done[64], game[64];
+	char wayland[64], x11[64], slack[64], gpu_done[64], game[64], damaged[64], repainted[64];
 	const struct schedule *schedule = timing->schedule;
 	wlr_log(WLR_INFO, "flame: frame-timing output=%s mode=%.3fHz span=%.2fs "
 		"pipeline=%s overlap=%s asap=%s vrr=%s pace_fps=%.1f pace_stuck=%u lead_ms=%.3f "
@@ -139,7 +141,7 @@ static int handle_report(void *data) {
 		"metadata_missing=%u clock_discontinuities=%u seq_repeat=%u seq_reset=%u seq_last=%u "
 		"wayland_commit_to_flip_ms=%s x11_present_to_flip_ms=%s game_gap_ms=%s "
 		"missed_vblanks=%u margin_ms=%.3f slack_ms=%s late_app_frames=%u "
-		"hiccups=%u planned=%u",
+		"hiccups=%u planned=%u damage_kpx=%s repaint_kpx=%s",
 		timing->output->name, timing->output->refresh / 1000.0, span,
 		schedule_policy_name(schedule->policy), schedule_overlapping(schedule) ? "on" : "off",
 		schedule->asap ? "on" : "off",
@@ -163,7 +165,9 @@ static int handle_report(void *data) {
 		stat_str(&timing->x11_latency, x11, sizeof(x11)),
 		stat_str(&timing->game_gap, game, sizeof(game)),
 		timing->missed, schedule->margin / 1e6, stat_str(&timing->slack, slack, sizeof(slack)),
-		timing->late_app_frames, timing->hiccups, timing->hiccups_planned);
+		timing->late_app_frames, timing->hiccups, timing->hiccups_planned,
+		stat_str(&timing->damage_kpx, damaged, sizeof(damaged)),
+		stat_str(&timing->repaint_kpx, repainted, sizeof(repainted)));
 
 	reset_span(timing);
 	wl_event_source_timer_update(timing->report, REPORT_MS);
@@ -215,6 +219,13 @@ void timing_frame(struct flame_frame_timing *timing, const struct timespec *star
 		const struct timespec *end, bool drew) {
 	if (timing->enabled) {
 		stat_add(drew ? &timing->draw : &timing->empty, ms_between(start, end));
+	}
+}
+
+void timing_areas(struct flame_frame_timing *timing, uint64_t damage, uint64_t repaint) {
+	if (timing->enabled) {
+		stat_add(&timing->damage_kpx, (double)damage / 1000);
+		stat_add(&timing->repaint_kpx, (double)repaint / 1000);
 	}
 }
 
