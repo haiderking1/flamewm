@@ -4,6 +4,7 @@
 #include <linux/input-event-codes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wlr/util/log.h>
 
 #include "bindings/action.h"
 #include "config/settings.h"
@@ -226,6 +227,25 @@ void ipc_command(struct flame_ipc_client *client, char *line) {
 		} else {
 			reply_error(client, "test unplug|plug");
 		}
+		return;
+	}
+	if (!strcmp(name, "frame-timing")) {
+		// frame-timing on|off: the probes every screen logs a report from
+		// every 2s, live (FLAME_FRAME_TIMING=1 has them on from the start)
+		const char *how = strtok_r(NULL, " \t\r", &save);
+		struct flame_server *server = client->ipc->server;
+		if (!how || (strcmp(how, "on") && strcmp(how, "off"))) {
+			reply_error(client, "frame-timing on|off");
+			return;
+		}
+		bool on = !strcmp(how, "on");
+		server->render.frame_timing = on; // screens that come later too
+		struct flame_output *output;
+		wl_list_for_each(output, &server->outputs.list, link) {
+			timing_set(&output->frames.timing, on);
+		}
+		wlr_log(WLR_INFO, "frame timing probes %s", on ? "on, reports every 2s" : "off");
+		reply_ok(client);
 		return;
 	}
 	if (!strcmp(name, "key")) {

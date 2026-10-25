@@ -178,15 +178,25 @@ void timing_init(struct flame_frame_timing *timing, struct wlr_output *output,
 	timing->output = output;
 	timing->schedule = schedule;
 	wl_list_init(&timing->present.link);
-	if (!enabled) {
+	timing_set(timing, enabled);
+}
+
+void timing_set(struct flame_frame_timing *timing, bool on) {
+	if (on == timing->enabled) {
 		return;
 	}
+	if (!on) {
+		timing_finish(timing);
+		return;
+	}
+	struct wlr_output *output = timing->output;
 	timing->report = wl_event_loop_add_timer(output->event_loop, handle_report, timing);
 	if (!timing->report) {
 		wlr_log(WLR_ERROR, "no timer for frame timing on %s, it stays off", output->name);
 		return;
 	}
 	timing->enabled = true;
+	timing->have_flip = false; // a flip from before it was on isn't the last one
 	reset_span(timing);
 	wl_event_source_timer_update(timing->report, REPORT_MS);
 	listener_connect(&timing->present, &output->events.present, handle_present);

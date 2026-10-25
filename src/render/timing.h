@@ -72,6 +72,9 @@ bool timing_enabled_by_env(void);
 void timing_init(struct flame_frame_timing *timing, struct wlr_output *output,
 	const struct schedule *schedule, bool enabled);
 void timing_finish(struct flame_frame_timing *timing);
+// the probes on or off while flame runs (flamectl frame-timing), a report
+// every 2s in the log while they're on
+void timing_set(struct flame_frame_timing *timing, bool on);
 
 // one call to frame_render, from start to end. drew: a changed frame got
 // queued, else it was an empty pass (no damage, nothing queued)
