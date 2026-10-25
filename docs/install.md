@@ -2,19 +2,23 @@
 
 ## arch
 
-the packages aren't on the aur yet, but the PKGBUILD is right here and
-makes the same two packages:
-
 ```sh
 git clone https://github.com/haiderking1/flamewm
-cd flamewm/dist/aur/flamewm-git
-makepkg -si                         # builds both, then asks what to install
+flamewm/dist/flame-update           # flame with all its apps
+flamewm/dist/flame-update --core    # or flame alone, bring your own bar and locker
 ```
 
-`flamewm-git` is the compositor alone: bring your own bar, launcher and
-locker. `flame-apps-git` adds the bar, files, settings, the player,
-search, the lock screen and the login screen. to install just one of them
-after building: `sudo pacman -U flamewm-git-*.pkg.tar.zst`.
+it builds real packages (`flamewm-git`, `flame-apps-git`) and installs
+them with pacman. it installs itself too, so after that updating is just:
+
+```sh
+flame-update
+```
+
+it updates what you have (just flame, or flame and the apps) and does
+nothing when there's nothing new. `--all` and `--core` switch between the
+two. the PKGBUILD it builds is in [dist/aur](../dist/aur/flamewm-git/PKGBUILD),
+the aur package is coming once the aur takes new accounts again.
 
 ## from source
 
