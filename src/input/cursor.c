@@ -23,10 +23,12 @@ static uint32_t now_msec(void) {
 
 // the pointer's over view now (NULL: a layer, surface, or the background),
 // moved there or something moved under it. focus follows the mouse into
-// another window, like sway and hyprland's mouse_refocus = 0: not as it
-// moves around inside the one it was over, and never by itself. a window
-// that opened (a game started from steam's play button) keeps the focus
-// it got while the mouse wiggles where it was
+// another window, like hyprland's follow_mouse = 1 with mouse_refocus = 0:
+// a move into a window other than the one the mouse last went into focuses
+// it, moving around inside that one doesn't, and nothing does by itself. a
+// window that opened (a game started from steam's play button) keeps the
+// focus it got while the mouse wiggles where it was, the keyboard sent
+// elsewhere stays there till the mouse goes into another window
 static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 		struct wlr_surface *surface, bool moved) {
 	struct flame_server *server = cursor->server;
@@ -39,9 +41,9 @@ static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 			|| xshell_buttons_held(&server->xshell) || xshell_menu_open(&server->xshell)) {
 		return;
 	}
-	bool entered = view != cursor->over;
-	cursor->over = view;
-	if (!moved || !server->config->focus_follows_mouse || (view && !entered)) {
+	// only the mouse moving says where it went: what moves under a still one
+	// changes nothing (hyprland's m_lastMouseFocus is set as it focuses)
+	if (!moved || !server->config->focus_follows_mouse) {
 		return;
 	}
 	if (!view) {
@@ -56,16 +58,19 @@ static void follow_mouse(struct flame_cursor *cursor, struct flame_view *view,
 	if (view->workspace != desktop->active || layers_keyboard_locked(&server->layers)) {
 		return;
 	}
-	// already typing here. unless a layer took the keyboard on hover, then
-	// coming back onto the window takes it back
-	if (view == desktop->focused && !server->layers.focused) {
-		return;
-	}
 	// nothing behind a fullscreen window gets focus by peeking out
 	if (desktop->active->fullscreen && desktop->active->fullscreen != view) {
 		return;
 	}
-	focus_view(desktop, view);
+	// the one it last went into: moving around in it changes nothing. unless
+	// a layer took the keyboard on hover, then it takes it back
+	if (view == cursor->mouse_focused && !(view == desktop->focused && server->layers.focused)) {
+		return;
+	}
+	cursor->mouse_focused = view;
+	if (view != desktop->focused || server->layers.focused) {
+		focus_view(desktop, view);
+	}
 }
 
 // a held button keeps the pointer on the surface it went down on, the
@@ -435,8 +440,8 @@ void cursor_refresh(struct flame_cursor *cursor) {
 }
 
 void cursor_forget_view(struct flame_cursor *cursor, struct flame_view *view) {
-	if (cursor->over == view) {
-		cursor->over = NULL;
+	if (cursor->mouse_focused == view) {
+		cursor->mouse_focused = NULL;
 	}
 }
 

@@ -267,6 +267,37 @@ title wiggled
 $CTL pointer move 900 400 > /dev/null; sleep 0.3
 $CTL pointer move 300 400 > /dev/null; sleep 0.3
 title crossed" "opened game" "wiggled game" "crossed steam"
+case_run "back on a workspace the window under the mouse has the keyboard (hyprland's way), not the last one typed in" "
+title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
+$BIN/xtyped left > /dev/null &
+sleep 1
+$BIN/xtyped right > /dev/null &
+sleep 1.5
+$CTL pointer move 900 400 > /dev/null; sleep 0.3
+title before
+$CTL workspace 2 > /dev/null; sleep 0.3
+$CTL pointer move 300 400 > /dev/null; sleep 0.2
+$CTL workspace 1 > /dev/null; sleep 0.5
+title back
+$CTL pointer move 303 401 > /dev/null; sleep 0.3
+title wiggled" "before right" "back left" "wiggled left"
+case_run "the keyboard sent elsewhere stays while the mouse moves in its window, the mouse going into another takes it" "
+title() { printf '%s ' \$1; $CTL state | python3 -I -c \"import json, sys; print(json.load(sys.stdin)['window']['title'])\"; }
+$BIN/xtyped a > /dev/null &
+sleep 1
+$BIN/xtyped b > /dev/null &
+sleep 1
+$BIN/xtyped c > /dev/null &
+sleep 1.5
+# a on the left, b over c on the right
+$CTL pointer move 900 550 > /dev/null; sleep 0.3
+title mouse
+$CTL focus next > /dev/null; sleep 0.3
+title keyboard
+$CTL pointer move 903 551 > /dev/null; sleep 0.3
+title wiggled
+$CTL pointer move 900 200 > /dev/null; sleep 0.3
+title crossed" "mouse c" "keyboard a" "wiggled a" "crossed b"
 case_run "a window that just opened takes the screen when it asks, though the user clicked elsewhere meanwhile; one long open doesn't" "
 click() { $CTL pointer button left press > /dev/null; $CTL pointer button left release > /dev/null; }
 $BIN/xtyped steam > /dev/null &

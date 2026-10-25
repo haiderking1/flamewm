@@ -1,5 +1,7 @@
 #include "desktop/desktop.h"
 
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
 
 #include "anim/window.h"
@@ -237,6 +239,46 @@ void desktop_swap_views(struct flame_desktop *desktop, struct flame_view *a,
 	desktop_arrange(desktop);
 }
 
+// the window under the pointer on workspace, by where its windows are laid
+// out (they may still be sliding in): a float over the tiles
+static struct flame_view *view_under_pointer(struct flame_desktop *desktop,
+		struct flame_workspace *workspace) {
+	struct wlr_cursor *pointer = desktop->server->input.cursor.wlr;
+	struct flame_view *view, *found = NULL;
+	wl_list_for_each(view, &workspace->floats, link) {
+		// the last one drawn over the others that has it
+		if (wlr_box_contains_point(&view->geometry, pointer->x, pointer->y)) {
+			found = view;
+		}
+	}
+	if (found) {
+		return found;
+	}
+	wl_list_for_each(view, &workspace->views, link) {
+		if (wlr_box_contains_point(&view->geometry, pointer->x, pointer->y)) {
+			return view;
+		}
+	}
+	return NULL;
+}
+
+// who has the keyboard on a workspace that comes up, hyprland's way: a
+// fullscreen window covering it, else the last one typed in when it floats,
+// else (focus following the mouse) the one under the pointer, else the last
+static struct flame_view *focus_on_show(struct flame_desktop *desktop,
+		struct flame_workspace *workspace) {
+	struct flame_view *last = focus_fallback(workspace);
+	if (workspace->fullscreen) {
+		return workspace->fullscreen;
+	}
+	if (last && last->floating) {
+		return last;
+	}
+	struct flame_view *under = desktop->server->config->focus_follows_mouse
+		? view_under_pointer(desktop, workspace) : NULL;
+	return under ? under : last;
+}
+
 void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 	if (index < 0 || index >= FLAME_WORKSPACE_COUNT) {
 		return;
@@ -259,7 +301,7 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 	workspace_anim_switch(desktop, from, target);
 
 	desktop_arrange(desktop);
-	focus_view(desktop, focus_fallback(target));
+	focus_view(desktop, focus_on_show(desktop, target));
 	// a different set of windows is under the still cursor now. waiting for a
 	// transaction doesn't work, there's none when nothing needs a new size,
 	// and the scroll would keep going to a window on the old workspace

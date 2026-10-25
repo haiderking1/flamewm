@@ -17,9 +17,10 @@ struct flame_cursor {
 	struct flame_cursor_image image;
 	bool image_ready;
 	struct wlr_cursor_shape_manager_v1 *shape_manager;
-	// the window the pointer was last over, moved there or something moved
-	// under it: focus follows the mouse into another one, not around this
-	struct flame_view *over;
+	// the window the mouse itself last moved into, hyprland's
+	// m_lastMouseFocus: focus follows the mouse into another one, not around
+	// this. windows moving under a still pointer don't change it
+	struct flame_view *mouse_focused;
 
 	struct wl_listener motion;
 	struct wl_listener motion_absolute;
