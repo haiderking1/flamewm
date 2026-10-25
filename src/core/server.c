@@ -63,6 +63,8 @@ bool server_start(struct flame_server *server, const char *startup_cmd,
 		return false;
 	}
 
+	config_watch_init(&server->config_watch, server,
+		server->config_path ? server->config_path : config_default_path());
 	setenv("WAYLAND_DISPLAY", server->socket, true);
 	setenv("XDG_CURRENT_DESKTOP", "flamewm", true);
 	// started from a tty this says "tty", and chromium (helium, brave...)
@@ -157,6 +159,7 @@ static void handle_reload_idle(void *data) {
 		wlr_log(WLR_INFO, "config: reloaded %s", server->config_path ? server->config_path
 			: config_default_path());
 	}
+	config_watch_loaded(&server->config_watch);
 	struct flame_config *old = (struct flame_config *)server->config;
 	server->config = config;
 	server_apply_config(server);
@@ -183,6 +186,7 @@ void server_finish(struct flame_server *server) {
 		server->reload_idle = NULL;
 	}
 	server->terminating = true;
+	config_watch_finish(&server->config_watch);
 	greeter_finish(&server->greeter);
 	wl_display_destroy_clients(server->display);
 	anims_finish(&server->anims);

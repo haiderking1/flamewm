@@ -10,6 +10,7 @@
 #include "eyecandy/eyecandy.h"
 #include "greeter/greeter.h"
 #include "idle/idle.h"
+#include "config/watch.h"
 #include "core/signals.h"
 #include "desktop/desktop.h"
 #include "input/input.h"
@@ -39,6 +40,7 @@ struct flame_server {
 	const struct flame_config *config;
 	const char *config_path; // -c, NULL for the usual place
 	struct wl_event_source *reload_idle;
+	struct flame_config_watch config_watch; // saved: reloaded
 	bool terminating; // tearing down: nothing animates its way out
 
 	struct flame_signals signals;

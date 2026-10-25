@@ -7,7 +7,8 @@ itself: pick one in settings or `flamectl set wallpaper ~/walls/x.jpg`.
 
 for more, there's lua at `~/.config/flame/init.lua` (see
 [examples/init.lua](../examples/init.lua)). what you set there wins over
-settings.lua, and `super+shift+r` reloads it.
+settings.lua. save it and flame reloads it right away (`super+shift+r`
+does too).
 
 ```lua
 flame.set {

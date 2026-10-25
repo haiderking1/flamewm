@@ -765,6 +765,21 @@ sleep 0.5
 [ -e locked ] || echo nothing ran
 $CTL settings | python3 -I -c \"import json, sys; print('lock is', repr(json.load(sys.stdin)['values']['lock']))\"
 " "ran it" "nothing ran" "lock is ''"
+case_run "init.lua saved: flame reloads by itself, once, and not for a save that changes nothing" "
+mkdir -p \$XDG_CONFIG_HOME/flame
+# the way an editor saves: a new file renamed over the old one
+echo 'flame.set{ gap = 17 }' > \$XDG_CONFIG_HOME/flame/init.lua.tmp
+mv \$XDG_CONFIG_HOME/flame/init.lua.tmp \$XDG_CONFIG_HOME/flame/init.lua
+sleep 0.6
+$CTL settings | python3 -I -c \"import json, sys; print('gap', json.load(sys.stdin)['values']['gap'])\"
+n=\$(grep -ac 'config: reloaded' flame.log)
+touch \$XDG_CONFIG_HOME/flame/init.lua
+sleep 0.6
+[ \$(grep -ac 'config: reloaded' flame.log) = \$n ] && echo touched, not reloaded
+$CTL set border_width 5 > /dev/null
+sleep 0.6
+echo reloads for a set: \$(( \$(grep -ac 'config: reloaded' flame.log) - n ))
+" "gap 17" "touched, not reloaded" "reloads for a set: 1"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched

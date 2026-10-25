@@ -30,7 +30,7 @@ that's flame with all its apps. just flame: `... | sh -s -- --core`. later,
 - its own apps: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications
 - all of the apps optional: use waybar, or nothing
 - every setting live, from the settings app or `flamectl set`
-- lua config for everything else
+- lua config for everything else, reloaded the moment you save it
 - socket-based ipc, plus ext-workspace for waybar
 - explicit sync, and windows on hidden workspaces told to stop drawing
 - frame logs that show where a slow frame's time went
