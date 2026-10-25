@@ -152,9 +152,80 @@ static void handle_output_commit(struct wl_listener *listener, void *data) {
 	}
 }
 
+// ---- watching a stretch of frames ----
+
+static void watch_report(struct flame_frame *frame);
+static int handle_watch_done(void *data);
+
+void frame_watch(struct flame_frame *frame, const char *what, int64_t ns) {
+	watch_report(frame); // one still going: what it has so far
+	if (!frame->watch.done) {
+		frame->watch.done = wl_event_loop_add_timer(frame->output->event_loop,
+			handle_watch_done, frame);
+	}
+	if (frame->watch.done) {
+		wl_event_source_timer_update(frame->watch.done, (int)(ns / 1000000) + 1);
+	}
+	frame->watch.on = true;
+	snprintf(frame->watch.what, sizeof(frame->watch.what), "%s", what);
+	frame->watch.started = now_ns();
+	frame->watch.until = frame->watch.started + ns;
+	frame->watch.last_flip = 0;
+	frame->watch.frames = frame->watch.missed = 0;
+	frame->watch.worst_gap = frame->watch.worst_gpu = 0;
+}
+
+// the watch is over: its line, the wall clock in it to line up with what
+// else was going on (gpu clocks)
+static void watch_report(struct flame_frame *frame) {
+	if (!frame->watch.on) {
+		return;
+	}
+	frame->watch.on = false;
+	struct timespec wall;
+	clock_gettime(CLOCK_REALTIME, &wall);
+	struct tm tm;
+	localtime_r(&wall.tv_sec, &tm);
+	double span = (double)(frame->watch.until - frame->watch.started) / 1e6;
+	double refresh = frame->output->refresh > 0 ? frame->output->refresh / 1000.0 : 0;
+	wlr_log(WLR_INFO, "%s: %s: %d frames in %.0fms (%.0f at %.1fHz), %d vblanks missed, "
+		"worst gap %.1fms, gpu up to %.1fms [%02d:%02d:%02d.%03ld]",
+		frame->output->name, frame->watch.what, frame->watch.frames, span,
+		refresh * span / 1000, refresh, frame->watch.missed, frame->watch.worst_gap / 1e6,
+		frame->watch.worst_gpu / 1e6, tm.tm_hour, tm.tm_min, tm.tm_sec,
+		wall.tv_nsec / 1000000);
+}
+
+static int handle_watch_done(void *data) {
+	watch_report(data);
+	return 0;
+}
+
+// a flip landed while watching: counted
+static void watch_flip(struct flame_frame *frame, const struct wlr_output_event_present *event) {
+	if (!frame->watch.on || !event->presented) {
+		return;
+	}
+	int64_t when = timespec_ns(&event->when);
+	if (when > frame->watch.until) {
+		return; // the timer has it
+	}
+	if (frame->watch.last_flip) {
+		int64_t gap = when - frame->watch.last_flip;
+		frame->watch.worst_gap = gap > frame->watch.worst_gap ? gap : frame->watch.worst_gap;
+		if (event->seq > frame->watch.last_seq + 1) {
+			frame->watch.missed += (int)(event->seq - frame->watch.last_seq - 1);
+		}
+	}
+	frame->watch.last_flip = when;
+	frame->watch.last_seq = event->seq;
+	frame->watch.frames++;
+}
+
 static void handle_output_present(struct wl_listener *listener, void *data) {
 	struct flame_frame *frame = wl_container_of(listener, frame, output_present);
 	const struct wlr_output_event_present *event = data;
+	watch_flip(frame, event);
 	// a flip without a timestamp anchors on dispatch time instead
 	frame->present_ns = event->presented ? timespec_ns(&event->when) : 0;
 	if (frame->vrr_switch_since && event->presented) {
@@ -464,6 +535,10 @@ void frame_finish(struct flame_frame *frame) {
 	if (frame->done_waiting) {
 		wlr_drm_syncobj_timeline_waiter_finish(&frame->done_waiter);
 		frame->done_waiting = false;
+	}
+	if (frame->watch.done) {
+		wl_event_source_remove(frame->watch.done);
+		frame->watch.done = NULL;
 	}
 	let_go_held(frame, UINT64_MAX);
 	wl_array_release(&frame->held);
@@ -861,6 +936,9 @@ static void handle_gpu_done(struct wlr_drm_syncobj_timeline_waiter *waiter) {
 	frame->done_waiting = false;
 	schedule_observe_gpu(&frame->schedule, took);
 	timing_gpu_done(&frame->timing, took);
+	if (frame->watch.on && took > frame->watch.worst_gpu) {
+		frame->watch.worst_gpu = took;
+	}
 }
 
 // a frame's drawing just went to the gpu: when does it finish. every drawn

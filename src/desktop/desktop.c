@@ -298,6 +298,16 @@ void desktop_switch_workspace(struct flame_desktop *desktop, int index) {
 	workspace_set_visible(target, true);
 	// the old one slides out of sight before it hides
 	workspace_anim_switch(desktop, from, target);
+	// how it went on screen, a line in the log: the slide, every refresh of
+	// it should have a frame (no slide: the first 200ms)
+	const struct flame_anim_config *anim = &desktop->server->config->anim;
+	int ms = anim->enabled && anim->workspace_ms > 0 ? anim->workspace_ms : 200;
+	char what[32];
+	snprintf(what, sizeof(what), "workspace %d", index + 1);
+	struct flame_output *output;
+	wl_list_for_each(output, &desktop->server->outputs.list, link) {
+		frame_watch(&output->frames, what, (int64_t)ms * 1000000);
+	}
 
 	desktop_arrange(desktop);
 	focus_view(desktop, focus_on_show(desktop, target));

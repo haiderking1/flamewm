@@ -139,6 +139,18 @@ struct flame_frame {
 	struct wlr_drm_syncobj_timeline_waiter done_waiter;
 	bool done_waiting;
 	int64_t done_since;
+	// a stretch of frames watched (a workspace switch): what reached the
+	// screen, logged once it's over. always on, it's only a few counters
+	struct {
+		bool on;
+		char what[32];
+		int64_t started, until;
+		int64_t last_flip;
+		uint32_t last_seq;
+		int frames, missed;
+		int64_t worst_gap, worst_gpu;
+		struct wl_event_source *done; // the line once it's over, flips or not
+	} watch;
 	// apps' dmabufs this frame's gpu work reads that have no explicit sync to
 	// hear when it's done: held, so the app doesn't get them back to draw
 	// into while the gpu's still reading. let go once the gpu's past the
@@ -166,6 +178,10 @@ void frame_finish(struct flame_frame *frame);
 
 // something wants a frame: the schedule decides when
 void frame_request(struct flame_frame *frame);
+// the next ns of frames watched as what (a workspace switch): one line in
+// the log once they're over, how many reached the screen, missed vblanks,
+// the worst gap between two and how long the gpu took at worst
+void frame_watch(struct flame_frame *frame, const char *what, int64_t ns);
 // the output's mode or what its display can do changed: tearing and vrr
 // get tried again, refused before or not
 void frame_display_changed(struct flame_frame *frame);
