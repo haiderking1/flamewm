@@ -12,6 +12,7 @@ flame.set {
 	background = "#111111",
 	-- wallpaper = "~/walls/sea.jpg", -- a jpeg, png or webp over the background
 	-- wallpaper_mode = "fill", -- "fit", "center", "stretch"
+	lock = "flamelock", -- what super+l and going to sleep run: "swaylock", "" for nothing
 	repeat_rate = 30, -- keys a second
 	repeat_delay = 250, -- ms
 	focus_follows_mouse = true,
