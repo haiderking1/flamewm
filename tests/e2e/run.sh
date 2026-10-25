@@ -724,6 +724,7 @@ sleep 1.5
 $BIN/wlcapture $CTL capme" "listed: yes" "drawn pixels: 889856 of 889856" \
 	"unchanged window, next frame: yes"
 case_run "a workspace sliding in draws each pixel once: a moved window still hides what's behind it" "
+$CTL frame-timing on > /dev/null
 foot sh -c 'sleep 30' > /dev/null 2>&1 &
 sleep 0.6
 foot sh -c 'sleep 30' > /dev/null 2>&1 &
@@ -798,7 +799,12 @@ fresh old
 [ -e old/flame/init.lua ] || echo init.lua gone
 cat old/flame/flame.lua
 " "bar lines: 1" "init.lua gone" "flame.set{ gap = 19 }"
+case_run "a workspace switch logs nothing unless frame timing is on" "
+$CTL workspace 2 > /dev/null; sleep 0.5; $CTL workspace 1 > /dev/null; sleep 0.5
+echo switch lines: \$(grep -ac 'frames in' flame.log)
+" "switch lines: 0"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
+$CTL frame-timing on > /dev/null
 $CTL frame-pipeline sideways 2>&1 | head -1
 $CTL frame-pipeline immediate > /dev/null && echo switched
 $CTL workspace 2 > /dev/null
@@ -1124,6 +1130,7 @@ $CTL set blur.noise 0 > /dev/null
 sleep 0.4
 flat off" "default grain" "off flat"
 case_run "glass over just the wallpaper reads it blurred once: a workspace sliding by blurs nothing, a new background blurs again" "
+$CTL frame-timing on > /dev/null
 hue() { grim -t ppm \$1.ppm; python3 -I -c \"
 d = open('\$1.ppm', 'rb').read()
 w, h = map(int, d.split(b'\\\\n')[1].split())

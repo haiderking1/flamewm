@@ -57,11 +57,10 @@ waybar's built in workspace module just works:
 
 ## when frames feel off
 
-every workspace switch writes a few lines to the log: how many frames made
+`flamectl frame-timing on` (or `FLAME_FRAME_TIMING=1`) logs a line per
+screen every 2 seconds: flips, scanout, tearing, vrr, a game's pace and its
+hitches. every workspace switch writes a few lines too: how many frames made
 it, how long the gpu took, and which apps were drawing during it. `grep
-workspace $XDG_RUNTIME_DIR/flamewm.log`.
-
-for more, `flamectl frame-timing on` (or `FLAME_FRAME_TIMING=1`) logs a
-line per screen every 2 seconds: flips, scanout, tearing, vrr, a game's
-pace and its hitches. `flamectl frame-pipeline adaptive|immediate|deadline`
+workspace $XDG_RUNTIME_DIR/flamewm.log`. off again with `flamectl
+frame-timing off`, off by default. `flamectl frame-pipeline adaptive|immediate|deadline`
 changes when frames start drawing, live, if you want to compare.

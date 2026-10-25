@@ -164,6 +164,11 @@ static void watch_report(struct flame_frame *frame);
 static int handle_watch_done(void *data);
 
 void frame_watch(struct flame_frame *frame, const char *what, int64_t ns) {
+	// for finding out why frames were late: only with the timing probes on
+	// (flamectl frame-timing on), nobody's log fills up with switches
+	if (!frame->render->frame_timing) {
+		return;
+	}
 	watch_report(frame); // one still going: what it has so far
 	if (!frame->watch.done) {
 		frame->watch.done = wl_event_loop_add_timer(frame->output->event_loop,

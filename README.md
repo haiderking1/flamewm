@@ -35,7 +35,6 @@ to update flame to the newest version later, run `flame-update`.
 - its own apps, all optional: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications, a lock screen and a login screen. or bring your own bar and config
 - every setting live: a lua config at `~/.config/flame/flame.lua`, reloaded the moment you save it, or an optional settings app (`super+,`) if you want them graphical
 - ext-workspace for waybar
-- frame logs that show where a slow frame's time went
 - and more...
 
 ## special thanks
