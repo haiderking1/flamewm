@@ -135,7 +135,8 @@ static void toast(struct app *app, const char *what, const char *why) {
 
 static void set_number(struct app *app, const char *key, double v, bool whole) {
 	char text[32];
-	snprintf(text, sizeof(text), whole ? "%.0f" : "%.2f", v);
+	// %g: small ones (the blur's noise, a few thousandths) keep their digits
+	snprintf(text, sizeof(text), whole ? "%.0f" : "%g", v);
 	// our copy moves now, the slider doesn't snap back while flame reloads
 	struct json *values = (struct json *)json_get(app->settings, "values");
 	struct json *slot = (struct json *)json_get(values, key);
@@ -446,6 +447,13 @@ static void appearance_motion(struct page *p) {
 		"is while another has focus", 0.5, 1, 0.05, "%.0f%%", 100, NULL);
 }
 
+static void appearance_blur(struct page *p) {
+	slider_row(p, "blur.size", "Blur", "How far a see-through app's blur reaches", 0, 40, 1,
+		"%.0f px", 1, "None");
+	slider_row(p, "blur.noise", "Grain", "Keeps dark blur smooth instead of banded, in levels "
+		"of brightness", 0, 8.0 / 255, 0.5 / 255, "%.1f", 255, "None");
+}
+
 static void appearance_desktop(struct page *p) {
 	color_row(p, "background", "Background", NULL, background_colors, 5);
 }
@@ -453,6 +461,7 @@ static void appearance_desktop(struct page *p) {
 static void page_appearance(struct page *p) {
 	card(p, "WINDOWS", appearance_windows);
 	card(p, "MOTION", appearance_motion);
+	card(p, "GLASS", appearance_blur);
 	card(p, "DESKTOP", appearance_desktop);
 }
 
