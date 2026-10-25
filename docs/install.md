@@ -8,7 +8,7 @@ flame with all its apps:
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install.sh | sh
 ```
 
-only the compositor, barebones:
+just the window manager, barebones:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/install-core.sh | sh
