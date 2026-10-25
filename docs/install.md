@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/haiderking1/flamewm/main/dist/insta
 don't have it). want another one: `flame.bind("super", "q", "kitty")` in
 your flame.lua.
 
-to update flame to the newest version later:
+to update flame to the newest version later, run this in your terminal:
 
 ```sh
 flame-update
