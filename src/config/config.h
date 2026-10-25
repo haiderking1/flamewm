@@ -125,6 +125,8 @@ struct flame_config {
 	struct flame_anim_config anim;
 	// glass and what's see-through over it
 	struct {
+		// glass blurs what's behind it at all: off, it's only tinted
+		bool enabled;
 		// grain (of full, +-) over glass and blended windows: dark blur
 		// doesn't come out in bands
 		float noise;

@@ -25,6 +25,7 @@ struct eyecandy_pane {
 	struct flame_glass_style style;
 	float opacity; // how much of it shows (set_pane_opacity), 1 for all
 	bool app_blur; // an app's own blur (ext-background-effect): blur.size's reach
+	float asked_blur; // what the app asked for, style.blur is what's drawn
 };
 
 bool eyecandy_init(struct flame_eyecandy *eyecandy, struct flame_server *server);

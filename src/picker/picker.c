@@ -297,6 +297,15 @@ static struct flame_output *output_under_pointer(struct flame_server *server) {
 }
 
 // the bar's labels, their boxes, the bar around them, centered at the top
+// a style as the config has glass: blur off, only tinted
+static struct flame_glass_style styled(const struct flame_picker *picker,
+		struct flame_glass_style style) {
+	if (!picker->server->config->blur.enabled) {
+		style.blur = 0;
+	}
+	return style;
+}
+
 static void build_bar(struct flame_picker *picker) {
 	int x = 0;
 	for (int i = 0; i < PICKER_CHOICES; i++) {
@@ -314,13 +323,15 @@ static void build_bar(struct flame_picker *picker) {
 	picker->bar_box = (struct wlr_box){picker->area.x + (picker->area.width - width) / 2,
 		picker->area.y + BAR_TOP, width, height};
 	scene_node_set_position(&picker->bar->node, picker->bar_box.x, picker->bar_box.y);
-	struct flame_glass_style bar = bar_style;
+	struct flame_glass_style bar = styled(picker, bar_style);
 	bar.radius = height / 2.0;
 	scene_glass_set_style(picker->bar_glass, &bar);
 	scene_glass_set_size(picker->bar_glass, width, height);
-	struct flame_glass_style knob = knob_style;
+	struct flame_glass_style knob = styled(picker, knob_style);
 	knob.radius = CHOICE_H / 2.0;
 	scene_glass_set_style(picker->knob, &knob);
+	struct flame_glass_style panel = styled(picker, panel_style);
+	scene_glass_set_style(picker->panel_glass, &panel);
 	for (int i = 0; i < PICKER_CHOICES; i++) {
 		struct wlr_box *box = &picker->choice_boxes[i];
 		struct picker_label *label = &picker->choices[i];

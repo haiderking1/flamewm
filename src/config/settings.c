@@ -56,6 +56,7 @@ static const struct setting settings[] = {
 	{"keyboard.variant", KIND_STRING, 0, 0, NULL},
 	{"keyboard.options", KIND_STRING, 0, 0, NULL},
 	{"keyboard.model", KIND_STRING, 0, 0, NULL},
+	{"blur.enabled", KIND_BOOL, 0, 0, NULL},
 	{"blur.noise", KIND_FLOAT, 0, 0.1, NULL},
 	{"blur.size", KIND_FLOAT, 0, 64, NULL},
 	{"animations.enabled", KIND_BOOL, 0, 0, NULL},
@@ -148,6 +149,8 @@ static void write_value(struct strbuf *out, const struct flame_config *c, const 
 		strbuf_json_string(out, k->options ? k->options : "");
 	} else if (!strcmp(key, "keyboard.model")) {
 		strbuf_json_string(out, k->model ? k->model : "");
+	} else if (!strcmp(key, "blur.enabled")) {
+		strbuf_printf(out, "%s", c->blur.enabled ? "true" : "false");
 	} else if (!strcmp(key, "blur.noise")) {
 		strbuf_printf(out, "%.4f", c->blur.noise);
 	} else if (!strcmp(key, "blur.size")) {

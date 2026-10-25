@@ -53,12 +53,14 @@ flame.x11 {
 	global_keys = "always",
 }
 
--- glass: how far apps' blur reaches, and a fine grain over it so dark blur
--- doesn't band (0 for none)
-flame.blur {
-	size = 18,
-	noise = 0.004,
-}
+-- blur, off out of the box: glass (the bar, see-through windows) is only
+-- tinted. on, it blurs what's behind it: how far apps' blur reaches, and a
+-- fine grain over it so dark blur doesn't band (0 for none)
+-- flame.blur {
+-- 	enabled = true,
+-- 	size = 18,
+-- 	noise = 0.004,
+-- }
 
 -- animations: on or off for all of them, curves named once ({x1, y1, x2,
 -- y2}, like css cubic-bezier), then each thing that moves: how long (ms),

@@ -162,14 +162,19 @@ double eyecandy_shape(struct wlr_surface *surface) {
 const struct eyecandy_pane *eyecandy_panes(struct wlr_surface *surface, size_t *len) {
 	struct surface_glass *glass = glass_of(surface);
 	*len = glass ? glass->all.len : 0;
-	// an app's own blur reaches as far as the config says now, not as it
-	// said when the app last committed
-	for (size_t i = 0; i < *len; i++) {
-		if (glass->all.panes[i].app_blur) {
-			glass->all.panes[i].style.blur = glass->server->config->blur.size;
-		}
+	if (!*len) {
+		return NULL;
 	}
-	return *len ? glass->all.panes : NULL;
+	// an app's own blur reaches as far as the config says now, not as it
+	// said when the app last committed. blur off: no pane blurs. the login
+	// screen's look is flamegreet's to say (each person's own), not a config's
+	const struct flame_config *config = glass->server->config;
+	bool blur = config->blur.enabled || greeter_active(&glass->server->greeter);
+	for (size_t i = 0; i < *len; i++) {
+		struct eyecandy_pane *pane = &glass->all.panes[i];
+		pane->style.blur = !blur ? 0 : pane->app_blur ? config->blur.size : pane->asked_blur;
+	}
+	return glass->all.panes;
 }
 
 // ---- flame-eyecandy-v1 ----
@@ -219,6 +224,7 @@ static void glass_handle_add_pane(struct wl_client *client, struct wl_resource *
 		},
 		.opacity = 1,
 	};
+	pane->asked_blur = pane->style.blur;
 	glass->candy_dirty = true;
 }
 

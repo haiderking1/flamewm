@@ -26,7 +26,7 @@
 //   flame.mouse{ focus_follows, drag_modifier, cursor_size, cursor_theme }
 //   flame.games{ tearing, vrr, pace, pace_fps }
 //   flame.x11{ zero_scaling, global_keys }
-//   flame.blur{ noise, size }
+//   flame.blur{ enabled, noise, size }
 //   flame.animations{ enabled, curves = { name = { x1, y1, x2, y2 } },
 //     open|close|move|workspace|focus|fade_in|fade_out|layers = { enabled,
 //     ms, curve, style ("slide", "zoom 40%", "fade", "none"; workspace:
@@ -51,9 +51,10 @@
 //   flame.bind(mods, key, action)  mods "super+shift", key a keysym name,
 //     action a function or a string to spawn. replaces a bind on the same keys
 //   flame.unbind(mods, key), flame.clear_binds()
-//   flame.set{ blur = { noise = 0.004, size = 18 } }: grain over glass and
-//     see-through windows (0 for none, dark blur bands without it), how far
-//     apps' own blur reaches (foot's)
+//   flame.set{ blur = { enabled = true, noise = 0.004, size = 18 } }: glass
+//     blurs what's behind it (off by default: only tinted), grain over glass
+//     and see-through windows (0 for none, dark blur bands without it), how
+//     far apps' own blur reaches (foot's)
 //   flame.set{ animations = false } or animations = { enabled, layers,
 //     open, close, layer_open, layer_close ("slide", "zoom", "fade", "none"),
 //     fade_in, fade_out, fade_in_from, fade_out_from, zoom_from, zoom_to,
@@ -499,7 +500,10 @@ static int set_blur(lua_State *L, struct flame_config *config, int table) {
 	while (lua_next(L, table)) {
 		const char *key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
 		int value = lua_gettop(L);
-		if (!strcmp(key, "noise")) {
+		if (!strcmp(key, "enabled")) {
+			luaL_checktype(L, value, LUA_TBOOLEAN);
+			config->blur.enabled = lua_toboolean(L, value);
+		} else if (!strcmp(key, "noise")) {
 			double n = luaL_checknumber(L, value);
 			config->blur.noise = (float)(n < 0 ? 0 : n > 0.1 ? 0.1 : n);
 		} else if (!strcmp(key, "size")) {

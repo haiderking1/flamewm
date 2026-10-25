@@ -12,6 +12,10 @@ flame.mouse { focus_follows = true }
 flame.lockscreen { command = "flamelock" }  -- what super+l runs, "" for nothing
 ```
 
+blur is off out of the box, glass is only tinted. `flame.blur { enabled =
+true }` turns it on. a screen's refresh: `flame.output("DP-2", { mode =
+"1920x1080@120" })`, the fastest it has when you don't say.
+
 every block is its own function: `flame.look`, `flame.wallpaper`,
 `flame.lockscreen`, `flame.keyboard`, `flame.mouse`, `flame.x11`, `flame.blur`, `flame.animations`. all of them with every option
 in [examples/flame.lua](../examples/flame.lua).

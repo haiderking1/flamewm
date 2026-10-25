@@ -1166,9 +1166,14 @@ for i in $(seq 1 40); do
 done
 sleep 30
 EOF
-case_run "glass for apps: flame-eyecandy and ext-background-effect blur what's behind a see-through window, a pane faded on its own doesn't" "
+case_run "glass for apps: blur's off by default, glass only tinted; on, flame-eyecandy and ext-background-effect blur what's behind a see-through window, a pane faded on its own doesn't" "
 foot sh stripes.sh > /dev/null 2>&1 &
 sleep 1.2
+$BIN/wlglass candy 3 &
+sleep 1.2
+grim -t ppm off.ppm
+sleep 2.2
+$CTL set blur.enabled true > /dev/null
 $BIN/wlglass candy 3 &
 sleep 1.2
 grim -t ppm candy.ppm
@@ -1180,9 +1185,10 @@ sleep 2.2
 $BIN/wlglass faded 3 &
 sleep 1.2
 grim -t ppm faded.ppm
+$ROUGH off.ppm off
 $ROUGH candy.ppm candy
 $ROUGH blur.ppm blur
-$ROUGH faded.ppm faded" "glass up" "candy smooth over sharp" "blur smooth over sharp" \
+$ROUGH faded.ppm faded" "glass up" "off sharp over sharp" "candy smooth over sharp" "blur smooth over sharp" \
 	"faded sharp over sharp"
 case_run "glass gets a grain: a dark blur doesn't come out in flat bands, blur.noise 0 does" "
 # down the middle of the blur, how long the longest stretch of one level is
@@ -1197,6 +1203,7 @@ for a, b in zip(vals, vals[1:]):
     longest = max(longest, run)
 print('\$1', 'grain' if longest < 40 else 'flat %d px' % longest)
 \"; }
+$CTL set blur.enabled true > /dev/null
 $BIN/wlglass blur 6 &
 sleep 1.2
 flat default
@@ -1212,6 +1219,7 @@ px = d[-(w * h * 3):]
 i = ((h // 2) * w + w // 2) * 3
 print('\$1', 'reddish' if px[i] > px[i + 2] + 40 else 'bluish' if px[i + 2] > px[i] + 40 else tuple(px[i:i + 3]))
 \"; }
+$CTL set blur.enabled true > /dev/null
 $CTL set background '#ff0000' > /dev/null
 $CTL workspace 2 > /dev/null
 $BIN/wlglass blur 8 &
