@@ -1324,7 +1324,7 @@ print(next(x for x in range(w // 2, w) if px[(16 * w + x) * 3] > 200) + 7)
 # its notifications would come here
 FLAMEBAR_NO_DDC=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/flame-e2e $(dirname $CTL)/flamebar > /dev/null 2>&1 &
 sleep 1
-$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+mkdir -p home; HOME=\$PWD/home $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
 win under
 a=\$(bright a)
@@ -1430,9 +1430,9 @@ buspid=\$(echo \"\$bus\" | sed -n 2p)
 FLAMEBAR_NO_DDC=1 $(dirname $CTL)/flamebar > /dev/null 2>&1 &
 sleep 1
 gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.GetServerInformation
-$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+mkdir -p home; HOME=\$PWD/home $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.2
-$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+mkdir -p home; HOME=\$PWD/home $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
 click 1000 400
 echo focused \$([ \$(win) -gt 100 ] && echo right)
@@ -1509,7 +1509,7 @@ print('\$1', 'red' if (r, g, b) == (255, 0, 0) else 'black' if (r, g, b) == (0, 
 \"; }
 key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
 windows() { $CTL state | python3 -I -c \"import json, sys; print('\$1', sum(w['windows'] for w in json.load(sys.stdin)['workspaces']))\"; }
-$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+mkdir -p home; HOME=\$PWD/home $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
 center before
 $BIN/wllock unlock 2500 > one.txt 2>&1 &
@@ -1545,7 +1545,7 @@ print('\$1', 'clock' if n > 300 else 'no clock', 'black' if tuple(c) == (0, 0, 0
 \"; }
 key() { $CTL key \$1 press > /dev/null; $CTL key \$1 release > /dev/null; }
 windows() { $CTL state | python3 -I -c \"import json, sys; print('\$1', sum(w['windows'] for w in json.load(sys.stdin)['workspaces']))\"; }
-$(dirname $CTL)/flamefiles > /dev/null 2>&1 &
+mkdir -p home; HOME=\$PWD/home $(dirname $CTL)/flamefiles > /dev/null 2>&1 &
 sleep 1.5
 clock before
 $CTL key Super_L press > /dev/null; key l; $CTL key Super_L release > /dev/null
