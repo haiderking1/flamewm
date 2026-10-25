@@ -29,7 +29,6 @@ to update flame to the newest version later, run `flame-update`.
 - made for games: tearing, vrr, and frame pacing with nothing injected into the game
 - its own renderer: glass, blur, rounded corners and animations, all drawn by flame
 - its own frame scheduler: nothing drawn when nothing changes, frames start as late as they can
-- direct scanout for fullscreen apps
 - a hardware cursor that actually works on nvidia
 - bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
 - screen sharing with its own portal and picker: point at a window, click, done
