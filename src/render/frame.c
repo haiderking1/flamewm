@@ -173,6 +173,7 @@ void frame_watch(struct flame_frame *frame, const char *what, int64_t ns) {
 	frame->watch.last_flip = 0;
 	frame->watch.frames = frame->watch.missed = 0;
 	frame->watch.worst_gap = frame->watch.worst_gpu = 0;
+	frame->watch.worst_own_ms = 0;
 }
 
 // the watch is over: its line, the wall clock in it to line up with what
@@ -188,12 +189,16 @@ static void watch_report(struct flame_frame *frame) {
 	localtime_r(&wall.tv_sec, &tm);
 	double span = (double)(frame->watch.until - frame->watch.started) / 1e6;
 	double refresh = frame->output->refresh > 0 ? frame->output->refresh / 1000.0 : 0;
+	// done: from going to the gpu to finished, waiting behind others included.
+	// own: the gpu's time on flame's commands alone (an app's work cutting in
+	// between them counts too, so it's at most that)
 	wlr_log(WLR_INFO, "%s: %s: %d frames in %.0fms (%.0f at %.1fHz), %d vblanks missed, "
-		"worst gap %.1fms, gpu up to %.1fms [%02d:%02d:%02d.%03ld]",
+		"worst gap %.1fms, gpu done in up to %.1fms, flame's own gpu work up to %.1fms "
+		"[%02d:%02d:%02d.%03ld]",
 		frame->output->name, frame->watch.what, frame->watch.frames, span,
 		refresh * span / 1000, refresh, frame->watch.missed, frame->watch.worst_gap / 1e6,
-		frame->watch.worst_gpu / 1e6, tm.tm_hour, tm.tm_min, tm.tm_sec,
-		wall.tv_nsec / 1000000);
+		frame->watch.worst_gpu / 1e6, frame->watch.worst_own_ms, tm.tm_hour, tm.tm_min,
+		tm.tm_sec, wall.tv_nsec / 1000000);
 }
 
 static int handle_watch_done(void *data) {
@@ -1275,6 +1280,9 @@ static void process_once(struct flame_frame *frame) {
 			schedule_observe_gpu(schedule, (int64_t)(gpu_ms * 1e6));
 		}
 		timing_gpu(&frame->timing, gpu_ms);
+		if (frame->watch.on && gpu_ms > frame->watch.worst_own_ms) {
+			frame->watch.worst_own_ms = gpu_ms;
+		}
 	}
 
 	if (!output->enabled || wlr_box_empty(frame->area)) {
