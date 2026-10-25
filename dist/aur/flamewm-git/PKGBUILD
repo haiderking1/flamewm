@@ -1,0 +1,58 @@
+# Maintainer: haiderking1 <haiderking1@users.noreply.github.com>
+# two packages from one build: flamewm-git is flame alone, flame-apps-git its
+# apps (the bar, files, settings, the player, search, the lock and login
+# screens). install both for the whole thing
+
+pkgbase=flamewm-git
+pkgname=(flamewm-git flame-apps-git)
+pkgver=r284.c633eed
+pkgrel=1
+pkgdesc='a wayland compositor as light as it gets, no features sacrificed, with its own independent X server written from scratch'
+arch=(x86_64)
+url='https://github.com/haiderking1/flamewm'
+license=(MIT)
+makedepends=(git clang make pkgconf wayland-protocols vulkan-headers shaderc
+	wlroots0.20 wayland libxkbcommon libglvnd libdrm libxshmfence lua54 pango cairo
+	pixman harfbuzz glib2 libpipewire systemd-libs libjpeg-turbo libpng libwebp
+	ffmpeg librsvg gdk-pixbuf2 libass uchardet mesa libpulse curl pam)
+source=("$pkgbase::git+$url.git")
+sha256sums=(SKIP)
+
+pkgver() {
+	cd "$pkgbase"
+	printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+	cd "$pkgbase"
+	make release
+}
+
+package_flamewm-git() {
+	pkgdesc='a wayland compositor as light as it gets, with its own independent X server written from scratch (flame alone, no apps)'
+	depends=(wlroots0.20 wayland libxkbcommon libglvnd libdrm libxshmfence lua54 pango
+		cairo pixman harfbuzz glib2 libpipewire systemd-libs libjpeg-turbo libpng libwebp
+		xdg-desktop-portal xdg-desktop-portal-gtk)
+	optdepends=('flame-apps-git: the bar, files, settings, player, search, lock and login screens'
+		'foot: the terminal super+enter opens'
+		'swaylock: a locker if you skip flame-apps-git (set lock = "swaylock")')
+	provides=(flamewm)
+	conflicts=(flamewm)
+	cd "$pkgbase"
+	make install-core DESTDIR="$pkgdir" PREFIX=/usr
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_flame-apps-git() {
+	pkgdesc="flame's apps: the bar, files, settings, the player, search, the lock and login screens"
+	depends=(flamewm-git wayland libxkbcommon libjpeg-turbo libwebp ffmpeg librsvg
+		gdk-pixbuf2 pango cairo harfbuzz libpng glib2 libpipewire libass uchardet mesa
+		libpulse systemd-libs curl pam)
+	optdepends=('greetd: to use flamegreet as the login screen')
+	provides=(flame-apps)
+	conflicts=(flame-apps)
+	backup=(etc/pam.d/flamelock etc/xdg/xdg-desktop-portal/flamewm-portals.conf)
+	cd "$pkgbase"
+	make install-apps DESTDIR="$pkgdir" PREFIX=/usr
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

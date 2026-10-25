@@ -24,7 +24,7 @@ sudo pacman -S --needed clang wlroots0.20 wayland wayland-protocols libxkbcommon
 
 | dep | pkg-config | why |
 | --- | --- | --- |
-| wlroots 0.20 | `wlroots-0.20` | backend, renderer, scene graph, xdg-shell, seat, cursor. pinned to 0.20 (latest stable, 0.20.2), api breaks between minors |
+| wlroots 0.20 | `wlroots-0.20` | the backend (kms, input, the session), the GL context and client buffers as textures, the protocols (xdg-shell, seat, cursor...). flame's scene, renderer and frame scheduling are its own; wlroots' renderer only draws where flame's GL can't. pinned to 0.20 (latest stable, 0.20.2), api breaks between minors |
 | wayland | `wayland-server` | the wayland server lib itself |
 | libxkbcommon | `xkbcommon` | keymaps + keysyms for keybinds |
 | pixman | `pixman-1` | region math: damage, occlusion, checking a client's opaque region before showing a resize |

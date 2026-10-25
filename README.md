@@ -1,152 +1,37 @@
-# flamewm
+# flame
 
-a tiling wayland compositor in C on wlroots 0.20, built for games.
+flame is a tiling wayland compositor that's as light as it gets, without
+giving up a single feature. X11 apps and games run on its own X server,
+written from scratch and built right in. no Xwayland anywhere.
 
-X11 apps and games run through flame's own X server, built in. no
-Xwayland needed, Steam and Proton games included.
+**[install](docs/install.md)** · **[configure](docs/config.md)** · **[deps](deps.md)**
 
-## what you get
+## features
 
-- **bspwm style tiling**, 10 workspaces, focus follows the mouse
-- **its own frame scheduler**: nothing drawn when nothing changed, a
-  fullscreen app goes straight to the display (direct scanout)
-- **tearing** for games with vsync off, **vrr** while a game's fullscreen,
-  no hitch going to the browser and back
-- **frame pacing**: the fullscreen game you're in gets its frames on screen
-  at an even pace, the fastest it can hold. a flat frametime line with
-  nothing to set and no injecting into the game
-- **hardware cursor** that works on nvidia
-- **screen sharing** through its own portal and picker: the window you
-  want lights up under the mouse, a glass panel on it, click to share.
-  an app asking twice (browsers do) doesn't make you pick twice. flame
-  draws everything itself, blur and glass included
-- **its own apps**, on its glass: settings (`super+,`), a file manager,
-  flamefiles (`super+e`), that's also every app's open and save dialog
-  and its "show in folder", and a video and music player, flameplay:
-  decoded on the gpu (vulkan), subtitles, audio tracks, it remembers where
-  you stopped
-- **search** (`super+space`): one field over everything, apps and files in
-  your home as you type, a sum's answer, the web. what you open most comes
-  up first
-- **a lock screen** (`super+l`, and before the computer sleeps): your
-  wallpaper with the time big over it, your picture and a glass field for
-  the password. locked, nothing but it shows or hears a key, and a lock
-  that crashes stays locked
-- **a login screen**, flamegreet: the lock screen's look before anyone's
-  logged in. everyone who can log in side by side, a field for the picked
-  one's password, what to log into, sleep, restart and shut down. it's a
-  greetd greeter, see [logging in](#logging-in)
-- **its own bar**, flamebar: see through over the wallpaper, the app in
-  front and the workspaces in use, the time (a click: a calendar), and a
-  control center of glass tiles (sound, what's playing, network,
-  bluetooth, do not disturb). notifications too: cards that slide in
-  under it, the list of them under the bell. the media keys (volume, mute, brightness, play) show what they
-  changed on glass for a moment. brightness for a laptop's screen or a
-  monitor on a cable (ddc/ci), keys or the control center's slider.
-  on a laptop, the battery: how full, how long it lasts, warned when
-  it's low (a desktop shows none). `flame.autostart("flamebar")`
-- an **ipc socket** for bars and scripts, and ext-workspace for waybar
+- its own X server, written from scratch: Steam, Proton and X11 apps without Xwayland
+- light: ~30MB of its own memory, X server included
+- made for games: tearing, vrr, and frame pacing with nothing injected into the game
+- its own renderer: glass, blur, rounded corners and animations, all drawn by flame
+- its own frame scheduler: nothing drawn when nothing changes, frames start as late as they can
+- direct scanout for fullscreen apps
+- a hardware cursor that actually works on nvidia
+- bspwm style tiling, floating windows, 10 workspaces, focus follows the mouse
+- screen sharing with its own portal and picker: point at a window, click, done
+- its own login screen and lock screen, on greetd
+- its own apps: settings, file manager (and every app's file dialog), video and music player, search, a bar with a control center and notifications
+- all of the apps optional: use waybar, or nothing
+- every setting live, from the settings app or `flamectl set`
+- lua config for everything else
+- socket-based ipc, plus ext-workspace for waybar
+- explicit sync, and windows on hidden workspaces told to stop drawing
+- frame logs that show where a slow frame's time went
+- and more...
 
-## build + run
+## special thanks
 
-deps are in [deps.md](deps.md).
-
-```sh
-make            # build/flamewm
-make run        # nested inside your current compositor
-make release    # build-release/flamewm
-make test       # unit tests
-make e2e        # end to end tests on headless flames
-sudo make install  # flamewm, flamectl, its apps, the portal files sharing and dialogs need
-```
-
-`flamewm -c config -s command -d`: a config file, a command to run once
-it's up, debug logs. started on a console (a tty, greetd) the logs go to
-`$XDG_RUNTIME_DIR/flamewm.log` instead (`flamewm-greeter.log` for the
-login screen), the screen stays black around flame.
-
-## logging in
-
-flamegreet greets through [greetd](https://git.sr.ht/~kennylevinsen/greetd),
-flame itself showing it. `sudo make install`, then in
-`/etc/greetd/config.toml`:
-
-```toml
-[default_session]
-command = "flamewm -g flamegreet"
-user = "greeter"
-```
-
-`systemctl enable greetd` (with your current display manager disabled).
-`-g` makes flame the login screen: just the greeter, no binds, and flame
-gone the moment someone's logged in. everyone picks how it looks while
-they're the one picked, in settings (wallpaper, login screen): their own
-wallpaper (a copy goes to `/var/lib/flamegreet`, no root needed) and the
-blur on or off. for nobody's in particular, the greeter user's config:
-`-c /etc/greetd/flame.lua` with a `flame.set{ wallpaper = ... }` in it.
-the sessions are `/usr/share/wayland-sessions`' (flame's put there), the
-last person and session picked come up first next time.
-
-## config
-
-none needed. **flamesettings** (`super+,`) changes things live, on flame's
-glass, so does `flamectl set gap 8` (`flamectl settings` lists them all).
-flame keeps them in `~/.config/flame/settings.lua`. the wallpaper too: flame
-draws it itself, pick one in flamesettings or `flamectl set wallpaper ~/walls/x.jpg`.
-
-for more, lua at `~/.config/flame/init.lua`, see
-[examples/init.lua](examples/init.lua). what it sets wins over settings.lua.
-
-```lua
-flame.set {
-  allow_tearing = true, -- games with vsync off tear
-  vrr = "fullscreen",   -- "off", "fullscreen", "always"
-  pace = "vrr",         -- "off", "vrr", "always"
-  pace_fps = 0,         -- a cap, 0 for none
-}
-```
-
-## binds
-
-mod is super.
-
-| bind | does |
-| --- | --- |
-| `super+q` / `super+enter` | foot |
-| `super+c` | close window |
-| `super+,` | settings |
-| `super+e` | files |
-| `super+space` | search: apps, files, sums |
-| `super+l` | lock |
-| `super+j` / `super+k` | focus next / prev |
-| `super+f` | fullscreen |
-| `super+1..0` | go to workspace |
-| `super+shift+1..0` | send window to workspace |
-| `super` + left drag | swap two windows |
-| `super` + right drag | resize |
-| `super+shift+q` | quit |
-
-## ipc
-
-`flamectl workspace 3`, `flamectl fullscreen`, `flamectl subscribe` (the
-state as one json line, again on every change). the socket is in
-`$FLAMEWM_SOCKET`, so quickshell and friends can talk to it directly.
-
-for waybar the built in workspace module just works:
-
-```jsonc
-"ext/workspaces": { "format": "{name}", "on-click": "activate", "sort-by-id": true }
-```
-
-## debugging frames
-
-`FLAME_FRAME_TIMING=1` (or `flamectl frame-timing on` live) logs a timing
-line per output every 2 seconds: flips, scanout, tearing, vrr, the game's
-pace and its hitches. `grep frame-timing $XDG_RUNTIME_DIR/flamewm.log`
-
-every workspace switch logs how its frames went (`grep workspace` in the
-same log). `flamectl frame-pipeline adaptive|immediate|deadline` changes
-when frames start drawing, live, to compare.
+- wlroots - for doing the basic boring stuff
+- greetd - for handling the login part
+- foot - for being the terminal every test runs in
 
 ## license
 

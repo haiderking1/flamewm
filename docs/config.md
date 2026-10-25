@@ -1,0 +1,65 @@
+# config
+
+you don't need one. **flamesettings** (`super+,`) changes everything live,
+and so does `flamectl set gap 8` (`flamectl settings` lists them all). they
+end up in `~/.config/flame/settings.lua`. the wallpaper too, flame draws it
+itself: pick one in settings or `flamectl set wallpaper ~/walls/x.jpg`.
+
+for more, there's lua at `~/.config/flame/init.lua` (see
+[examples/init.lua](../examples/init.lua)). what you set there wins over
+settings.lua, and `super+shift+r` reloads it.
+
+```lua
+flame.set {
+  allow_tearing = true, -- games with vsync off tear
+  vrr = "fullscreen",   -- "off", "fullscreen", "always"
+  pace = "vrr",         -- "off", "vrr", "always"
+  pace_fps = 0,         -- a cap, 0 for none
+  lock = "flamelock",   -- what super+l and sleep run, "" for nothing
+}
+```
+
+## binds
+
+mod is super.
+
+| bind | does |
+| --- | --- |
+| `super+enter` / `super+q` | terminal (foot) |
+| `super+c` | close window |
+| `super+,` | settings |
+| `super+e` | files |
+| `super+space` | search |
+| `super+l` | lock (whatever `lock` says) |
+| `super+j` / `super+k` | focus next / previous |
+| `super+f` | fullscreen |
+| `super+shift+space` | float / tile |
+| `super+1..0` | go to workspace |
+| `super+shift+1..0` | send window to workspace |
+| `super` + left drag | swap two windows |
+| `super` + right drag | resize |
+| `super+shift+r` | reload config |
+| `super+shift+q` | quit |
+
+## ipc
+
+`flamectl workspace 3`, `flamectl fullscreen`, `flamectl subscribe` (the
+whole state as one json line, and again on every change). the socket is
+in `$FLAMEWM_SOCKET`, so quickshell and friends can talk to it directly.
+
+waybar's built in workspace module just works:
+
+```jsonc
+"ext/workspaces": { "format": "{name}", "on-click": "activate", "sort-by-id": true }
+```
+
+## when frames feel off
+
+every workspace switch writes a few lines to the log: how many frames made
+it, how long the gpu took, and which apps were drawing during it. `grep
+workspace $XDG_RUNTIME_DIR/flamewm.log`.
+
+for more, `flamectl frame-timing on` (or `FLAME_FRAME_TIMING=1`) logs a
+line per screen every 2 seconds: flips, scanout, tearing, vrr, a game's
+pace and its hitches. `flamectl frame-pipeline adaptive|immediate|deadline`
+changes when frames start drawing, live, if you want to compare.
