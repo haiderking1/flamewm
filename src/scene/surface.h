@@ -3,6 +3,7 @@
 
 #include <pixman.h>
 #include <stdbool.h>
+#include <time.h>
 #include <wayland-server-core.h>
 #include <wlr/util/addon.h>
 #include <wlr/util/box.h>
@@ -51,6 +52,12 @@ struct flame_surface_state {
 	// the just in time wake it's waiting for, 0 for none. a deadline: frames
 	// going out meanwhile move the render it aims at, never this later
 	int64_t jit_wake;
+	// a visible app that was drawing steadily and stopped for a while says
+	// whose wait it was, one line when it draws again: its newest frame
+	// callback (when it asked, when flame answered), its last buffer and the
+	// usual time between them (ns)
+	int64_t asked_at, answered_at;
+	int64_t last_buffer, buffer_gap;
 
 	struct wl_listener commit;
 };
@@ -73,5 +80,9 @@ bool scene_surface_drawn(const struct flame_surface_state *state);
 // an output is going away, nobody is on it anymore
 void scene_surfaces_output_gone(struct flame_scene_surfaces *surfaces,
 	struct wlr_output *output);
+
+// the frame callbacks surface asked for, answered now: every answer goes
+// through here, so a stall knows when flame said draw
+void scene_surface_frame_done(struct wlr_surface *surface, const struct timespec *when);
 
 #endif

@@ -212,7 +212,7 @@ static void source_produce(struct window_source *source) {
 		struct wlr_surface *surface = list.data[i].surface;
 		if (surface && !on_screen(surface)
 				&& !wl_list_empty(&surface->current.frame_callback_list)) {
-			wlr_surface_send_frame_done(surface, &when);
+			scene_surface_frame_done(surface, &when);
 		}
 	}
 	elements_finish(&list);

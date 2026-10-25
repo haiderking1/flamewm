@@ -853,6 +853,12 @@ XDG_CONFIG_HOME=\$PWD/first FLAME_SETTINGS=\$PWD/first/settings.lua WLR_BACKENDS
 [ -s first/flame/flame.lua ] && echo first written
 echo first errors: \$(grep -ac 'ERROR.*config: ' first.log)
 " "example errors: 0" "first written" "first errors: 0"
+case_run "an app drawing steadily that stops for a while: the log says whose wait it was, nothing while it draws" "
+$BIN/wlgame 3 > /dev/null 2>&1
+echo quiet: \$(grep -ac 'stall:' flame.log)
+$BIN/wlgame 4 busy > /dev/null 2>&1
+grep -ao 'stall: wlgame went 1.[0-9]s without a new frame: flame took 0.0[0-9]s to say draw, wlgame took 1.[0-9]*s to draw after' flame.log | head -1 | sed 's/[0-9]\\.[0-9]*s/Ns/g'
+" "quiet: 0" "stall: wlgame went Ns without a new frame: flame took Ns to say draw, wlgame took Ns to draw after"
 case_run "the frame pipeline changes live and a switch says which one it ran with" "
 $CTL frame-timing on > /dev/null
 $CTL frame-pipeline sideways 2>&1 | head -1

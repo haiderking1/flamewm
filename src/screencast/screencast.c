@@ -608,7 +608,7 @@ static void produce(struct cast_stream *stream) {
 	clock_gettime(CLOCK_MONOTONIC, &when);
 	for (size_t i = 0; i < list.len; i++) {
 		if (list.data[i].surface) {
-			wlr_surface_send_frame_done(list.data[i].surface, &when);
+			scene_surface_frame_done(list.data[i].surface, &when);
 		}
 	}
 	elements_finish(&list);

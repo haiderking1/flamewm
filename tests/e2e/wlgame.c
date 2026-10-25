@@ -1,7 +1,8 @@
 // a fullscreen wayland game: an opaque buffer every frame callback for a few
 // seconds. vsyncoff: it asks to tear (wp_tearing_control_v1 async), like a
-// game with vsync off. prints how many frames went out
-// usage: wlgame SECONDS [vsyncoff]
+// game with vsync off. busy: after 60 frames it's stuck once for 1.2s before
+// drawing the next, like a browser can be. prints how many frames went out
+// usage: wlgame SECONDS [vsyncoff|busy]
 #define _GNU_SOURCE
 #include <poll.h>
 #include <stdbool.h>
@@ -45,9 +46,13 @@ static struct wl_buffer *make_buffer(int w, int h, uint32_t xrgb) {
 }
 
 static void draw(void);
+static bool busy;
 
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time) {
 	wl_callback_destroy(cb);
+	if (busy && frames == 60) {
+		usleep(1200000);
+	}
 	draw();
 }
 
@@ -128,6 +133,7 @@ static double now(void) {
 int main(int argc, char **argv) {
 	double seconds = argc > 1 ? atof(argv[1]) : 2;
 	bool vsyncoff = argc > 2 && !strcmp(argv[2], "vsyncoff");
+	busy = argc > 2 && !strcmp(argv[2], "busy");
 	struct wl_display *display = wl_display_connect(NULL);
 	if (!display) {
 		return 2;

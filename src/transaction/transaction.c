@@ -627,7 +627,7 @@ void transaction_remove(struct flame_transaction *txn, struct flame_view *view) 
 }
 
 static void send_frame_done(struct wlr_surface *surface, int sx, int sy, void *data) {
-	wlr_surface_send_frame_done(surface, data);
+	scene_surface_frame_done(surface, data);
 }
 
 bool transaction_frame_done(struct flame_transaction *txn, const struct timespec *now) {

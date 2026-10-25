@@ -82,6 +82,7 @@ static void send(struct flame_surface_state *state, uint64_t cycle, int64_t now)
 	// only a callback it asked for times its drawing
 	state->drawing = !wl_list_empty(&state->surface->current.frame_callback_list);
 	wlr_surface_send_frame_done(state->surface, &when);
+	state->answered_at = now;
 	state->callback_cycle = cycle;
 	state->callback_time = now;
 	state->jit_target = 0; // the just in time path sets it after
